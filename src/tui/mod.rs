@@ -114,13 +114,16 @@ impl App {
 
                     // Clean up worktree/tmux when moving backward from a dispatched state
                     let cleanup = if matches!(direction, MoveDirection::Backward) {
-                        match (task.worktree.take(), task.tmux_window.take()) {
-                            (Some(wt), Some(tw)) => Some(Command::Cleanup {
+                        match task.worktree.take() {
+                            Some(wt) => Some(Command::Cleanup {
                                 repo_path: task.repo_path.clone(),
                                 worktree: wt,
-                                tmux_window: tw,
+                                tmux_window: task.tmux_window.take(),
                             }),
-                            _ => None,
+                            None => {
+                                task.tmux_window.take(); // clear even if no worktree
+                                None
+                            },
                         }
                     } else {
                         None

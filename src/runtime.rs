@@ -207,8 +207,8 @@ async fn execute_commands(
 
                 tokio::task::spawn_blocking(move || {
                     // Clean up previous dispatch if present
-                    if let (Some(wt), Some(tw)) = (&task.worktree, &task.tmux_window) {
-                        if let Err(e) = dispatch::cleanup_task(&task.repo_path, wt, tw) {
+                    if let Some(wt) = &task.worktree {
+                        if let Err(e) = dispatch::cleanup_task(&task.repo_path, wt, task.tmux_window.as_deref()) {
                             let _ = tx.send(Message::Error(format!("Cleanup failed: {e:#}")));
                             return;
                         }
@@ -364,7 +364,7 @@ async fn execute_commands(
             Command::Cleanup { repo_path, worktree, tmux_window } => {
                 let tx = rt.msg_tx.clone();
                 tokio::task::spawn_blocking(move || {
-                    if let Err(e) = dispatch::cleanup_task(&repo_path, &worktree, &tmux_window) {
+                    if let Err(e) = dispatch::cleanup_task(&repo_path, &worktree, tmux_window.as_deref()) {
                         let _ = tx.send(Message::Error(format!("Cleanup failed: {e:#}")));
                     }
                 });

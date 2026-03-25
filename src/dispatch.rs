@@ -82,17 +82,18 @@ pub fn dispatch_agent(task: &Task, mcp_port: u16) -> Result<DispatchResult> {
 ///
 /// Errors are logged but not propagated for the tmux step so that the
 /// worktree removal is always attempted.
-pub fn cleanup_task(repo_path: &str, worktree_path: &str, tmux_window: &str) -> Result<()> {
+pub fn cleanup_task(repo_path: &str, worktree_path: &str, tmux_window: Option<&str>) -> Result<()> {
     // Kill the tmux window if it is still alive.
-    match tmux::has_window(tmux_window) {
-        Ok(true) => {
-            tmux::kill_window(tmux_window)
-                .context("failed to kill tmux window during cleanup")?;
-        }
-        Ok(false) => {} // already gone
-        Err(e) => {
-            // Non-fatal: window state unknown, proceed with worktree removal.
-            eprintln!("warning: could not check tmux window during cleanup: {e}");
+    if let Some(window) = tmux_window {
+        match tmux::has_window(window) {
+            Ok(true) => {
+                tmux::kill_window(window)
+                    .context("failed to kill tmux window during cleanup")?;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("warning: could not check tmux window during cleanup: {e}");
+            }
         }
     }
 

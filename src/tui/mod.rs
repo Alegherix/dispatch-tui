@@ -46,6 +46,7 @@ pub enum Command {
     PersistTask(Task),
     DeleteTask(i64),
     Dispatch { task: Task },
+    Cleanup { repo_path: String, worktree: String, tmux_window: String },
     CaptureTmux { id: i64, window: String },
     EditTaskInEditor(Task),
     SaveRepoPath(String),

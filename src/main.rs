@@ -421,6 +421,15 @@ async fn execute_commands(
                 }
             }
 
+            Command::Cleanup { repo_path, worktree, tmux_window } => {
+                let tx = rt.msg_tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    if let Err(e) = dispatch::cleanup_task(&repo_path, &worktree, &tmux_window) {
+                        let _ = tx.send(Message::Error(format!("Cleanup failed: {e:#}")));
+                    }
+                });
+            }
+
             Command::None => {}
         }
     }

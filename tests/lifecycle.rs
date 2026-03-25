@@ -45,11 +45,11 @@ fn full_lifecycle() {
         repo_path: "/repo".to_string(),
     });
     persist(&mut app, &db, &cmds);
-    assert_eq!(app.tasks.len(), 1);
-    assert_eq!(app.tasks[0].status, TaskStatus::Backlog);
-    assert_ne!(app.tasks[0].id, 0, "ID should be assigned by DB");
+    assert_eq!(app.tasks().len(), 1);
+    assert_eq!(app.tasks()[0].status, TaskStatus::Backlog);
+    assert_ne!(app.tasks()[0].id, 0, "ID should be assigned by DB");
 
-    let task_id = app.tasks[0].id;
+    let task_id = app.tasks()[0].id;
 
     // Verify DB has the task
     let db_task = db.get_task(task_id).unwrap().unwrap();
@@ -62,7 +62,7 @@ fn full_lifecycle() {
     });
     assert!(matches!(cmds[0], Command::PersistTask(_)));
     persist(&mut app, &db, &cmds);
-    assert_eq!(app.tasks[0].status, TaskStatus::Ready);
+    assert_eq!(app.tasks()[0].status, TaskStatus::Ready);
 
     let db_task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(db_task.status, TaskStatus::Ready);
@@ -78,16 +78,16 @@ fn full_lifecycle() {
         tmux_window: "task-1".to_string(),
     });
     persist(&mut app, &db, &cmds);
-    assert_eq!(app.tasks[0].status, TaskStatus::Running);
+    assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     assert_eq!(
-        app.tasks[0].tmux_window.as_deref(),
+        app.tasks()[0].tmux_window.as_deref(),
         Some("task-1")
     );
 
     // 4. WindowGone → auto-advances to Review
     let cmds = app.update(Message::WindowGone(task_id));
     persist(&mut app, &db, &cmds);
-    assert_eq!(app.tasks[0].status, TaskStatus::Review);
+    assert_eq!(app.tasks()[0].status, TaskStatus::Review);
 
     // 5. Move to Done → PersistTask
     let cmds = app.update(Message::MoveTask {
@@ -95,7 +95,7 @@ fn full_lifecycle() {
         direction: MoveDirection::Forward,
     });
     persist(&mut app, &db, &cmds);
-    assert_eq!(app.tasks[0].status, TaskStatus::Done);
+    assert_eq!(app.tasks()[0].status, TaskStatus::Done);
 
     let db_task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(db_task.status, TaskStatus::Done);
@@ -103,7 +103,7 @@ fn full_lifecycle() {
     // 6. Delete → removed from state and DB
     let cmds = app.update(Message::DeleteTask(task_id));
     persist(&mut app, &db, &cmds);
-    assert!(app.tasks.is_empty());
+    assert!(app.tasks().is_empty());
 
     let db_task = db.get_task(task_id).unwrap();
     assert!(db_task.is_none());
@@ -119,7 +119,7 @@ fn dispatch_only_from_ready() {
         description: "desc".to_string(),
         repo_path: "/repo".to_string(),
     });
-    let task_id = app.tasks[0].id;
+    let task_id = app.tasks()[0].id;
 
     // Try dispatch from Backlog — should be no-op
     let cmds = app.update(Message::DispatchTask(task_id));
@@ -136,7 +136,7 @@ fn window_gone_only_advances_running() {
         description: "desc".to_string(),
         repo_path: "/repo".to_string(),
     });
-    let task_id = app.tasks[0].id;
+    let task_id = app.tasks()[0].id;
 
     // Manually set to Review
     app.update(Message::MoveTask {
@@ -152,10 +152,10 @@ fn window_gone_only_advances_running() {
         direction: MoveDirection::Forward,
     }); // Review
 
-    assert_eq!(app.tasks[0].status, TaskStatus::Review);
+    assert_eq!(app.tasks()[0].status, TaskStatus::Review);
 
     // WindowGone should NOT advance from Review
     let cmds = app.update(Message::WindowGone(task_id));
     assert!(cmds.is_empty());
-    assert_eq!(app.tasks[0].status, TaskStatus::Review);
+    assert_eq!(app.tasks()[0].status, TaskStatus::Review);
 }

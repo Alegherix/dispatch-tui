@@ -13,19 +13,19 @@ use crate::models::{Note, Task, TaskStatus};
 // ---------------------------------------------------------------------------
 
 pub struct App {
-    pub tasks: Vec<Task>,
-    pub selected_column: usize,
-    pub selected_row: [usize; 5],
-    pub mode: InputMode,
-    pub input_buffer: String,
-    pub task_draft: Option<TaskDraft>,
-    pub detail_visible: bool,
-    pub tmux_outputs: HashMap<i64, String>,
-    pub notes: HashMap<i64, Vec<Note>>,
-    pub status_message: Option<String>,
-    pub error_popup: Option<String>,
-    pub repo_paths: Vec<String>,
-    pub should_quit: bool,
+    pub(in crate::tui) tasks: Vec<Task>,
+    pub(in crate::tui) selected_column: usize,
+    pub(in crate::tui) selected_row: [usize; 5],
+    pub(in crate::tui) mode: InputMode,
+    pub(in crate::tui) input_buffer: String,
+    pub(in crate::tui) task_draft: Option<TaskDraft>,
+    pub(in crate::tui) detail_visible: bool,
+    pub(in crate::tui) tmux_outputs: HashMap<i64, String>,
+    pub(in crate::tui) notes: HashMap<i64, Vec<Note>>,
+    pub(in crate::tui) status_message: Option<String>,
+    pub(in crate::tui) error_popup: Option<String>,
+    pub(in crate::tui) repo_paths: Vec<String>,
+    pub(in crate::tui) should_quit: bool,
 }
 
 impl App {
@@ -46,6 +46,21 @@ impl App {
             should_quit: false,
         }
     }
+
+    // Read-only accessors for code outside the tui module
+    pub fn tasks(&self) -> &[Task] { &self.tasks }
+    pub fn should_quit(&self) -> bool { self.should_quit }
+    pub fn selected_column(&self) -> usize { self.selected_column }
+    pub fn selected_row(&self) -> &[usize; 5] { &self.selected_row }
+    pub fn mode(&self) -> &InputMode { &self.mode }
+    pub fn input_buffer(&self) -> &str { &self.input_buffer }
+    pub fn detail_visible(&self) -> bool { self.detail_visible }
+    pub fn tmux_outputs(&self) -> &HashMap<i64, String> { &self.tmux_outputs }
+    pub fn notes(&self) -> &HashMap<i64, Vec<Note>> { &self.notes }
+    pub fn status_message(&self) -> Option<&str> { self.status_message.as_deref() }
+    pub fn error_popup(&self) -> Option<&str> { self.error_popup.as_deref() }
+    pub fn repo_paths(&self) -> &[String] { &self.repo_paths }
+    pub fn task_draft(&self) -> Option<&TaskDraft> { self.task_draft.as_ref() }
 
     /// Return all tasks for a given status, ordered as they appear in self.tasks.
     pub fn tasks_by_status(&self, status: TaskStatus) -> Vec<&Task> {

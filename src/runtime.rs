@@ -129,7 +129,7 @@ async fn run_loop(
         // Draw the current frame
         terminal.draw(|frame| tui::ui::render(frame, app))?;
 
-        if app.should_quit {
+        if app.should_quit() {
             break;
         }
 

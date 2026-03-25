@@ -32,7 +32,7 @@ impl TaskStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "backlog" => Some(TaskStatus::Backlog),
             "ready" => Some(TaskStatus::Ready),
@@ -126,7 +126,7 @@ impl NoteSource {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "user" => Some(NoteSource::User),
             "agent" => Some(NoteSource::Agent),
@@ -210,16 +210,16 @@ mod tests {
     fn status_roundtrip() {
         for &status in TaskStatus::ALL {
             let s = status.as_str();
-            let parsed = TaskStatus::from_str(s).expect("roundtrip failed");
+            let parsed = TaskStatus::parse(s).expect("roundtrip failed");
             assert_eq!(status, parsed, "roundtrip failed for {:?}", status);
         }
     }
 
     #[test]
     fn status_invalid_from_str() {
-        assert!(TaskStatus::from_str("").is_none());
-        assert!(TaskStatus::from_str("unknown").is_none());
-        assert!(TaskStatus::from_str("Backlog").is_none(), "should be case-sensitive");
+        assert!(TaskStatus::parse("").is_none());
+        assert!(TaskStatus::parse("unknown").is_none());
+        assert!(TaskStatus::parse("Backlog").is_none(), "should be case-sensitive");
     }
 
     #[test]
@@ -265,13 +265,13 @@ mod tests {
             (NoteSource::System, "system"),
         ] {
             assert_eq!(src.as_str(), s);
-            assert_eq!(NoteSource::from_str(s), Some(src));
+            assert_eq!(NoteSource::parse(s), Some(src));
         }
     }
 
     #[test]
     fn note_source_invalid() {
-        assert!(NoteSource::from_str("unknown").is_none());
+        assert!(NoteSource::parse("unknown").is_none());
     }
 
     // --- slugify ---

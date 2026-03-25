@@ -178,7 +178,7 @@ fn handle_update_task(state: &McpState, id: Option<Value>, args: &Value) -> Json
         Some(v) => v,
         None => return JsonRpcResponse::err(id, -32602, "Missing or invalid status"),
     };
-    let status = match TaskStatus::from_str(status_str) {
+    let status = match TaskStatus::parse(status_str) {
         Some(s) => s,
         None => {
             return JsonRpcResponse::err(

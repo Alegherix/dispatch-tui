@@ -275,7 +275,7 @@ impl Database {
 
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get(4)?;
-    let status = TaskStatus::from_str(&status_str).unwrap_or(TaskStatus::Backlog);
+    let status = TaskStatus::parse(&status_str).unwrap_or(TaskStatus::Backlog);
 
     let created_str: String = row.get(7)?;
     let updated_str: String = row.get(8)?;
@@ -295,7 +295,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 
 fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
     let source_str: String = row.get(3)?;
-    let source = NoteSource::from_str(&source_str).unwrap_or(NoteSource::User);
+    let source = NoteSource::parse(&source_str).unwrap_or(NoteSource::User);
 
     let created_str: String = row.get(4)?;
 

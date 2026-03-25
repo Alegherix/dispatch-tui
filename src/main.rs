@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
             run_tui(&cli.db, port).await?;
         }
         Commands::Update { id, status } => {
-            let new_status = models::TaskStatus::from_str(&status)
+            let new_status = models::TaskStatus::parse(&status)
                 .ok_or_else(|| anyhow::anyhow!("Unknown status: {}", status))?;
             let db = db::Database::open(&cli.db)?;
             db.update_status(id, new_status)?;
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
             let db = db::Database::open(&cli.db)?;
             let tasks = match status {
                 Some(s) => {
-                    let filter = models::TaskStatus::from_str(&s)
+                    let filter = models::TaskStatus::parse(&s)
                         .ok_or_else(|| anyhow::anyhow!("Unknown status: {}", s))?;
                     db.list_by_status(filter)?
                 }
@@ -318,11 +318,8 @@ async fn execute_commands(
                     // Check if the window is still alive. If it's gone, signal
                     // that the window exited. The main loop will check the task's
                     // current status before advancing.
-                    match tmux::has_window(&window) {
-                        Ok(false) => {
-                            let _ = tx.send(Message::WindowGone(id));
-                        }
-                        _ => {} // still running or error — leave it
+                    if let Ok(false) = tmux::has_window(&window) {
+                        let _ = tx.send(Message::WindowGone(id));
                     }
                 });
             }
@@ -377,7 +374,7 @@ async fn execute_commands(
                                         "description" => description = value,
                                         "repo_path" => repo_path = value,
                                         "status" => {
-                                            if let Some(s) = models::TaskStatus::from_str(&value) {
+                                            if let Some(s) = models::TaskStatus::parse(&value) {
                                                 new_status = s;
                                             }
                                         }

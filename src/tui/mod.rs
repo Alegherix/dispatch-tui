@@ -32,6 +32,8 @@ pub enum Message {
     DeleteTask(i64),
     ToggleDetail,
     TmuxOutput { id: i64, output: String },
+    WindowGone(i64),
+    RefreshTasks(Vec<Task>),
     Error(String),
 }
 
@@ -45,6 +47,7 @@ pub enum Command {
     DeleteTask(i64),
     Dispatch { task: Task },
     CaptureTmux { id: i64, window: String },
+    RefreshFromDb,
     None,
 }
 
@@ -243,9 +246,29 @@ impl App {
                 vec![Command::None]
             }
 
+            Message::WindowGone(id) => {
+                // Only auto-advance if the task is still Running
+                if let Some(task) = self.tasks.iter().find(|t| t.id == id) {
+                    if task.status == TaskStatus::Running {
+                        return self.update(Message::MoveTask {
+                            id,
+                            direction: MoveDirection::Forward,
+                        });
+                    }
+                }
+                vec![Command::None]
+            }
+
+            Message::RefreshTasks(new_tasks) => {
+                // Merge DB state into in-memory state, preserving tmux_outputs
+                self.tasks = new_tasks;
+                self.clamp_selection();
+                vec![Command::None]
+            }
+
             Message::Tick => {
-                // Return CaptureTmux commands for every Running task that has a tmux_window.
-                let cmds: Vec<Command> = self
+                // Return CaptureTmux commands for Running tasks + a RefreshFromDb command
+                let mut cmds: Vec<Command> = self
                     .tasks
                     .iter()
                     .filter(|t| t.status == TaskStatus::Running)
@@ -256,11 +279,8 @@ impl App {
                         })
                     })
                     .collect();
-                if cmds.is_empty() {
-                    vec![Command::None]
-                } else {
-                    cmds
-                }
+                cmds.push(Command::RefreshFromDb);
+                cmds
             }
 
             Message::Error(msg) => {
@@ -399,11 +419,12 @@ mod tests {
     fn tick_produces_capture_for_running_tasks_with_window() {
         let mut task4 = make_task(4, TaskStatus::Running);
         task4.tmux_window = Some("main:task-4".to_string());
-        let app = App::new(vec![task4]);
-        let mut app = app;
+        let mut app = App::new(vec![task4]);
         let cmds = app.update(Message::Tick);
-        assert_eq!(cmds.len(), 1);
+        // Should have CaptureTmux + RefreshFromDb
+        assert_eq!(cmds.len(), 2);
         assert!(matches!(&cmds[0], Command::CaptureTmux { id: 4, window } if window == "main:task-4"));
+        assert!(matches!(&cmds[1], Command::RefreshFromDb));
     }
 
     #[test]

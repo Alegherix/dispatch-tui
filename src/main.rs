@@ -294,18 +294,31 @@ async fn execute_commands(
                         }
                     }
 
-                    // Check if the window is still alive. If it's gone and the task
-                    // is presumably still Running, advance it to Review.
+                    // Check if the window is still alive. If it's gone, signal
+                    // that the window exited. The main loop will check the task's
+                    // current status before advancing.
                     match tmux::has_window(&window) {
                         Ok(false) => {
-                            let _ = tx.send(Message::MoveTask {
-                                id,
-                                direction: tui::MoveDirection::Forward,
-                            });
+                            let _ = tx.send(Message::WindowGone(id));
                         }
                         _ => {} // still running or error — leave it
                     }
                 });
+            }
+
+            Command::RefreshFromDb => {
+                // Re-read all tasks from SQLite to pick up MCP/CLI updates
+                match database.list_all() {
+                    Ok(tasks) => {
+                        let cmds = app.update(Message::RefreshTasks(tasks));
+                        // Don't recurse into execute_commands for RefreshTasks
+                        // since it only updates in-memory state (no side effects)
+                        let _ = cmds;
+                    }
+                    Err(e) => {
+                        app.status_message = Some(format!("DB refresh failed: {e}"));
+                    }
+                }
             }
 
             Command::None => {}

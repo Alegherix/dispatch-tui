@@ -60,12 +60,12 @@ pub fn dispatch_agent(task: &Task, mcp_port: u16) -> Result<DispatchResult> {
     tmux::new_window(&tmux_window, &worktree_path)
         .context("failed to create tmux window")?;
 
-    // 5. Write the prompt file and launch Claude in print mode.
+    // 5. Write the prompt file and launch Claude in interactive mode.
     let prompt = build_prompt(task.id, &task.title, &task.description, mcp_port);
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
-    tmux::send_keys(&tmux_window, "claude -p < .claude-prompt")
+    tmux::send_keys(&tmux_window, "claude \"$(cat .claude-prompt)\"")
         .context("failed to send keys to tmux window")?;
 
     Ok(DispatchResult {

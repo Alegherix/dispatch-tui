@@ -159,15 +159,8 @@ impl App {
 
             Message::DispatchTask(id) => {
                 if let Some(task) = self.tasks.iter().find(|t| t.id == id) {
-                    match task.status {
-                        TaskStatus::Ready | TaskStatus::Running | TaskStatus::Review => {
-                            return vec![Command::Dispatch { task: task.clone() }];
-                        }
-                        _ => {
-                            self.status_message = Some(
-                                "Move task to Ready before dispatching (press m)".to_string(),
-                            );
-                        }
+                    if task.status == TaskStatus::Ready {
+                        return vec![Command::Dispatch { task: task.clone() }];
                     }
                 }
                 vec![]
@@ -472,23 +465,23 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_from_running_redispatches() {
+    fn dispatch_from_running_is_noop() {
         let mut task = make_task(4, TaskStatus::Running);
         task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
         task.tmux_window = Some("task-4".to_string());
         let mut app = App::new(vec![task]);
         let cmds = app.update(Message::DispatchTask(4));
-        assert!(matches!(cmds[0], Command::Dispatch { .. }));
+        assert!(cmds.is_empty());
     }
 
     #[test]
-    fn dispatch_from_review_redispatches() {
+    fn dispatch_from_review_is_noop() {
         let mut task = make_task(5, TaskStatus::Review);
         task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
         task.tmux_window = Some("task-5".to_string());
         let mut app = App::new(vec![task]);
         let cmds = app.update(Message::DispatchTask(5));
-        assert!(matches!(cmds[0], Command::Dispatch { .. }));
+        assert!(cmds.is_empty());
     }
 
     #[test]

@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::process::Command;
 
-use crate::models::{DispatchResult, slugify};
+use crate::models::{DispatchResult, Task, slugify};
 use crate::tmux;
 
 // ---------------------------------------------------------------------------
@@ -14,18 +14,12 @@ use crate::tmux;
 ///
 /// This function is **synchronous** and should be called via
 /// `tokio::task::spawn_blocking` from async contexts.
-pub fn dispatch_agent(
-    task_id: i64,
-    title: &str,
-    description: &str,
-    repo_path: &str,
-    mcp_port: u16,
-) -> Result<DispatchResult> {
-    let repo_path = expand_tilde(repo_path);
-    let slug = slugify(title);
-    let worktree_name = format!("{task_id}-{slug}");
+pub fn dispatch_agent(task: &Task, mcp_port: u16) -> Result<DispatchResult> {
+    let repo_path = expand_tilde(&task.repo_path);
+    let slug = slugify(&task.title);
+    let worktree_name = format!("{}-{slug}", task.id);
     let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
-    let tmux_window = format!("task-{task_id}");
+    let tmux_window = format!("task-{}", task.id);
 
     // 1. Ensure the .worktrees directory exists.
     fs::create_dir_all(format!("{repo_path}/.worktrees"))
@@ -67,7 +61,7 @@ pub fn dispatch_agent(
         .context("failed to create tmux window")?;
 
     // 5. Write the prompt file and launch Claude in print mode.
-    let prompt = build_prompt(task_id, title, description, mcp_port);
+    let prompt = build_prompt(task.id, &task.title, &task.description, mcp_port);
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;

@@ -60,6 +60,35 @@ impl JsonRpcResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Typed argument structs for tool calls
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct UpdateTaskArgs {
+    task_id: i64,
+    status: String,
+}
+
+#[derive(Deserialize)]
+struct AddNoteArgs {
+    task_id: i64,
+    note: String,
+}
+
+#[derive(Deserialize)]
+struct GetTaskArgs {
+    task_id: i64,
+}
+
+fn parse_args<T: serde::de::DeserializeOwned>(
+    id: Option<Value>,
+    args: Value,
+) -> Result<T, JsonRpcResponse> {
+    serde_json::from_value(args)
+        .map_err(|e| JsonRpcResponse::err(id, -32602, format!("Invalid arguments: {e}")))
+}
+
+// ---------------------------------------------------------------------------
 // Tool definitions returned by tools/list
 // ---------------------------------------------------------------------------
 
@@ -152,9 +181,9 @@ pub async fn handle_mcp(
             let args = params.get("arguments").cloned().unwrap_or(Value::Null);
 
             match tool_name {
-                "update_task" => handle_update_task(&state, id, &args),
-                "add_note" => handle_add_note(&state, id, &args),
-                "get_task" => handle_get_task(&state, id, &args),
+                "update_task" => handle_update_task(&state, id, args),
+                "add_note" => handle_add_note(&state, id, args),
+                "get_task" => handle_get_task(&state, id, args),
                 other => JsonRpcResponse::err(id, -32602, format!("Unknown tool: {other}")),
             }
         }
@@ -169,65 +198,50 @@ pub async fn handle_mcp(
 // Tool implementations
 // ---------------------------------------------------------------------------
 
-fn handle_update_task(state: &McpState, id: Option<Value>, args: &Value) -> JsonRpcResponse {
-    let task_id = match args.get("task_id").and_then(Value::as_i64) {
-        Some(v) => v,
-        None => return JsonRpcResponse::err(id, -32602, "Missing or invalid task_id"),
+fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+    let parsed = match parse_args::<UpdateTaskArgs>(id.clone(), args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
     };
-    let status_str = match args.get("status").and_then(Value::as_str) {
-        Some(v) => v,
-        None => return JsonRpcResponse::err(id, -32602, "Missing or invalid status"),
-    };
-    let status = match TaskStatus::parse(status_str) {
+    let status = match TaskStatus::parse(&parsed.status) {
         Some(s) => s,
         None => {
             return JsonRpcResponse::err(
                 id,
                 -32602,
-                format!("Unknown status: {status_str}. Valid values: backlog, ready, running, review, done"),
+                format!("Unknown status: {}. Valid values: backlog, ready, running, review, done", parsed.status),
             )
         }
     };
-
-    match state.db.update_status(task_id, status) {
+    match state.db.update_status(parsed.task_id, status) {
         Ok(()) => JsonRpcResponse::ok(
             id,
-            json!({
-                "content": [{"type": "text", "text": format!("Task {task_id} updated to {status_str}")}]
-            }),
+            json!({"content": [{"type": "text", "text": format!("Task {} updated to {}", parsed.task_id, parsed.status)}]}),
         ),
         Err(e) => JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     }
 }
 
-fn handle_add_note(state: &McpState, id: Option<Value>, args: &Value) -> JsonRpcResponse {
-    let task_id = match args.get("task_id").and_then(Value::as_i64) {
-        Some(v) => v,
-        None => return JsonRpcResponse::err(id, -32602, "Missing or invalid task_id"),
+fn handle_add_note(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+    let parsed = match parse_args::<AddNoteArgs>(id.clone(), args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
     };
-    let note = match args.get("note").and_then(Value::as_str) {
-        Some(v) => v,
-        None => return JsonRpcResponse::err(id, -32602, "Missing or invalid note"),
-    };
-
-    match state.db.add_note(task_id, note, NoteSource::Agent) {
+    match state.db.add_note(parsed.task_id, &parsed.note, NoteSource::Agent) {
         Ok(note_id) => JsonRpcResponse::ok(
             id,
-            json!({
-                "content": [{"type": "text", "text": format!("Note {note_id} added to task {task_id}")}]
-            }),
+            json!({"content": [{"type": "text", "text": format!("Note {note_id} added to task {}", parsed.task_id)}]}),
         ),
         Err(e) => JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     }
 }
 
-fn handle_get_task(state: &McpState, id: Option<Value>, args: &Value) -> JsonRpcResponse {
-    let task_id = match args.get("task_id").and_then(Value::as_i64) {
-        Some(v) => v,
-        None => return JsonRpcResponse::err(id, -32602, "Missing or invalid task_id"),
+fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+    let parsed = match parse_args::<GetTaskArgs>(id.clone(), args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
     };
-
-    match state.db.get_task(task_id) {
+    match state.db.get_task(parsed.task_id) {
         Ok(Some(task)) => {
             let text = format!(
                 "Task {id}: {title}\nStatus: {status}\nRepo: {repo}\nDescription: {desc}",
@@ -237,14 +251,9 @@ fn handle_get_task(state: &McpState, id: Option<Value>, args: &Value) -> JsonRpc
                 repo = task.repo_path,
                 desc = task.description,
             );
-            JsonRpcResponse::ok(
-                id,
-                json!({
-                    "content": [{"type": "text", "text": text}]
-                }),
-            )
+            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
-        Ok(None) => JsonRpcResponse::err(id, -32602, format!("Task {task_id} not found")),
+        Ok(None) => JsonRpcResponse::err(id, -32602, format!("Task {} not found", parsed.task_id)),
         Err(e) => JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     }
 }

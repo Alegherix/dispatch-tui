@@ -259,6 +259,30 @@ impl App {
                 self.error_popup = Some(msg);
                 vec![]
             }
+
+            Message::TaskIdAssigned { placeholder_id, real_id } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == placeholder_id) {
+                    t.id = real_id;
+                }
+                vec![]
+            }
+
+            Message::TaskEdited { id, title, description, repo_path, status } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
+                    t.title = title;
+                    t.description = description;
+                    t.repo_path = repo_path;
+                    t.status = status;
+                    t.updated_at = chrono::Utc::now();
+                }
+                self.clamp_selection();
+                vec![]
+            }
+
+            Message::RepoPathsUpdated(paths) => {
+                self.repo_paths = paths;
+                vec![]
+            }
         }
     }
 }
@@ -559,6 +583,36 @@ mod tests {
 
         let cmds = app.update(Message::Tick);
         assert!(!cmds.iter().any(|c| matches!(c, Command::LoadNotes(_))));
+    }
+
+    #[test]
+    fn task_id_assigned_updates_placeholder() {
+        let mut app = App::new(vec![make_task(0, TaskStatus::Backlog)]);
+        app.update(Message::TaskIdAssigned { placeholder_id: 0, real_id: 42 });
+        assert_eq!(app.tasks[0].id, 42);
+    }
+
+    #[test]
+    fn task_edited_updates_fields() {
+        let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+        app.update(Message::TaskEdited {
+            id: 1,
+            title: "New".into(),
+            description: "Desc".into(),
+            repo_path: "/new".into(),
+            status: TaskStatus::Ready,
+        });
+        assert_eq!(app.tasks[0].title, "New");
+        assert_eq!(app.tasks[0].description, "Desc");
+        assert_eq!(app.tasks[0].repo_path, "/new");
+        assert_eq!(app.tasks[0].status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn repo_paths_updated_replaces_paths() {
+        let mut app = App::new(vec![]);
+        app.update(Message::RepoPathsUpdated(vec!["/a".into(), "/b".into()]));
+        assert_eq!(app.repo_paths, vec!["/a", "/b"]);
     }
 
     #[test]

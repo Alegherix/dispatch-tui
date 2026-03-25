@@ -18,9 +18,7 @@ fn persist(app: &mut App, db: &Database, cmds: &[Command]) {
                 let new_id = db
                     .create_task(&task.title, &task.description, &task.repo_path)
                     .unwrap();
-                if let Some(t) = app.tasks.iter_mut().find(|t| t.id == 0) {
-                    t.id = new_id;
-                }
+                app.update(Message::TaskIdAssigned { placeholder_id: 0, real_id: new_id });
             } else {
                 let _ = db.update_status(task.id, task.status);
                 let _ = db.update_dispatch(

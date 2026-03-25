@@ -37,7 +37,8 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
 
     // 3. Create App and load saved repo paths
     let mut app = App::new(tasks);
-    app.repo_paths = database.list_repo_paths().unwrap_or_default();
+    let paths = database.list_repo_paths().unwrap_or_default();
+    app.update(Message::RepoPathsUpdated(paths));
 
     // 4. Set up terminal
     enable_raw_mode()?;
@@ -174,20 +175,18 @@ async fn execute_commands(
                     task.id = new_id;
                     // Update the placeholder task in app.tasks (id 0) with the real id.
                     // There may be multiple id=0 tasks if rapid creation; update the first one.
-                    if let Some(t) = app.tasks.iter_mut().find(|t| t.id == 0) {
-                        t.id = new_id;
-                    }
+                    app.update(Message::TaskIdAssigned { placeholder_id: 0, real_id: new_id });
                 } else {
                     // Existing task — update its status and dispatch fields
                     if let Err(e) = rt.database.update_status(task.id, task.status) {
-                        app.error_popup = Some(format!("DB error updating status: {e}"));
+                        app.update(Message::Error(format!("DB error updating status: {e}")));
                     }
                     if let Err(e) = rt.database.update_dispatch(
                         task.id,
                         task.worktree.as_deref(),
                         task.tmux_window.as_deref(),
                     ) {
-                        app.error_popup = Some(format!("DB error updating dispatch: {e}"));
+                        app.update(Message::Error(format!("DB error updating dispatch: {e}")));
                     }
                 }
             }
@@ -196,7 +195,7 @@ async fn execute_commands(
                 if let Err(e) = rt.database.delete_task(id) {
                     // id=0 tasks were never persisted — not a real error
                     if id != 0 {
-                        app.error_popup = Some(format!("DB error deleting task: {e}"));
+                        app.update(Message::Error(format!("DB error deleting task: {e}")));
                     }
                 }
             }
@@ -260,7 +259,8 @@ async fn execute_commands(
 
             Command::SaveRepoPath(path) => {
                 let _ = rt.database.save_repo_path(&path);
-                app.repo_paths = rt.database.list_repo_paths().unwrap_or_default();
+                let paths = rt.database.list_repo_paths().unwrap_or_default();
+                app.update(Message::RepoPathsUpdated(paths));
             }
 
             Command::LoadNotes(task_id) => {
@@ -288,7 +288,7 @@ async fn execute_commands(
                         let _ = cmds;
                     }
                     Err(e) => {
-                        app.error_popup = Some(format!("DB refresh failed: {e}"));
+                        app.update(Message::Error(format!("DB refresh failed: {e}")));
                     }
                 }
             }
@@ -372,16 +372,15 @@ fn handle_edit_in_editor(
 
                 // Update DB and in-memory state
                 if let Err(e) = rt.database.update_task(task_id, &title, &description, &repo_path, new_status) {
-                    app.error_popup = Some(format!("DB error updating task: {e}"));
+                    app.update(Message::Error(format!("DB error updating task: {e}")));
                 }
-                if let Some(t) = app.tasks.iter_mut().find(|t| t.id == task_id) {
-                    t.title = title;
-                    t.description = description;
-                    t.repo_path = repo_path;
-                    t.status = new_status;
-                    t.updated_at = chrono::Utc::now();
-                }
-                app.clamp_selection();
+                app.update(Message::TaskEdited {
+                    id: task_id,
+                    title,
+                    description,
+                    repo_path,
+                    status: new_status,
+                });
             }
         }
     }

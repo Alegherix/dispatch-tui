@@ -1,4 +1,4 @@
-use crate::models::{Note, Task};
+use crate::models::{Note, Task, TaskStatus};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -31,6 +31,9 @@ pub enum Message {
     RefreshTasks(Vec<Task>),
     NotesLoaded { task_id: i64, notes: Vec<Note> },
     Error(String),
+    TaskIdAssigned { placeholder_id: i64, real_id: i64 },
+    TaskEdited { id: i64, title: String, description: String, repo_path: String, status: TaskStatus },
+    RepoPathsUpdated(Vec<String>),
 }
 
 // ---------------------------------------------------------------------------

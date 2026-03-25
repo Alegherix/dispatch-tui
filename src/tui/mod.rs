@@ -256,6 +256,28 @@ impl App {
                 cmds
             }
 
+            Message::ResumeTask(id) => {
+                if let Some(task) = self.tasks.iter().find(|t| t.id == id) {
+                    if task.worktree.is_some() && task.tmux_window.is_none() {
+                        vec![Command::Resume { task: task.clone() }]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
+            Message::Resumed { id, tmux_window } => {
+                if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
+                    task.tmux_window = Some(tmux_window);
+                    let task_clone = task.clone();
+                    vec![Command::PersistTask(task_clone)]
+                } else {
+                    vec![]
+                }
+            }
+
             Message::Error(msg) => {
                 self.error_popup = Some(msg);
                 vec![]

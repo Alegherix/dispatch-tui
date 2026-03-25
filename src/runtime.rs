@@ -370,6 +370,10 @@ async fn execute_commands(
                 });
             }
 
+            // Handled in Task 12
+            Command::Resume { .. } => {}
+            Command::JumpToTmux { .. } => {}
+
         }
     }
 

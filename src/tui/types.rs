@@ -30,6 +30,8 @@ pub enum Message {
     WindowGone(i64),
     RefreshTasks(Vec<Task>),
     NotesLoaded { task_id: i64, notes: Vec<Note> },
+    ResumeTask(i64),
+    Resumed { id: i64, tmux_window: String },
     Error(String),
 }
 
@@ -44,6 +46,8 @@ pub enum Command {
     Dispatch { task: Task },
     Cleanup { repo_path: String, worktree: String, tmux_window: Option<String> },
     CaptureTmux { id: i64, window: String },
+    Resume { task: Task },
+    JumpToTmux { window: String },
     EditTaskInEditor(Task),
     SaveRepoPath(String),
     LoadNotes(i64),

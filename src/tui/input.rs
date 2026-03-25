@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, Command, InputMode, Message, MoveDirection};
+use super::{App, Command, InputMode, Message, MoveDirection, TaskDraft};
 
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
@@ -10,11 +10,11 @@ impl App {
             return vec![];
         }
 
-        match &self.mode.clone() {
+        match self.mode.clone() {
             InputMode::Normal => self.handle_key_normal(key),
             InputMode::InputTitle => self.handle_key_text_input(key),
-            InputMode::InputDescription { .. } => self.handle_key_text_input(key),
-            InputMode::InputRepoPath { .. } => self.handle_key_text_input(key),
+            InputMode::InputDescription => self.handle_key_text_input(key),
+            InputMode::InputRepoPath => self.handle_key_text_input(key),
             InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
         }
     }
@@ -31,6 +31,7 @@ impl App {
             KeyCode::Char('n') => {
                 self.mode = InputMode::InputTitle;
                 self.input_buffer.clear();
+                self.task_draft = None;
                 self.status_message = Some("Enter title: ".to_string());
                 vec![]
             }
@@ -90,6 +91,7 @@ impl App {
             KeyCode::Esc => {
                 self.mode = InputMode::Normal;
                 self.input_buffer.clear();
+                self.task_draft = None;
                 self.status_message = None;
                 vec![]
             }
@@ -102,28 +104,36 @@ impl App {
                     InputMode::InputTitle => {
                         if value.is_empty() {
                             self.mode = InputMode::Normal;
+                            self.task_draft = None;
                             self.status_message = None;
                             vec![]
                         } else {
-                            self.mode = InputMode::InputDescription { title: value };
+                            self.task_draft = Some(TaskDraft {
+                                title: value,
+                                description: String::new(),
+                            });
+                            self.mode = InputMode::InputDescription;
                             self.status_message = Some("Enter description: ".to_string());
                             vec![]
                         }
                     }
-                    InputMode::InputDescription { title } => {
-                        self.mode = InputMode::InputRepoPath {
-                            title,
-                            description: value,
-                        };
+                    InputMode::InputDescription => {
+                        if let Some(ref mut draft) = self.task_draft {
+                            draft.description = value;
+                        }
+                        self.mode = InputMode::InputRepoPath;
                         self.status_message = Some("Enter repo path: ".to_string());
                         vec![]
                     }
-                    InputMode::InputRepoPath { title, description } => {
+                    InputMode::InputRepoPath => {
+                        let draft = self.task_draft.take().unwrap_or_default();
                         let repo_path = if value.is_empty() {
                             if let Some(first) = self.repo_paths.first() {
                                 first.clone()
                             } else {
-                                self.status_message = Some("Repo path required (no saved paths available)".to_string());
+                                self.task_draft = Some(draft);
+                                self.status_message =
+                                    Some("Repo path required (no saved paths available)".to_string());
                                 return vec![];
                             }
                         } else {
@@ -132,8 +142,8 @@ impl App {
                         self.mode = InputMode::Normal;
                         self.status_message = None;
                         self.update(Message::CreateTask {
-                            title,
-                            description,
+                            title: draft.title,
+                            description: draft.description,
                             repo_path,
                         })
                     }
@@ -148,21 +158,20 @@ impl App {
 
             KeyCode::Char(c) => {
                 // In repo path mode with empty buffer, 1-9 selects a saved path
-                if let InputMode::InputRepoPath { ref title, ref description } = self.mode {
-                    if self.input_buffer.is_empty() && c.is_ascii_digit() && c != '0' {
-                        let idx = (c as usize) - ('1' as usize);
-                        if idx < self.repo_paths.len() {
-                            let title = title.clone();
-                            let description = description.clone();
-                            let repo_path = self.repo_paths[idx].clone();
-                            self.mode = InputMode::Normal;
-                            self.status_message = None;
-                            return self.update(Message::CreateTask {
-                                title,
-                                description,
-                                repo_path,
-                            });
-                        }
+                if self.mode == InputMode::InputRepoPath
+                    && self.input_buffer.is_empty() && c.is_ascii_digit() && c != '0'
+                {
+                    let idx = (c as usize) - ('1' as usize);
+                    if idx < self.repo_paths.len() {
+                        let draft = self.task_draft.take().unwrap_or_default();
+                        let repo_path = self.repo_paths[idx].clone();
+                        self.mode = InputMode::Normal;
+                        self.status_message = None;
+                        return self.update(Message::CreateTask {
+                            title: draft.title,
+                            description: draft.description,
+                            repo_path,
+                        });
                     }
                 }
                 self.input_buffer.push(c);

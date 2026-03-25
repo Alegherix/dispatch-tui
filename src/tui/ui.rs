@@ -220,7 +220,8 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                 Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
             ]
         }
-        InputMode::InputDescription { title } => {
+        InputMode::InputDescription => {
+            let title = app.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
             vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -231,10 +232,9 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                 Line::from(Span::styled("  Enter to confirm, Esc to cancel", hint)),
             ]
         }
-        InputMode::InputRepoPath {
-            title,
-            description,
-        } => {
+        InputMode::InputRepoPath => {
+            let title = app.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+            let description = app.task_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
             let mut lines = vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -326,8 +326,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                     .to_string()
             }
             InputMode::InputTitle => "Creating task: enter title".to_string(),
-            InputMode::InputDescription { .. } => "Creating task: enter description".to_string(),
-            InputMode::InputRepoPath { .. } => "Creating task: enter repo path".to_string(),
+            InputMode::InputDescription => "Creating task: enter description".to_string(),
+            InputMode::InputRepoPath => "Creating task: enter repo path".to_string(),
             InputMode::ConfirmDelete => "Delete? (y/n)".to_string(),
         }
     };

@@ -58,7 +58,17 @@ pub enum Command {
 pub enum InputMode {
     Normal,
     InputTitle,
-    InputDescription { title: String },
-    InputRepoPath { title: String, description: String },
+    InputDescription,
+    InputRepoPath,
     ConfirmDelete,
+}
+
+// ---------------------------------------------------------------------------
+// TaskDraft
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct TaskDraft {
+    pub title: String,
+    pub description: String,
 }

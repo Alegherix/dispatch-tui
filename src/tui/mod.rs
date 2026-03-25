@@ -18,6 +18,7 @@ pub struct App {
     pub selected_row: [usize; 5],
     pub mode: InputMode,
     pub input_buffer: String,
+    pub task_draft: Option<TaskDraft>,
     pub detail_visible: bool,
     pub tmux_outputs: HashMap<i64, String>,
     pub notes: HashMap<i64, Vec<Note>>,
@@ -35,6 +36,7 @@ impl App {
             selected_row: [0; 5],
             mode: InputMode::Normal,
             input_buffer: String::new(),
+            task_draft: None,
             detail_visible: false,
             tmux_outputs: HashMap::new(),
             notes: HashMap::new(),
@@ -488,10 +490,8 @@ mod tests {
         app.repo_paths = vec!["/saved/repo".to_string()];
 
         // Set up InputRepoPath mode manually
-        app.mode = InputMode::InputRepoPath {
-            title: "Test".to_string(),
-            description: "desc".to_string(),
-        };
+        app.mode = InputMode::InputRepoPath;
+        app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string() });
         app.input_buffer.clear();
 
         // Press Enter with empty buffer
@@ -510,17 +510,15 @@ mod tests {
         let mut app = App::new(vec![]);
         app.repo_paths = vec![]; // no saved paths
 
-        app.mode = InputMode::InputRepoPath {
-            title: "Test".to_string(),
-            description: "desc".to_string(),
-        };
+        app.mode = InputMode::InputRepoPath;
+        app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string() });
         app.input_buffer.clear();
 
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         let _cmds = app.handle_key(key);
 
         // Should stay in InputRepoPath mode
-        assert!(matches!(app.mode, InputMode::InputRepoPath { .. }));
+        assert_eq!(app.mode, InputMode::InputRepoPath);
         assert!(app.status_message.is_some());
         assert_eq!(app.tasks.len(), 0); // no task created
     }
@@ -531,10 +529,8 @@ mod tests {
         let mut app = App::new(vec![]);
         app.repo_paths = vec!["/saved/repo".to_string()];
 
-        app.mode = InputMode::InputRepoPath {
-            title: "Test".to_string(),
-            description: "desc".to_string(),
-        };
+        app.mode = InputMode::InputRepoPath;
+        app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string() });
         app.input_buffer = "/custom/path".to_string();
 
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);

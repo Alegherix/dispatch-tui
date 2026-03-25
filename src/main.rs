@@ -277,13 +277,23 @@ async fn execute_commands(
 
             Command::Dispatch { task } => {
                 let tx = rt.msg_tx.clone();
+                let id = task.id;
                 let title = task.title.clone();
                 let description = task.description.clone();
                 let repo_path = task.repo_path.clone();
-                let id = task.id;
                 let port = rt.port;
+                let old_worktree = task.worktree.clone();
+                let old_tmux_window = task.tmux_window.clone();
 
                 tokio::task::spawn_blocking(move || {
+                    // Clean up previous dispatch if present
+                    if let (Some(wt), Some(tw)) = (&old_worktree, &old_tmux_window) {
+                        if let Err(e) = dispatch::cleanup_task(&repo_path, wt, tw) {
+                            let _ = tx.send(Message::Error(format!("Cleanup failed: {e:#}")));
+                            return;
+                        }
+                    }
+
                     match dispatch::dispatch_agent(id, &title, &description, &repo_path, port) {
                         Ok(result) => {
                             let _ = tx.send(Message::Dispatched {

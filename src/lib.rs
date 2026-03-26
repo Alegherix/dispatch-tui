@@ -1,5 +1,6 @@
 pub mod db;
 pub mod dispatch;
+pub mod plan;
 pub mod editor;
 pub mod mcp;
 pub mod models;

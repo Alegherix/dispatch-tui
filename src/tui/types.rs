@@ -34,7 +34,7 @@ pub enum Message {
     Resumed { id: i64, tmux_window: String },
     Error(String),
     TaskIdAssigned { placeholder_id: i64, real_id: i64 },
-    TaskEdited { id: i64, title: String, description: String, repo_path: String, status: TaskStatus },
+    TaskEdited { id: i64, title: String, description: String, repo_path: String, status: TaskStatus, plan: Option<String> },
     RepoPathsUpdated(Vec<String>),
 }
 

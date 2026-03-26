@@ -3,11 +3,12 @@ pub struct EditorFields {
     pub description: String,
     pub repo_path: String,
     pub status: String,
+    pub plan: String,
 }
 
-pub fn format_editor_content(title: &str, description: &str, repo_path: &str, status: &str) -> String {
+pub fn format_editor_content(title: &str, description: &str, repo_path: &str, status: &str, plan: &str) -> String {
     format!(
-        "--- TITLE ---\n{title}\n--- DESCRIPTION ---\n{description}\n--- REPO_PATH ---\n{repo_path}\n--- STATUS ---\n{status}\n"
+        "--- TITLE ---\n{title}\n--- DESCRIPTION ---\n{description}\n--- REPO_PATH ---\n{repo_path}\n--- STATUS ---\n{status}\n--- PLAN ---\n{plan}\n"
     )
 }
 
@@ -17,6 +18,7 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
     let mut description = String::new();
     let mut repo_path = String::new();
     let mut status = String::new();
+    let mut plan = String::new();
 
     for line in input.lines() {
         let trimmed = line.trim();
@@ -30,6 +32,7 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
             Some("DESCRIPTION") => &mut description,
             Some("REPO_PATH") => &mut repo_path,
             Some("STATUS") => &mut status,
+            Some("PLAN") => &mut plan,
             _ => continue,
         };
         if !target.is_empty() {
@@ -43,6 +46,7 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         description: description.trim().to_string(),
         repo_path: repo_path.trim().to_string(),
         status: status.trim().to_string(),
+        plan: plan.trim().to_string(),
     }
 }
 
@@ -52,31 +56,32 @@ mod tests {
 
     #[test]
     fn editor_roundtrip_basic() {
-        let content = format_editor_content("My Task", "A description", "/repo", "ready");
+        let content = format_editor_content("My Task", "A description", "/repo", "ready", "docs/plan.md");
         let fields = parse_editor_content(&content);
         assert_eq!(fields.title, "My Task");
         assert_eq!(fields.description, "A description");
         assert_eq!(fields.repo_path, "/repo");
         assert_eq!(fields.status, "ready");
+        assert_eq!(fields.plan, "docs/plan.md");
     }
 
     #[test]
     fn editor_roundtrip_colons_in_title() {
-        let content = format_editor_content("Fix: auth bug", "desc", "/repo", "backlog");
+        let content = format_editor_content("Fix: auth bug", "desc", "/repo", "backlog", "");
         let fields = parse_editor_content(&content);
         assert_eq!(fields.title, "Fix: auth bug");
     }
 
     #[test]
     fn editor_roundtrip_colons_in_description() {
-        let content = format_editor_content("Title", "Step 1: do this\nStep 2: do that", "/repo", "ready");
+        let content = format_editor_content("Title", "Step 1: do this\nStep 2: do that", "/repo", "ready", "");
         let fields = parse_editor_content(&content);
         assert_eq!(fields.description, "Step 1: do this\nStep 2: do that");
     }
 
     #[test]
     fn editor_multiline_description() {
-        let content = format_editor_content("Title", "Line 1\nLine 2\nLine 3", "/repo", "done");
+        let content = format_editor_content("Title", "Line 1\nLine 2\nLine 3", "/repo", "done", "");
         let fields = parse_editor_content(&content);
         assert_eq!(fields.description, "Line 1\nLine 2\nLine 3");
     }

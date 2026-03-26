@@ -121,8 +121,8 @@ impl App {
             Message::Error(msg) => self.handle_error(msg),
             Message::TaskIdAssigned { placeholder_id, real_id } =>
                 self.handle_task_id_assigned(placeholder_id, real_id),
-            Message::TaskEdited { id, title, description, repo_path, status } =>
-                self.handle_task_edited(id, title, description, repo_path, status),
+            Message::TaskEdited { id, title, description, repo_path, status, plan } =>
+                self.handle_task_edited(id, title, description, repo_path, status, plan),
             Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
         }
     }
@@ -340,12 +340,13 @@ impl App {
         vec![]
     }
 
-    fn handle_task_edited(&mut self, id: i64, title: String, description: String, repo_path: String, status: TaskStatus) -> Vec<Command> {
+    fn handle_task_edited(&mut self, id: i64, title: String, description: String, repo_path: String, status: TaskStatus, plan: Option<String>) -> Vec<Command> {
         if let Some(t) = self.find_task_mut(id) {
             t.title = title;
             t.description = description;
             t.repo_path = repo_path;
             t.status = status;
+            t.plan = plan;
             t.updated_at = chrono::Utc::now();
         }
         self.clamp_selection();

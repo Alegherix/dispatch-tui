@@ -205,7 +205,7 @@ impl TuiRuntime {
     ) -> Result<()> {
         let task_id = task.id;
         let tmp = std::env::temp_dir().join(format!("task-{task_id}.txt"));
-        let content = format_editor_content(&task.title, &task.description, &task.repo_path, task.status.as_str());
+        let content = format_editor_content(&task.title, &task.description, &task.repo_path, task.status.as_str(), task.plan.as_deref().unwrap_or(""));
         std::fs::write(&tmp, &content)?;
 
         // Pause the input polling thread so vim can read keypresses
@@ -240,7 +240,6 @@ impl TuiRuntime {
                     let mut description = task.description.clone();
                     let mut repo_path = task.repo_path.clone();
                     let mut new_status = task.status;
-
                     let fields = parse_editor_content(&edited);
                     if !fields.title.is_empty() {
                         title = fields.title;
@@ -254,9 +253,10 @@ impl TuiRuntime {
                     if let Some(s) = models::TaskStatus::parse(&fields.status) {
                         new_status = s;
                     }
+                    let plan = if fields.plan.is_empty() { None } else { Some(fields.plan) };
 
                     // Update DB and in-memory state
-                    if let Err(e) = self.database.update_task(task_id, &title, &description, &repo_path, new_status, task.plan.as_deref()) {
+                    if let Err(e) = self.database.update_task(task_id, &title, &description, &repo_path, new_status, plan.as_deref()) {
                         app.update(Message::Error(format!("DB error updating task: {e}")));
                     }
                     app.update(Message::TaskEdited {
@@ -265,6 +265,7 @@ impl TuiRuntime {
                         description,
                         repo_path,
                         status: new_status,
+                        plan,
                     });
                 }
             }

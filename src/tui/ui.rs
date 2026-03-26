@@ -160,6 +160,10 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(format!("Title: {}", task.title)),
             Line::from(format!("Description: {}", task.description)),
             Line::from(format!(
+                "Plan: {}",
+                task.plan.as_deref().unwrap_or("-")
+            )),
+            Line::from(format!(
                 "Worktree: {}  Tmux: {}",
                 task.worktree.as_deref().unwrap_or("-"),
                 task.tmux_window.as_deref().unwrap_or("-")

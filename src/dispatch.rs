@@ -245,8 +245,7 @@ mod tests {
     #[test]
     fn build_prompt_includes_plan_path() {
         let prompt = build_prompt(1, "Task", "Desc", 3142, Some("docs/plans/my-plan.md"));
-        assert!(prompt.contains("docs/plans/my-plan.md"));
-        assert!(prompt.contains("plan"));
+        assert!(prompt.contains("Plan: docs/plans/my-plan.md"));
     }
 
     #[test]

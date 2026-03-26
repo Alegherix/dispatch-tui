@@ -717,6 +717,33 @@ mod tests {
     }
 
     #[test]
+    fn d_key_on_done_shows_warning() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = App::new(vec![make_task(1, TaskStatus::Done)]);
+        app.selected_column = 4; // Done column
+        let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert!(cmds.is_empty());
+        assert!(app.status_message.is_some());
+    }
+
+    #[test]
+    fn d_key_on_running_no_worktree_no_window_shows_warning() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut task = make_task(4, TaskStatus::Running);
+        task.worktree = None;
+        task.tmux_window = None;
+        let mut app = App::new(vec![task]);
+        app.selected_column = 2; // Running column
+        let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert!(cmds.is_empty());
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("No worktree"));
+    }
+
+    #[test]
     fn g_key_with_live_window_jumps() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let mut task = make_task(4, TaskStatus::Running);

@@ -23,6 +23,7 @@ pub trait TaskStore: Send + Sync {
     fn list_notes(&self, task_id: i64) -> Result<Vec<Note>>;
     fn list_repo_paths(&self) -> Result<Vec<String>>;
     fn save_repo_path(&self, path: &str) -> Result<()>;
+    fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +271,21 @@ impl Database {
         Ok(())
     }
 
+    // -- Plan lookup ----------------------------------------------------------
+
+    pub fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, title, description, repo_path, status, worktree, tmux_window,
+                    plan, created_at, updated_at
+             FROM tasks WHERE plan = ?1",
+            params![plan],
+            row_to_task,
+        )
+        .optional()
+        .context("Failed to find task by plan")
+    }
+
     // -- Full task update -----------------------------------------------------
 
     pub fn update_task(
@@ -331,6 +347,9 @@ impl TaskStore for Database {
     }
     fn save_repo_path(&self, path: &str) -> Result<()> {
         Database::save_repo_path(self, path)
+    }
+    fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
+        Database::find_task_by_plan(self, plan)
     }
 }
 
@@ -544,5 +563,33 @@ mod tests {
 
         // Notes cascade-deleted
         assert_eq!(db.list_notes(task_id).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn find_task_by_plan_returns_match() {
+        let db = in_memory_db();
+        let id = db.create_task("Planned", "desc", "/repo", Some("/plans/my-plan.md"), TaskStatus::Ready).unwrap();
+
+        let found = db.find_task_by_plan("/plans/my-plan.md").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, id);
+    }
+
+    #[test]
+    fn find_task_by_plan_returns_none_when_no_match() {
+        let db = in_memory_db();
+        db.create_task("Other", "desc", "/repo", Some("/plans/other.md"), TaskStatus::Ready).unwrap();
+
+        let found = db.find_task_by_plan("/plans/nonexistent.md").unwrap();
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn find_task_by_plan_ignores_tasks_without_plan() {
+        let db = in_memory_db();
+        db.create_task("No Plan", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        let found = db.find_task_by_plan("/plans/any.md").unwrap();
+        assert!(found.is_none());
     }
 }

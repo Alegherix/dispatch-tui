@@ -7,6 +7,25 @@ use std::sync::Mutex;
 use crate::models::{Note, NoteSource, Task, TaskStatus};
 
 // ---------------------------------------------------------------------------
+// TaskStore trait
+// ---------------------------------------------------------------------------
+
+pub trait TaskStore: Send + Sync {
+    fn create_task(&self, title: &str, description: &str, repo_path: &str) -> Result<i64>;
+    fn get_task(&self, id: i64) -> Result<Option<Task>>;
+    fn list_all(&self) -> Result<Vec<Task>>;
+    fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>>;
+    fn update_status(&self, id: i64, status: TaskStatus) -> Result<()>;
+    fn update_dispatch(&self, id: i64, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()>;
+    fn delete_task(&self, id: i64) -> Result<()>;
+    fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus) -> Result<()>;
+    fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64>;
+    fn list_notes(&self, task_id: i64) -> Result<Vec<Note>>;
+    fn list_repo_paths(&self) -> Result<Vec<String>>;
+    fn save_repo_path(&self, path: &str) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -266,6 +285,45 @@ impl Database {
             anyhow::bail!("Task {id} not found");
         }
         Ok(())
+    }
+}
+
+impl TaskStore for Database {
+    fn create_task(&self, title: &str, description: &str, repo_path: &str) -> Result<i64> {
+        Database::create_task(self, title, description, repo_path)
+    }
+    fn get_task(&self, id: i64) -> Result<Option<Task>> {
+        Database::get_task(self, id)
+    }
+    fn list_all(&self) -> Result<Vec<Task>> {
+        Database::list_all(self)
+    }
+    fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>> {
+        Database::list_by_status(self, status)
+    }
+    fn update_status(&self, id: i64, status: TaskStatus) -> Result<()> {
+        Database::update_status(self, id, status)
+    }
+    fn update_dispatch(&self, id: i64, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()> {
+        Database::update_dispatch(self, id, worktree, tmux_window)
+    }
+    fn delete_task(&self, id: i64) -> Result<()> {
+        Database::delete_task(self, id)
+    }
+    fn update_task(&self, id: i64, title: &str, description: &str, repo_path: &str, status: TaskStatus) -> Result<()> {
+        Database::update_task(self, id, title, description, repo_path, status)
+    }
+    fn add_note(&self, task_id: i64, content: &str, source: NoteSource) -> Result<i64> {
+        Database::add_note(self, task_id, content, source)
+    }
+    fn list_notes(&self, task_id: i64) -> Result<Vec<Note>> {
+        Database::list_notes(self, task_id)
+    }
+    fn list_repo_paths(&self) -> Result<Vec<String>> {
+        Database::list_repo_paths(self)
+    }
+    fn save_repo_path(&self, path: &str) -> Result<()> {
+        Database::save_repo_path(self, path)
     }
 }
 

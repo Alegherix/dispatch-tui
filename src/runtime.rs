@@ -107,7 +107,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 struct TuiRuntime {
-    database: Arc<db::Database>,
+    database: Arc<dyn db::TaskStore>,
     msg_tx: mpsc::UnboundedSender<Message>,
     port: u16,
     input_paused: Arc<AtomicBool>,

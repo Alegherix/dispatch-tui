@@ -265,10 +265,10 @@ fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcR
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Database;
+    use crate::db::{self, Database};
 
     fn test_state() -> Arc<McpState> {
-        let db = Arc::new(Database::open_in_memory().unwrap());
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         Arc::new(McpState { db })
     }
 

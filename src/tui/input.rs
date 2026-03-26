@@ -39,7 +39,7 @@ impl App {
             KeyCode::Char('d') => {
                 if let Some(task) = self.selected_task() {
                     let id = task.id;
-                    let status = task.status.clone();
+                    let status = task.status;
                     let has_window = task.tmux_window.is_some();
                     let has_worktree = task.worktree.is_some();
                     match status {

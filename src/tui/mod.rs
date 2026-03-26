@@ -15,7 +15,7 @@ use crate::models::{Note, Task, TaskStatus};
 pub struct App {
     pub(in crate::tui) tasks: Vec<Task>,
     pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; 5],
+    pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
     pub(in crate::tui) mode: InputMode,
     pub(in crate::tui) input_buffer: String,
     pub(in crate::tui) task_draft: Option<TaskDraft>,
@@ -33,7 +33,7 @@ impl App {
         App {
             tasks,
             selected_column: 0,
-            selected_row: [0; 5],
+            selected_row: [0; TaskStatus::COLUMN_COUNT],
             mode: InputMode::Normal,
             input_buffer: String::new(),
             task_draft: None,
@@ -51,7 +51,7 @@ impl App {
     pub fn tasks(&self) -> &[Task] { &self.tasks }
     pub fn should_quit(&self) -> bool { self.should_quit }
     pub fn selected_column(&self) -> usize { self.selected_column }
-    pub fn selected_row(&self) -> &[usize; 5] { &self.selected_row }
+    pub fn selected_row(&self) -> &[usize; TaskStatus::COLUMN_COUNT] { &self.selected_row }
     pub fn mode(&self) -> &InputMode { &self.mode }
     pub fn input_buffer(&self) -> &str { &self.input_buffer }
     pub fn detail_visible(&self) -> bool { self.detail_visible }
@@ -77,7 +77,7 @@ impl App {
 
     /// Clamp all selected_row values to be within bounds for each column.
     pub fn clamp_selection(&mut self) {
-        for col in 0..5 {
+        for col in 0..TaskStatus::COLUMN_COUNT {
             if let Some(status) = TaskStatus::from_column_index(col) {
                 let count = self.tasks_by_status(status).len();
                 if count == 0 {
@@ -99,7 +99,7 @@ impl App {
 
             Message::NavigateColumn(delta) => {
                 let new_col = (self.selected_column as isize + delta)
-                    .clamp(0, 4) as usize;
+                    .clamp(0, (TaskStatus::COLUMN_COUNT - 1) as isize) as usize;
                 self.selected_column = new_col;
                 self.clamp_selection();
                 vec![]

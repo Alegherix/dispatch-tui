@@ -22,6 +22,8 @@ impl TaskStatus {
         TaskStatus::Done,
     ];
 
+    pub const COLUMN_COUNT: usize = Self::ALL.len();
+
     pub fn as_str(&self) -> &'static str {
         match self {
             TaskStatus::Backlog => "backlog",
@@ -320,5 +322,11 @@ mod tests {
     #[test]
     fn slugify_numbers() {
         assert_eq!(slugify("Task 42"), "task-42");
+    }
+
+    #[test]
+    fn column_count_matches_all_len() {
+        assert_eq!(TaskStatus::COLUMN_COUNT, TaskStatus::ALL.len());
+        assert_eq!(TaskStatus::COLUMN_COUNT, 5);
     }
 }

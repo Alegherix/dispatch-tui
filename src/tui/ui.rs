@@ -53,13 +53,9 @@ pub fn render(frame: &mut Frame, app: &App) {
 fn render_columns(frame: &mut Frame, app: &App, area: Rect) {
     let column_areas = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
-        ])
+        .constraints(
+            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
+        )
         .split(area);
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {

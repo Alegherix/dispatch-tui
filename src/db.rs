@@ -288,6 +288,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         status,
         worktree: row.get("worktree")?,
         tmux_window: row.get("tmux_window")?,
+        plan: None,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })

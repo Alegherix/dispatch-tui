@@ -91,6 +91,19 @@ impl TaskStatus {
     }
 }
 
+impl std::fmt::Display for TaskStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for TaskStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown status: {s}"))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Task
 // ---------------------------------------------------------------------------
@@ -135,6 +148,19 @@ impl NoteSource {
             "system" => Some(NoteSource::System),
             _ => None,
         }
+    }
+}
+
+impl std::fmt::Display for NoteSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for NoteSource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown note source: {s}"))
     }
 }
 
@@ -328,5 +354,49 @@ mod tests {
     fn column_count_matches_all_len() {
         assert_eq!(TaskStatus::COLUMN_COUNT, TaskStatus::ALL.len());
         assert_eq!(TaskStatus::COLUMN_COUNT, 5);
+    }
+
+    #[test]
+    fn task_status_display() {
+        for &status in TaskStatus::ALL {
+            assert_eq!(format!("{status}"), status.as_str());
+        }
+    }
+
+    #[test]
+    fn task_status_from_str_roundtrip() {
+        for &status in TaskStatus::ALL {
+            let parsed: TaskStatus = status.as_str().parse().unwrap();
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn task_status_from_str_error() {
+        let result: Result<TaskStatus, _> = "bogus".parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn note_source_display() {
+        for (src, s) in [
+            (NoteSource::User, "user"),
+            (NoteSource::Agent, "agent"),
+            (NoteSource::System, "system"),
+        ] {
+            assert_eq!(format!("{src}"), s);
+        }
+    }
+
+    #[test]
+    fn note_source_from_str_roundtrip() {
+        for (src, s) in [
+            (NoteSource::User, "user"),
+            (NoteSource::Agent, "agent"),
+            (NoteSource::System, "system"),
+        ] {
+            let parsed: NoteSource = s.parse().unwrap();
+            assert_eq!(parsed, src);
+        }
     }
 }

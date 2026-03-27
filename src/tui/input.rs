@@ -190,12 +190,10 @@ impl App {
                         vec![]
                     }
                     InputMode::InputRepoPath => {
-                        let draft = self.task_draft.take().unwrap_or_default();
                         let repo_path = if value.is_empty() {
                             if let Some(first) = self.repo_paths.first() {
                                 first.clone()
                             } else {
-                                self.task_draft = Some(draft);
                                 self.status_message =
                                     Some("Repo path required (no saved paths available)".to_string());
                                 return vec![];
@@ -203,16 +201,7 @@ impl App {
                         } else {
                             value
                         };
-                        self.mode = InputMode::Normal;
-                        self.status_message = None;
-                        vec![
-                            Command::InsertTask {
-                                title: draft.title,
-                                description: draft.description,
-                                repo_path: repo_path.clone(),
-                            },
-                            Command::SaveRepoPath(repo_path),
-                        ]
+                        self.finish_task_creation(repo_path)
                     }
                     _ => vec![],
                 }
@@ -226,22 +215,14 @@ impl App {
             KeyCode::Char(c) => {
                 // In repo path mode with empty buffer, 1-9 selects a saved path
                 if self.mode == InputMode::InputRepoPath
-                    && self.input_buffer.is_empty() && c.is_ascii_digit() && c != '0'
+                    && self.input_buffer.is_empty()
+                    && c.is_ascii_digit()
+                    && c != '0'
                 {
                     let idx = (c as usize) - ('1' as usize);
                     if idx < self.repo_paths.len() {
-                        let draft = self.task_draft.take().unwrap_or_default();
                         let repo_path = self.repo_paths[idx].clone();
-                        self.mode = InputMode::Normal;
-                        self.status_message = None;
-                        return vec![
-                            Command::InsertTask {
-                                title: draft.title,
-                                description: draft.description,
-                                repo_path: repo_path.clone(),
-                            },
-                            Command::SaveRepoPath(repo_path),
-                        ];
+                        return self.finish_task_creation(repo_path);
                     }
                 }
                 self.input_buffer.push(c);
@@ -292,5 +273,19 @@ impl App {
             }
             _ => vec![],
         }
+    }
+
+    fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {
+        let draft = self.task_draft.take().unwrap_or_default();
+        self.mode = InputMode::Normal;
+        self.status_message = None;
+        vec![
+            Command::InsertTask {
+                title: draft.title,
+                description: draft.description,
+                repo_path: repo_path.clone(),
+            },
+            Command::SaveRepoPath(repo_path),
+        ]
     }
 }

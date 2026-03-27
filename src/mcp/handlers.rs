@@ -287,36 +287,33 @@ fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonR
         );
     }
 
-    if let Some(ref status_str) = parsed.status {
-        let status = match TaskStatus::parse(status_str) {
-            Some(s) => s,
+    let status = if let Some(ref status_str) = parsed.status {
+        match TaskStatus::parse(status_str) {
+            Some(s) => Some(s),
             None => {
                 return JsonRpcResponse::err(
                     id,
                     -32602,
-                    format!("Unknown status: {status_str}. Valid values: backlog, ready, running, review, done"),
+                    format!(
+                        "Unknown status: {status_str}. Valid values: backlog, ready, running, review, done"
+                    ),
                 )
             }
-        };
-        if let Err(e) = state.db.update_status(parsed.task_id, status) {
-            return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
         }
-    }
+    } else {
+        None
+    };
 
-    if let Some(ref plan) = parsed.plan {
-        if let Err(e) = state.db.update_plan(parsed.task_id, Some(plan)) {
-            return JsonRpcResponse::err(id, -32603, format!("Database error updating plan: {e}"));
-        }
-    }
+    let plan = parsed.plan.as_ref().map(|p| Some(p.as_str()));
 
-    if parsed.title.is_some() || parsed.description.is_some() {
-        if let Err(e) = state.db.update_title_description(
-            parsed.task_id,
-            parsed.title.as_deref(),
-            parsed.description.as_deref(),
-        ) {
-            return JsonRpcResponse::err(id, -32603, format!("Database error updating title/description: {e}"));
-        }
+    if let Err(e) = state.db.update_task_partial(
+        parsed.task_id,
+        status,
+        plan,
+        parsed.title.as_deref(),
+        parsed.description.as_deref(),
+    ) {
+        return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }
 
     let mut updated = Vec::new();
@@ -757,6 +754,30 @@ mod tests {
             })),
         ).await;
         assert!(resp.error.is_some(), "should error with no fields to update");
+    }
+
+    #[tokio::test]
+    async fn update_task_partial_sets_multiple_fields() {
+        let state = test_state();
+        let task_id = state.db.create_task("Test", "Desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_task",
+                "arguments": {
+                    "task_id": task_id,
+                    "status": "ready",
+                    "title": "Updated Title"
+                }
+            })),
+        ).await;
+        assert!(resp.error.is_none());
+
+        let task = state.db.get_task(task_id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Ready);
+        assert_eq!(task.title, "Updated Title");
     }
 
     #[tokio::test]

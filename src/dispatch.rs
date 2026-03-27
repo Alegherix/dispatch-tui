@@ -9,8 +9,8 @@ use crate::tmux;
 // dispatch_agent
 // ---------------------------------------------------------------------------
 
-/// Provision a git worktree, write MCP config, open a tmux window, and
-/// launch the Claude agent with a structured prompt.
+/// Provision a git worktree, open a tmux window, and launch the Claude agent
+/// with a structured prompt.
 ///
 /// This function is **synchronous** and should be called via
 /// `tokio::task::spawn_blocking` from async contexts.
@@ -49,16 +49,11 @@ pub fn dispatch_agent(task: &Task, mcp_port: u16) -> Result<DispatchResult> {
         anyhow::bail!("git worktree add failed: {msg}");
     }
 
-    // 3. Write .mcp.json into the worktree so Claude picks up the MCP server.
-    let mcp_config = build_mcp_config(mcp_port);
-    fs::write(format!("{worktree_path}/.mcp.json"), &mcp_config)
-        .with_context(|| format!("failed to write {worktree_path}/.mcp.json"))?;
-
-    // 4. Open a new tmux window rooted at the worktree.
+    // 3. Open a new tmux window rooted at the worktree.
     tmux::new_window(&tmux_window, &worktree_path)
         .context("failed to create tmux window")?;
 
-    // 5. Write the prompt file and launch Claude in interactive mode.
+    // 4. Write the prompt file and launch Claude in interactive mode.
     let prompt = build_prompt(task.id, &task.title, &task.description, mcp_port, task.plan.as_deref());
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &prompt)
@@ -155,12 +150,6 @@ pub fn resume_agent(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn build_mcp_config(mcp_port: u16) -> String {
-    format!(
-        r#"{{"mcpServers":{{"task-orchestrator":{{"type":"http","url":"http://localhost:{mcp_port}/mcp"}}}}}}"#
-    )
-}
-
 fn build_tmux_window_name(task_id: i64) -> String {
     format!("task-{task_id}")
 }
@@ -256,15 +245,6 @@ mod tests {
     fn build_prompt_without_plan_omits_plan_section() {
         let prompt = build_prompt(1, "Task", "Desc", 3142, None);
         assert!(!prompt.contains("Plan:"));
-    }
-
-    #[test]
-    fn mcp_config_matches_schema() {
-        let config: serde_json::Value =
-            serde_json::from_str(&build_mcp_config(3142)).expect("valid JSON");
-        let server = &config["mcpServers"]["task-orchestrator"];
-        assert_eq!(server["type"], "http");
-        assert_eq!(server["url"], "http://localhost:3142/mcp");
     }
 
 }

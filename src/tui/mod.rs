@@ -282,6 +282,10 @@ impl App {
     fn handle_delete_task(&mut self, id: i64) -> Vec<Command> {
         self.tasks.retain(|t| t.id != id);
         self.clamp_selection();
+        let archive_count = self.archived_tasks().len();
+        if self.selected_archive_row >= archive_count && archive_count > 0 {
+            self.selected_archive_row = archive_count - 1;
+        }
         vec![Command::DeleteTask(id)]
     }
 

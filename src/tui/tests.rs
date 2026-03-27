@@ -1436,3 +1436,64 @@ fn archive_clears_agent_tracking() {
     assert!(!app.crashed_tasks.contains(&1));
     assert!(!app.tmux_outputs.contains_key(&1));
 }
+
+// --- Archive panel key handling ---
+
+#[test]
+fn archive_panel_j_k_navigation() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+        make_task(3, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.show_archived = true;
+    assert_eq!(app.selected_archive_row, 0);
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.selected_archive_row, 1);
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.selected_archive_row, 2);
+
+    // Clamp at end
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.selected_archive_row, 2);
+
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.selected_archive_row, 1);
+}
+
+#[test]
+fn archive_panel_h_closes() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.show_archived = true;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+    assert!(!app.show_archived);
+}
+
+#[test]
+fn archive_panel_x_enters_confirm_delete() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.show_archived = true;
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert_eq!(app.mode, InputMode::ConfirmDelete);
+}
+
+#[test]
+fn archive_panel_confirm_delete_removes_task() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+    ], Duration::from_secs(300));
+    app.show_archived = true;
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(app.tasks.is_empty());
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteTask(1))));
+}

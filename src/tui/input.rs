@@ -24,6 +24,46 @@ impl App {
     }
 
     fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
+        // Archive panel intercepts certain keys when visible
+        if self.show_archived {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let count = self.archived_tasks().len();
+                    if count > 0 && self.selected_archive_row < count - 1 {
+                        self.selected_archive_row += 1;
+                    }
+                    return vec![];
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.selected_archive_row = self.selected_archive_row.saturating_sub(1);
+                    return vec![];
+                }
+                KeyCode::Char('H') => {
+                    return self.update(Message::ToggleArchive);
+                }
+                KeyCode::Char('x') => {
+                    let archived = self.archived_tasks();
+                    if archived.get(self.selected_archive_row).is_some() {
+                        self.mode = InputMode::ConfirmDelete;
+                        self.status_message = Some("Delete permanently? (y/n)".to_string());
+                    }
+                    return vec![];
+                }
+                KeyCode::Char('e') => {
+                    let archived = self.archived_tasks();
+                    if let Some(task) = archived.get(self.selected_archive_row) {
+                        return vec![Command::EditTaskInEditor((*task).clone())];
+                    }
+                    return vec![];
+                }
+                KeyCode::Char('q') => return self.update(Message::Quit),
+                KeyCode::Esc => {
+                    return self.update(Message::ToggleArchive);
+                }
+                _ => return vec![],
+            }
+        }
+
         match key.code {
             KeyCode::Char('q') => self.update(Message::Quit),
 
@@ -268,8 +308,14 @@ impl App {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 self.mode = InputMode::Normal;
                 self.status_message = None;
-                if let Some(task) = self.selected_task() {
-                    let id = task.id;
+                let task_id = if self.show_archived {
+                    self.archived_tasks()
+                        .get(self.selected_archive_row)
+                        .map(|t| t.id)
+                } else {
+                    self.selected_task().map(|t| t.id)
+                };
+                if let Some(id) = task_id {
                     self.update(Message::DeleteTask(id))
                 } else {
                     vec![]

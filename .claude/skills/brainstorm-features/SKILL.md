@@ -25,8 +25,9 @@ Use the Agent tool to spawn 3 agents in a single message (parallel execution). E
 - Instruction to read `CLAUDE.md` and `TODOS.md` for project context
 - Its category name and description
 - The specific source files to explore (listed below)
-- Instruction to return ideas as a numbered list, each with: **Title**, **Problem** (what's missing or painful today), **Idea** (what the feature would do)
-- Instruction to generate 5-10 ideas
+- Instruction to return exactly 3 ideas, ranked by value (impact on daily usage x feasibility), with a one-sentence justification for each ranking
+- Each idea has: **Title**, **Problem** (what's missing or painful today), **Idea** (what the feature would do)
+- Instruction to self-filter: explore broadly but only surface the highest-value ideas — prefer small changes that solve real pain over ambitious features
 - Instruction that this is a research-only task — do not write any code or modify any files
 
 **Agent prompts:**
@@ -43,10 +44,11 @@ Read CLAUDE.md and TODOS.md for project context, then explore these files:
 
 Focus on: keybindings, navigation, input modes, task creation flow, confirmation dialogs, discoverability, keyboard shortcuts, modal interactions.
 
-Return 5-10 feature ideas as a numbered list. For each idea provide:
+Explore broadly, then self-filter to exactly 3 ideas ranked by value (impact on daily usage x feasibility). Prefer small changes that solve real pain over ambitious features. For each idea provide:
 - **Title** — short name
 - **Problem** — what's missing or painful today
 - **Idea** — what the feature would do
+- **Why this ranks here** — one sentence on impact x feasibility
 
 Research only — do not write code or modify files.
 ```
@@ -65,10 +67,11 @@ Read CLAUDE.md and TODOS.md for project context, then explore these files:
 
 Focus on: agent dispatch workflow, MCP tools, CLI integration, plan-to-task pipeline, developer productivity, agent monitoring, task lifecycle.
 
-Return 5-10 feature ideas as a numbered list. For each idea provide:
+Explore broadly, then self-filter to exactly 3 ideas ranked by value (impact on daily usage x feasibility). Prefer small changes that solve real pain over ambitious features. For each idea provide:
 - **Title** — short name
 - **Problem** — what's missing or painful today
 - **Idea** — what the feature would do
+- **Why this ranks here** — one sentence on impact x feasibility
 
 Research only — do not write code or modify files.
 ```
@@ -84,41 +87,24 @@ Read CLAUDE.md and TODOS.md for project context, then explore these files:
 
 Focus on: layout improvements, information density, visual hierarchy, task card content, column rendering, detail panel, status bar, color usage, responsive layout, progress indicators.
 
-Return 5-10 feature ideas as a numbered list. For each idea provide:
+Explore broadly, then self-filter to exactly 3 ideas ranked by value (impact on daily usage x feasibility). Prefer small changes that solve real pain over ambitious features. For each idea provide:
 - **Title** — short name
 - **Problem** — what's missing or painful today
 - **Idea** — what the feature would do
+- **Why this ranks here** — one sentence on impact x feasibility
 
 Research only — do not write code or modify files.
 ```
 
 ### Step 3: Collect & Present Batch
 
-Merge the results from all 3 agents into a single categorized list:
+Present the 9 ideas (3 per category) as a compact ranked list. Each entry: **Title** — one-line summary. Group by category.
 
-```
-## UX Ideas
-1. [Title] — [one-line summary]
-2. ...
+Ask the user: "Which ideas would you like to turn into backlog tasks? Pick by number, name, or say 'all'."
 
-## DevX Ideas
-1. [Title] — [one-line summary]
-2. ...
+### Step 4: Refine Selected Ideas
 
-## UI Ideas
-1. [Title] — [one-line summary]
-2. ...
-```
-
-Ask the user: "Which ideas would you like to iterate on? Pick by number or name."
-
-### Step 4: Iterate on Selected Ideas
-
-For each idea the user selected:
-1. Present the full idea (Title, Problem, Idea from the agent)
-2. Ask clarifying questions to refine scope
-3. Discuss trade-offs and constraints
-4. Refine the description into a clear task description
+For each idea the user selected, write a concise task description (title + 2-3 sentence description) suitable for a backlog task. Ask the user to confirm or adjust before creating. Keep it brief — don't over-ask clarifying questions. If anything is ambiguous, pick a sensible default and note it.
 
 ### Step 5: Create Backlog Tasks
 

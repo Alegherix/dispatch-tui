@@ -432,6 +432,7 @@ async fn execute_commands(
                 rt.exec_insert_task(app, title, description, repo_path),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::Dispatch { task } => rt.exec_dispatch(task),
+            Command::Brainstorm { .. } => {} // TODO: Task 5 will add exec_brainstorm
             Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
             Command::EditTaskInEditor(task) => rt.exec_edit_in_editor(app, task, terminal)?,
             Command::SaveRepoPath(path) => rt.exec_save_repo_path(app, path),

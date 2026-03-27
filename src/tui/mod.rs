@@ -4,7 +4,8 @@ pub mod ui;
 
 pub use types::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use crate::models::{Task, TaskStatus};
 
@@ -25,10 +26,14 @@ pub struct App {
     pub(in crate::tui) error_popup: Option<String>,
     pub(in crate::tui) repo_paths: Vec<String>,
     pub(in crate::tui) should_quit: bool,
+    pub(in crate::tui) last_output_change: HashMap<i64, Instant>,
+    pub(in crate::tui) stale_tasks: HashSet<i64>,
+    pub(in crate::tui) crashed_tasks: HashSet<i64>,
+    pub(in crate::tui) inactivity_timeout: Duration,
 }
 
 impl App {
-    pub fn new(tasks: Vec<Task>) -> Self {
+    pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
         App {
             tasks,
             selected_column: 0,
@@ -42,6 +47,10 @@ impl App {
             error_popup: None,
             repo_paths: Vec::new(),
             should_quit: false,
+            last_output_change: HashMap::new(),
+            stale_tasks: HashSet::new(),
+            crashed_tasks: HashSet::new(),
+            inactivity_timeout,
         }
     }
 
@@ -58,6 +67,9 @@ impl App {
     pub fn error_popup(&self) -> Option<&str> { self.error_popup.as_deref() }
     pub fn repo_paths(&self) -> &[String] { &self.repo_paths }
     pub fn task_draft(&self) -> Option<&TaskDraft> { self.task_draft.as_ref() }
+    pub fn stale_tasks(&self) -> &HashSet<i64> { &self.stale_tasks }
+    pub fn crashed_tasks(&self) -> &HashSet<i64> { &self.crashed_tasks }
+    pub fn inactivity_timeout(&self) -> Duration { self.inactivity_timeout }
 
     /// Return all tasks for a given status, ordered as they appear in self.tasks.
     pub fn tasks_by_status(&self, status: TaskStatus) -> Vec<&Task> {
@@ -119,6 +131,11 @@ impl App {
                 self.handle_task_edited(id, title, description, repo_path, status, plan),
             Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
             Message::QuickDispatch { repo_path } => self.handle_quick_dispatch(repo_path),
+            Message::StaleAgent(_) => vec![],
+            Message::AgentCrashed(_) => vec![],
+            Message::KillAndRetry(_) => vec![],
+            Message::RetryResume(_) => vec![],
+            Message::RetryFresh(_) => vec![],
         }
     }
 

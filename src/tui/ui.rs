@@ -371,6 +371,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             InputMode::InputRepoPath => "Creating task: enter repo path".to_string(),
             InputMode::ConfirmDelete => "Delete? (y/n)".to_string(),
             InputMode::QuickDispatch => "Quick dispatch: select repo path".to_string(),
+            InputMode::ConfirmRetry(_) => "Retry agent? (r)esume  (f)resh  (k)ill  Esc to cancel".to_string(),
         }
     };
 

@@ -1,12 +1,14 @@
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
+use std::time::Duration;
+
 use task_orchestrator::db::{Database, TaskStore};
 use task_orchestrator::models::{Task, TaskStatus};
 use task_orchestrator::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().unwrap();
-    let app = App::new(vec![]);
+    let app = App::new(vec![], Duration::from_secs(300));
     (app, db)
 }
 

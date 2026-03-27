@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::time::Duration;
 
 use super::*;
 use crate::models::TaskStatus;
@@ -30,7 +31,7 @@ fn make_app() -> App {
         make_task(3, TaskStatus::Ready),
         make_task(4, TaskStatus::Running),
         make_task(5, TaskStatus::Done),
-    ])
+    ], Duration::from_secs(300))
 }
 
 #[test]
@@ -127,7 +128,7 @@ fn navigate_row_clamps() {
 fn tick_produces_capture_for_running_tasks_with_window() {
     let mut task4 = make_task(4, TaskStatus::Running);
     task4.tmux_window = Some("main:task-4".to_string());
-    let mut app = App::new(vec![task4]);
+    let mut app = App::new(vec![task4], Duration::from_secs(300));
     let cmds = app.update(Message::Tick);
     // Should have CaptureTmux + RefreshFromDb
     assert_eq!(cmds.len(), 2);
@@ -139,7 +140,7 @@ fn tick_produces_capture_for_running_tasks_with_window() {
 fn tick_captures_review_task_with_live_window() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::Tick);
 
@@ -161,7 +162,7 @@ fn task_created_adds_to_list() {
         created_at: now,
         updated_at: now,
     };
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     let cmds = app.update(Message::TaskCreated { task });
     assert_eq!(app.tasks.len(), 1);
     assert_eq!(app.tasks[0].id, 42);
@@ -179,7 +180,7 @@ fn delete_task_removes_and_returns_command() {
 
 #[test]
 fn error_sets_error_popup() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.update(Message::Error("Something went wrong".to_string()));
     assert_eq!(app.error_popup.as_deref(), Some("Something went wrong"));
 }
@@ -189,7 +190,7 @@ fn dispatch_from_running_is_noop() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     let cmds = app.update(Message::DispatchTask(4));
     assert!(cmds.is_empty());
 }
@@ -199,7 +200,7 @@ fn dispatch_from_review_is_noop() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     let cmds = app.update(Message::DispatchTask(5));
     assert!(cmds.is_empty());
 }
@@ -209,7 +210,7 @@ fn move_backward_from_running_emits_cleanup() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::MoveTask {
         id: 4,
@@ -242,7 +243,7 @@ fn move_backward_without_dispatch_fields_no_cleanup() {
 
 #[test]
 fn repo_path_empty_uses_saved_path() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.repo_paths = vec!["/saved/repo".to_string()];
 
     app.mode = InputMode::InputRepoPath;
@@ -259,7 +260,7 @@ fn repo_path_empty_uses_saved_path() {
 #[test]
 fn repo_path_empty_no_saved_stays_in_mode() {
 
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.repo_paths = vec![]; // no saved paths
 
     app.mode = InputMode::InputRepoPath;
@@ -277,7 +278,7 @@ fn repo_path_empty_no_saved_stays_in_mode() {
 
 #[test]
 fn repo_path_nonempty_used_as_is() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.repo_paths = vec!["/saved/repo".to_string()];
 
     app.mode = InputMode::InputRepoPath;
@@ -294,7 +295,7 @@ fn repo_path_nonempty_used_as_is() {
 
 #[test]
 fn task_edited_updates_fields() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.update(Message::TaskEdited {
         id: 1,
         title: "New".into(),
@@ -312,7 +313,7 @@ fn task_edited_updates_fields() {
 
 #[test]
 fn repo_paths_updated_replaces_paths() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.update(Message::RepoPathsUpdated(vec!["/a".into(), "/b".into()]));
     assert_eq!(app.repo_paths, vec!["/a", "/b"]);
 }
@@ -322,7 +323,7 @@ fn window_gone_clears_tmux_window_and_persists() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::WindowGone(4));
 
@@ -343,7 +344,7 @@ fn move_forward_to_done_emits_cleanup() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None; // session closed, but worktree remains
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::MoveTask {
         id: 5,
@@ -364,7 +365,7 @@ fn move_forward_to_done_with_live_window_emits_cleanup() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = Some("task-5".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::MoveTask {
         id: 5,
@@ -379,7 +380,7 @@ fn move_forward_to_done_with_live_window_emits_cleanup() {
 #[test]
 fn d_key_on_ready_dispatches() {
 
-    let mut app = App::new(vec![make_task(3, TaskStatus::Ready)]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Ready)], Duration::from_secs(300));
     app.selected_column = 1; // Ready column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Dispatch { .. }));
@@ -391,7 +392,7 @@ fn d_key_on_running_with_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     app.selected_column = 2; // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -404,7 +405,7 @@ fn d_key_on_running_no_window_resumes() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     app.selected_column = 2; // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
@@ -412,7 +413,7 @@ fn d_key_on_running_no_window_resumes() {
 
 #[test]
 fn d_key_on_backlog_brainstorms() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.selected_column = 0; // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert_eq!(cmds.len(), 1);
@@ -422,7 +423,7 @@ fn d_key_on_backlog_brainstorms() {
 #[test]
 fn d_key_on_done_shows_warning() {
 
-    let mut app = App::new(vec![make_task(1, TaskStatus::Done)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Done)], Duration::from_secs(300));
     app.selected_column = 4; // Done column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -435,7 +436,7 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     app.selected_column = 2; // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -451,7 +452,7 @@ fn g_key_with_live_window_jumps() {
 
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     app.selected_column = 2; // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"));
@@ -478,7 +479,7 @@ fn brainstorm_only_backlog_tasks() {
 #[test]
 fn g_key_without_window_shows_message() {
 
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.selected_column = 0;
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
@@ -500,7 +501,7 @@ fn n_key_enters_title_mode() {
 
 #[test]
 fn typing_appends_to_input_buffer() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputTitle;
     app.handle_key(make_key(KeyCode::Char('H')));
     app.handle_key(make_key(KeyCode::Char('i')));
@@ -509,7 +510,7 @@ fn typing_appends_to_input_buffer() {
 
 #[test]
 fn backspace_pops_from_input_buffer() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputTitle;
     app.input_buffer = "abc".to_string();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -518,7 +519,7 @@ fn backspace_pops_from_input_buffer() {
 
 #[test]
 fn backspace_on_empty_buffer_is_noop() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputTitle;
     app.input_buffer.clear();
     app.handle_key(make_key(KeyCode::Backspace));
@@ -528,7 +529,7 @@ fn backspace_on_empty_buffer_is_noop() {
 
 #[test]
 fn enter_with_title_advances_to_description() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputTitle;
     app.input_buffer = "My Task".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -540,7 +541,7 @@ fn enter_with_title_advances_to_description() {
 
 #[test]
 fn enter_with_empty_title_cancels() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputTitle;
     app.input_buffer.clear();
     app.handle_key(make_key(KeyCode::Enter));
@@ -551,7 +552,7 @@ fn enter_with_empty_title_cancels() {
 
 #[test]
 fn enter_with_whitespace_only_title_cancels() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputTitle;
     app.input_buffer = "   ".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -561,7 +562,7 @@ fn enter_with_whitespace_only_title_cancels() {
 
 #[test]
 fn enter_in_description_advances_to_repo_path() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputDescription;
     app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
     app.input_buffer = "some desc".to_string();
@@ -574,7 +575,7 @@ fn enter_in_description_advances_to_repo_path() {
 
 #[test]
 fn number_key_in_repo_path_selects_saved_path() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputRepoPath;
     app.task_draft = Some(TaskDraft { title: "T".to_string(), description: "d".to_string() });
     app.input_buffer.clear();
@@ -586,7 +587,7 @@ fn number_key_in_repo_path_selects_saved_path() {
 
 #[test]
 fn number_key_out_of_range_appends_to_buffer() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputRepoPath;
     app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
     app.input_buffer.clear();
@@ -598,7 +599,7 @@ fn number_key_out_of_range_appends_to_buffer() {
 
 #[test]
 fn number_key_with_nonempty_buffer_appends() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputRepoPath;
     app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
     app.input_buffer = "/my".to_string();
@@ -609,7 +610,7 @@ fn number_key_with_nonempty_buffer_appends() {
 
 #[test]
 fn zero_key_in_repo_path_appends_to_buffer() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputRepoPath;
     app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
     app.input_buffer.clear();
@@ -620,7 +621,7 @@ fn zero_key_in_repo_path_appends_to_buffer() {
 
 #[test]
 fn escape_from_title_mode_cancels() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputTitle;
     app.input_buffer = "partial".to_string();
     app.handle_key(make_key(KeyCode::Esc));
@@ -632,7 +633,7 @@ fn escape_from_title_mode_cancels() {
 
 #[test]
 fn escape_from_description_mode_cancels() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputDescription;
     app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
     app.input_buffer = "partial".to_string();
@@ -645,7 +646,7 @@ fn escape_from_description_mode_cancels() {
 
 #[test]
 fn escape_from_repo_path_mode_cancels() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.mode = InputMode::InputRepoPath;
     app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
     app.input_buffer = "/partial".to_string();
@@ -726,7 +727,7 @@ fn x_key_on_empty_column_is_noop() {
 
 #[test]
 fn any_key_clears_error_popup() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.error_popup = Some("boom".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
     assert!(app.error_popup.is_none());
@@ -741,7 +742,7 @@ fn make_shift_key(code: KeyCode) -> KeyEvent {
 
 #[test]
 fn shift_d_with_one_repo_emits_quick_dispatch() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.repo_paths = vec!["/repo".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
@@ -751,7 +752,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
 
 #[test]
 fn shift_d_with_no_repos_shows_error() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.repo_paths = vec![];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert!(cmds.is_empty());
@@ -761,7 +762,7 @@ fn shift_d_with_no_repos_shows_error() {
 
 #[test]
 fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert!(cmds.is_empty());
@@ -770,7 +771,7 @@ fn shift_d_with_multiple_repos_enters_quick_dispatch_mode() {
 
 #[test]
 fn quick_dispatch_mode_number_selects_repo() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
@@ -781,7 +782,7 @@ fn quick_dispatch_mode_number_selects_repo() {
 
 #[test]
 fn quick_dispatch_mode_esc_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     app.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Esc));
@@ -791,7 +792,7 @@ fn quick_dispatch_mode_esc_cancels() {
 
 #[test]
 fn quick_dispatch_mode_invalid_number_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.repo_paths = vec!["/repo1".to_string()];
     app.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('3')));
@@ -801,7 +802,7 @@ fn quick_dispatch_mode_invalid_number_is_noop() {
 
 #[test]
 fn quick_dispatch_message_emits_command() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     let cmds = app.update(Message::QuickDispatch { repo_path: "/my/repo".to_string() });
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::QuickDispatch { title, repo_path, .. }
@@ -821,7 +822,7 @@ fn error_popup_blocks_normal_key_handling() {
 
 #[test]
 fn toggle_detail_flips_visibility() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     assert!(!app.detail_visible);
     app.update(Message::ToggleDetail);
     assert!(app.detail_visible);
@@ -831,7 +832,7 @@ fn toggle_detail_flips_visibility() {
 
 #[test]
 fn enter_key_toggles_detail() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     assert!(!app.detail_visible);
     app.handle_key(make_key(KeyCode::Enter));
     assert!(app.detail_visible);
@@ -841,7 +842,7 @@ fn enter_key_toggles_detail() {
 
 #[test]
 fn dispatched_sets_fields_and_transitions_to_running() {
-    let mut app = App::new(vec![make_task(3, TaskStatus::Ready)]);
+    let mut app = App::new(vec![make_task(3, TaskStatus::Ready)], Duration::from_secs(300));
     let cmds = app.update(Message::Dispatched {
         id: 3,
         worktree: "/wt".to_string(),
@@ -857,7 +858,7 @@ fn dispatched_sets_fields_and_transitions_to_running() {
 
 #[test]
 fn dispatched_unknown_id_is_noop() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Ready)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Ready)], Duration::from_secs(300));
     let cmds = app.update(Message::Dispatched {
         id: 999,
         worktree: "/wt".to_string(),
@@ -871,7 +872,7 @@ fn dispatched_unknown_id_is_noop() {
 fn resumed_sets_tmux_window() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     let cmds = app.update(Message::Resumed {
         id: 4,
         tmux_window: "win-4".to_string(),
@@ -883,7 +884,7 @@ fn resumed_sets_tmux_window() {
 
 #[test]
 fn resumed_unknown_id_is_noop() {
-    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], Duration::from_secs(300));
     let cmds = app.update(Message::Resumed {
         id: 999,
         tmux_window: "win".to_string(),
@@ -896,7 +897,7 @@ fn resumed_sets_status_to_running() {
     let mut task = make_task(4, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::Resumed {
         id: 4,
@@ -912,7 +913,7 @@ fn resumed_sets_status_to_running() {
 
 #[test]
 fn tmux_output_stores_in_map() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], Duration::from_secs(300));
     let cmds = app.update(Message::TmuxOutput {
         id: 1,
         output: "hello".to_string(),
@@ -923,7 +924,7 @@ fn tmux_output_stores_in_map() {
 
 #[test]
 fn tmux_output_overwrites_previous() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Running)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)], Duration::from_secs(300));
     app.update(Message::TmuxOutput { id: 1, output: "first".to_string() });
     app.update(Message::TmuxOutput { id: 1, output: "second".to_string() });
     assert_eq!(app.tmux_outputs.get(&1).unwrap(), "second");
@@ -956,7 +957,7 @@ fn d_key_on_review_with_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.tmux_window = Some("task-5".to_string());
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     app.selected_column = 3; // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -968,7 +969,7 @@ fn d_key_on_review_no_window_with_worktree_resumes() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/5-task-5".to_string());
     task.tmux_window = None;
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     app.selected_column = 3; // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(matches!(&cmds[0], Command::Resume { .. }));
@@ -979,7 +980,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     let mut task = make_task(5, TaskStatus::Review);
     task.worktree = None;
     task.tmux_window = None;
-    let mut app = App::new(vec![task]);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
     app.selected_column = 3; // Review column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -990,7 +991,7 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
 
 #[test]
 fn d_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.selected_column = 0;
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
@@ -998,7 +999,7 @@ fn d_key_on_empty_column_is_noop() {
 
 #[test]
 fn g_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.selected_column = 0;
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
@@ -1006,7 +1007,7 @@ fn g_key_on_empty_column_is_noop() {
 
 #[test]
 fn m_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.selected_column = 0;
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
     assert!(cmds.is_empty());
@@ -1014,7 +1015,7 @@ fn m_key_on_empty_column_is_noop() {
 
 #[test]
 fn shift_m_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.selected_column = 0;
     let cmds = app.handle_key(make_key(KeyCode::Char('M')));
     assert!(cmds.is_empty());
@@ -1022,7 +1023,7 @@ fn shift_m_key_on_empty_column_is_noop() {
 
 #[test]
 fn e_key_on_empty_column_is_noop() {
-    let mut app = App::new(vec![]);
+    let mut app = App::new(vec![], Duration::from_secs(300));
     app.selected_column = 0;
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds.is_empty());
@@ -1032,9 +1033,16 @@ fn e_key_on_empty_column_is_noop() {
 
 #[test]
 fn e_key_emits_edit_task_in_editor() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));
     app.selected_column = 0;
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == 1));
+}
+
+#[test]
+fn new_app_has_empty_agent_tracking() {
+    let app = App::new(vec![], Duration::from_secs(300));
+    assert!(app.stale_tasks().is_empty());
+    assert!(app.crashed_tasks().is_empty());
 }

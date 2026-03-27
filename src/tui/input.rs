@@ -18,6 +18,7 @@ impl App {
             InputMode::InputRepoPath => self.handle_key_text_input(key),
             InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
             InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
+            InputMode::ConfirmRetry(_id) => vec![], // placeholder
         }
     }
 

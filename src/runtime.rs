@@ -40,7 +40,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     });
 
     // 3. Create App and load saved repo paths
-    let mut app = App::new(tasks);
+    let mut app = App::new(tasks, Duration::from_secs(300));
     let paths = database.list_repo_paths().unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
 
@@ -520,6 +520,7 @@ async fn execute_commands(
             Command::JumpToTmux { window } => rt.exec_jump_to_tmux(app, window),
             Command::QuickDispatch { title, description, repo_path } =>
                 rt.exec_quick_dispatch(app, title, description, repo_path),
+            Command::KillTmuxWindow { .. } => {} // placeholder
         }
     }
 

@@ -143,26 +143,29 @@ mod tests {
 
     #[test]
     fn has_window_finds_match_in_output() {
-        let fake_output = "main\ntask-42\nother-window\n";
-        let target = "task-42";
-        let found = fake_output.lines().any(|line| line.trim() == target);
-        assert!(found);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\ntask-42\nother-window\n"),
+        ]);
+        let result = has_window("task-42", &mock).unwrap();
+        assert!(result);
     }
 
     #[test]
     fn has_window_no_match() {
-        let fake_output = "main\nother-window\n";
-        let target = "task-42";
-        let found = fake_output.lines().any(|line| line.trim() == target);
-        assert!(!found);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\nother-window\n"),
+        ]);
+        let result = has_window("task-42", &mock).unwrap();
+        assert!(!result);
     }
 
     #[test]
     fn has_window_exact_match_not_prefix() {
-        let fake_output = "task-42\n";
-        let target = "task-4";
-        let found = fake_output.lines().any(|line| line.trim() == target);
-        assert!(!found);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"task-42\n"),
+        ]);
+        let result = has_window("task-4", &mock).unwrap();
+        assert!(!result);
     }
 
     #[test]

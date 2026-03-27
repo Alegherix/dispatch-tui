@@ -31,7 +31,7 @@ impl ProcessRunner for RealProcessRunner {
 // ---------------------------------------------------------------------------
 
 pub struct MockProcessRunner {
-    pub calls: Mutex<Vec<(String, Vec<String>)>>,
+    calls: Mutex<Vec<(String, Vec<String>)>>,
     responses: Mutex<VecDeque<Result<Output>>>,
 }
 

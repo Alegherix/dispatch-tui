@@ -25,7 +25,7 @@ pub trait TaskStore: Send + Sync {
     fn list_repo_paths(&self) -> Result<Vec<String>>;
     fn save_repo_path(&self, path: &str) -> Result<()>;
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
-    fn update_task_partial(
+    fn patch_task(
         &self,
         id: TaskId,
         status: Option<TaskStatus>,
@@ -33,6 +33,14 @@ pub trait TaskStore: Send + Sync {
         title: Option<&str>,
         description: Option<&str>,
     ) -> Result<()>;
+    fn create_task_returning(
+        &self,
+        title: &str,
+        description: &str,
+        repo_path: &str,
+        plan: Option<&str>,
+        status: TaskStatus,
+    ) -> Result<Task>;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,27 +292,22 @@ impl TaskStore for Database {
 
     fn update_title_description(&self, id: TaskId, title: Option<&str>, description: Option<&str>) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
-        let mut parts = Vec::new();
-        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(t) = title {
-            parts.push("title = ?");
-            params_vec.push(Box::new(t.to_string()));
+        let rows = match (title, description) {
+            (Some(t), Some(d)) => conn.execute(
+                "UPDATE tasks SET title = ?1, description = ?2, updated_at = datetime('now') WHERE id = ?3",
+                params![t, d, id.0],
+            ),
+            (Some(t), None) => conn.execute(
+                "UPDATE tasks SET title = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![t, id.0],
+            ),
+            (None, Some(d)) => conn.execute(
+                "UPDATE tasks SET description = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![d, id.0],
+            ),
+            (None, None) => return Ok(()),
         }
-        if let Some(d) = description {
-            parts.push("description = ?");
-            params_vec.push(Box::new(d.to_string()));
-        }
-        if parts.is_empty() {
-            return Ok(());
-        }
-        parts.push("updated_at = datetime('now')");
-        params_vec.push(Box::new(id.0));
-
-        let sql = format!("UPDATE tasks SET {} WHERE id = ?", parts.join(", "));
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-        let rows = conn.execute(&sql, params_refs.as_slice())
-            .context("Failed to update title/description")?;
+        .context("Failed to update title/description")?;
         if rows == 0 {
             anyhow::bail!("Task {id} not found");
         }
@@ -349,7 +352,20 @@ impl TaskStore for Database {
         .context("Failed to find task by plan")
     }
 
-    fn update_task_partial(
+    fn create_task_returning(
+        &self,
+        title: &str,
+        description: &str,
+        repo_path: &str,
+        plan: Option<&str>,
+        status: TaskStatus,
+    ) -> Result<Task> {
+        let id = self.create_task(title, description, repo_path, plan, status)?;
+        self.get_task(id)?
+            .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
+    }
+
+    fn patch_task(
         &self,
         id: TaskId,
         status: Option<TaskStatus>,
@@ -357,47 +373,40 @@ impl TaskStore for Database {
         title: Option<&str>,
         description: Option<&str>,
     ) -> Result<()> {
-        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
-        let tx = conn.transaction().context("Failed to begin transaction")?;
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
 
-        let mut parts = Vec::new();
-        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        // Fetch current values for fields not being patched
+        let existing = conn.query_row(
+            "SELECT title, description, status, plan FROM tasks WHERE id = ?1",
+            params![id.0],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        ).optional().context("Failed to fetch task for patch")?;
 
-        if let Some(s) = status {
-            parts.push("status = ?");
-            params_vec.push(Box::new(s.as_str().to_string()));
-        }
-        if let Some(p) = plan {
-            parts.push("plan = ?");
-            params_vec.push(Box::new(p.map(|s| s.to_string())));
-        }
-        if let Some(t) = title {
-            parts.push("title = ?");
-            params_vec.push(Box::new(t.to_string()));
-        }
-        if let Some(d) = description {
-            parts.push("description = ?");
-            params_vec.push(Box::new(d.to_string()));
-        }
+        let (cur_title, cur_desc, cur_status, cur_plan) = match existing {
+            Some(row) => row,
+            None => anyhow::bail!("Task {id} not found"),
+        };
 
-        if parts.is_empty() {
-            return Ok(());
-        }
+        let final_status = status.map(|s| s.as_str().to_string()).unwrap_or(cur_status);
+        let final_title = title.unwrap_or(&cur_title);
+        let final_desc = description.unwrap_or(&cur_desc);
+        let final_plan: Option<&str> = match plan {
+            Some(p) => p,
+            None => cur_plan.as_deref(),
+        };
 
-        parts.push("updated_at = datetime('now')");
-        params_vec.push(Box::new(id.0));
+        conn.execute(
+            "UPDATE tasks SET title = ?1, description = ?2, status = ?3, plan = ?4, updated_at = datetime('now') WHERE id = ?5",
+            params![final_title, final_desc, final_status, final_plan, id.0],
+        ).context("Failed to patch task")?;
 
-        let sql = format!("UPDATE tasks SET {} WHERE id = ?", parts.join(", "));
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
-        let rows = tx
-            .execute(&sql, params_refs.as_slice())
-            .context("Failed to update task fields")?;
-        if rows == 0 {
-            anyhow::bail!("Task {id} not found");
-        }
-
-        tx.commit().context("Failed to commit task update")?;
         Ok(())
     }
 }
@@ -763,12 +772,33 @@ mod tests {
     }
 
     #[test]
-    fn update_task_partial_applies_all_fields() {
+    fn create_task_returning_returns_full_task() {
+        let db = in_memory_db();
+        let task = db.create_task_returning("Title", "Desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        assert_eq!(task.title, "Title");
+        assert_eq!(task.description, "Desc");
+        assert_eq!(task.repo_path, "/repo");
+        assert_eq!(task.status, TaskStatus::Backlog);
+        assert!(task.worktree.is_none());
+        assert!(task.tmux_window.is_none());
+        assert!(task.plan.is_none());
+    }
+
+    #[test]
+    fn create_task_returning_with_plan() {
+        let db = in_memory_db();
+        let task = db.create_task_returning("T", "D", "/r", Some("plan.md"), TaskStatus::Ready).unwrap();
+        assert_eq!(task.plan.as_deref(), Some("plan.md"));
+        assert_eq!(task.status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn patch_task_applies_all_fields() {
         let db = in_memory_db();
         let id = db
             .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
             .unwrap();
-        db.update_task_partial(
+        db.patch_task(
             id,
             Some(TaskStatus::Ready),
             Some(Some("plan.md")),
@@ -784,12 +814,12 @@ mod tests {
     }
 
     #[test]
-    fn update_task_partial_none_fields_unchanged() {
+    fn patch_task_none_fields_unchanged() {
         let db = in_memory_db();
         let id = db
             .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Ready)
             .unwrap();
-        db.update_task_partial(id, None, None, None, None).unwrap();
+        db.patch_task(id, None, None, None, None).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.title, "title");
         assert_eq!(task.plan.as_deref(), Some("plan.md"));
@@ -797,12 +827,12 @@ mod tests {
     }
 
     #[test]
-    fn update_task_partial_clears_plan() {
+    fn patch_task_clears_plan() {
         let db = in_memory_db();
         let id = db
             .create_task("title", "desc", "/repo", Some("plan.md"), TaskStatus::Ready)
             .unwrap();
-        db.update_task_partial(id, None, Some(None), None, None)
+        db.patch_task(id, None, Some(None), None, None)
             .unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert!(task.plan.is_none());

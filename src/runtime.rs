@@ -150,21 +150,8 @@ struct TuiRuntime {
 
 impl TuiRuntime {
     fn exec_insert_task(&self, app: &mut App, title: String, description: String, repo_path: String) {
-        match self.database.create_task(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
-            Ok(new_id) => {
-                let now = chrono::Utc::now();
-                let task = models::Task {
-                    id: new_id,
-                    title,
-                    description,
-                    repo_path,
-                    status: models::TaskStatus::Backlog,
-                    worktree: None,
-                    tmux_window: None,
-                    plan: None,
-                    created_at: now,
-                    updated_at: now,
-                };
+        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
+            Ok(task) => {
                 app.update(Message::TaskCreated { task });
             }
             Err(e) => {
@@ -174,34 +161,12 @@ impl TuiRuntime {
     }
 
     fn exec_quick_dispatch(&self, app: &mut App, title: String, description: String, repo_path: String) {
-        // 1. Create task in DB with status Ready
-        match self.database.create_task(&title, &description, &repo_path, None, models::TaskStatus::Ready) {
-            Ok(new_id) => {
-                let now = chrono::Utc::now();
-                let task = models::Task {
-                    id: new_id,
-                    title,
-                    description,
-                    repo_path: repo_path.clone(),
-                    status: models::TaskStatus::Ready,
-                    worktree: None,
-                    tmux_window: None,
-                    plan: None,
-                    created_at: now,
-                    updated_at: now,
-                };
-                // 2. Add task to in-memory state
+        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Ready) {
+            Ok(task) => {
                 app.update(Message::TaskCreated { task: task.clone() });
-                // 3. Save repo path
-                if let Err(e) = self.database.save_repo_path(&repo_path) {
-                    tracing::warn!("failed to save repo path: {e}");
-                }
-                let paths = self.database.list_repo_paths().unwrap_or_else(|e| {
-                    tracing::warn!("failed to list repo paths: {e}");
-                    vec![]
-                });
+                let _ = self.database.save_repo_path(&repo_path);
+                let paths = self.database.list_repo_paths().unwrap_or_default();
                 app.update(Message::RepoPathsUpdated(paths));
-                // 4. Dispatch the agent
                 let tx = self.msg_tx.clone();
                 let port = self.port;
                 let runner = self.runner.clone();
@@ -276,7 +241,7 @@ impl TuiRuntime {
     }
 
     fn exec_dispatch(&self, task: models::Task) {
-        self.spawn_dispatch(task, dispatch::dispatch_agent, "Dispatch");
+        self.spawn_dispatch(task, |t, _port, r| dispatch::dispatch_agent(t, r), "Dispatch");
     }
 
     fn exec_brainstorm(&self, task: models::Task) {
@@ -617,5 +582,60 @@ mod tests {
         rt.exec_refresh_from_db(&mut app);
         assert_eq!(app.tasks().len(), 1);
         assert_eq!(app.tasks()[0].title, "External");
+    }
+
+    #[test]
+    fn exec_delete_task_nonexistent_shows_error() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_delete_task(&mut app, TaskId(999));
+        assert!(app.error_popup().is_some());
+    }
+
+    #[test]
+    fn exec_jump_to_tmux_calls_select_window() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // for select-window
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_jump_to_tmux(&mut app, "my-window".to_string());
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].1.contains(&"select-window".to_string()));
+        assert!(calls[0].1.contains(&"my-window".to_string()));
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_jump_to_tmux_failure_shows_error() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("no such window"), // simulate tmux failure
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_jump_to_tmux(&mut app, "nonexistent-window".to_string());
+
+        assert!(app.error_popup().is_some());
     }
 }

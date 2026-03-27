@@ -2,7 +2,41 @@
   "permissions": {
     "allow": [
       "Bash(cargo:*)",
-      "Bash(task-orchestrator:*)"
+      "Bash(task-orchestrator:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(curl:*)",
+      "Bash(printf '%s' '— Implementation Plan')",
+      "Bash(git:*)",
+      "Bash(find . -name *.sh -o -name *.bash)"
     ]
-  }
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ID=$(git rev-parse --abbrev-ref HEAD | grep -oP '^\\d+'); [ -n \"$ID\" ] && task-orchestrator update \"$ID\" review || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ID=$(git rev-parse --abbrev-ref HEAD | grep -oP '^\\d+'); [ -n \"$ID\" ] && task-orchestrator update \"$ID\" running || true"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "vibe_kanban",
+    "task-orchestrator"
+  ],
+  "enableAllProjectMcpServers": true
 }

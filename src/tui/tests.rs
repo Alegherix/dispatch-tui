@@ -450,13 +450,22 @@ fn d_key_on_running_no_window_resumes() {
 }
 
 #[test]
-fn d_key_on_backlog_shows_warning() {
-
+fn d_key_on_backlog_brainstorms() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.selected_column = 0; // Backlog column
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds.is_empty());
-    assert!(app.status_message.is_some());
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::Brainstorm { task } if task.id == 1));
+}
+
+#[test]
+fn d_key_on_backlog_shows_warning() {
+    // This test is now covered by d_key_on_backlog_brainstorms.
+    // Kept as a compatibility check: backlog dispatch produces a command, not a warning.
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.selected_column = 0;
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(!cmds.is_empty(), "d on Backlog should now produce Brainstorm command");
 }
 
 #[test]

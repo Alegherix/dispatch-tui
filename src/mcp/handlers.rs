@@ -306,7 +306,7 @@ fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonR
 
     let plan = parsed.plan.as_ref().map(|p| Some(p.as_str()));
 
-    if let Err(e) = state.db.update_task_partial(
+    if let Err(e) = state.db.patch_task(
         TaskId(parsed.task_id),
         status,
         plan,
@@ -757,7 +757,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_task_partial_sets_multiple_fields() {
+    async fn patch_task_sets_multiple_fields() {
         let state = test_state();
         let task_id = state.db.create_task("Test", "Desc", "/repo", None, TaskStatus::Backlog).unwrap();
 

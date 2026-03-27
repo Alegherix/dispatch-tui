@@ -192,8 +192,13 @@ impl TuiRuntime {
                 // 2. Add task to in-memory state
                 app.update(Message::TaskCreated { task: task.clone() });
                 // 3. Save repo path
-                let _ = self.database.save_repo_path(&repo_path);
-                let paths = self.database.list_repo_paths().unwrap_or_default();
+                if let Err(e) = self.database.save_repo_path(&repo_path) {
+                    tracing::warn!("failed to save repo path: {e}");
+                }
+                let paths = self.database.list_repo_paths().unwrap_or_else(|e| {
+                    tracing::warn!("failed to list repo paths: {e}");
+                    vec![]
+                });
                 app.update(Message::RepoPathsUpdated(paths));
                 // 4. Dispatch the agent
                 let tx = self.msg_tx.clone();
@@ -249,6 +254,7 @@ impl TuiRuntime {
             tracing::info!(task_id = id, "dispatching task");
             match dispatch::dispatch_agent(&task, port, &*runner) {
                 Ok(result) => {
+                    // receiver dropped = app shutting down; nothing to log
                     let _ = tx.send(Message::Dispatched {
                         id,
                         worktree: result.worktree_path,
@@ -349,9 +355,8 @@ impl TuiRuntime {
         // Resume input polling thread
         self.input_paused.store(false, Ordering::Relaxed);
 
-        if let Ok(exit) = status {
-            if exit.success() {
-                // Parse the edited file
+        match status {
+            Ok(exit) if exit.success() => {
                 if let Ok(edited) = std::fs::read_to_string(tmp.path()) {
                     let mut title = task.title.clone();
                     let mut description = task.description.clone();
@@ -372,8 +377,9 @@ impl TuiRuntime {
                     }
                     let plan = if fields.plan.is_empty() { None } else { Some(fields.plan) };
 
-                    // Update DB and in-memory state
-                    if let Err(e) = self.database.update_task(task_id, &title, &description, &repo_path, new_status, plan.as_deref()) {
+                    if let Err(e) = self.database.update_task(
+                        task_id, &title, &description, &repo_path, new_status, plan.as_deref(),
+                    ) {
                         app.update(Message::Error(format!("DB error updating task: {e}")));
                     }
                     app.update(Message::TaskEdited {
@@ -384,7 +390,15 @@ impl TuiRuntime {
                         status: new_status,
                         plan,
                     });
+                } else {
+                    tracing::warn!(task_id, "failed to read edited temp file");
                 }
+            }
+            Ok(exit) => {
+                tracing::warn!(task_id, ?exit, "editor exited with non-zero status");
+            }
+            Err(e) => {
+                tracing::warn!(task_id, "failed to spawn editor: {e}");
             }
         }
 
@@ -392,8 +406,13 @@ impl TuiRuntime {
     }
 
     fn exec_save_repo_path(&self, app: &mut App, path: String) {
-        let _ = self.database.save_repo_path(&path);
-        let paths = self.database.list_repo_paths().unwrap_or_default();
+        if let Err(e) = self.database.save_repo_path(&path) {
+            tracing::warn!("failed to save repo path: {e}");
+        }
+        let paths = self.database.list_repo_paths().unwrap_or_else(|e| {
+            tracing::warn!("failed to list repo paths: {e}");
+            vec![]
+        });
         app.update(Message::RepoPathsUpdated(paths));
     }
 

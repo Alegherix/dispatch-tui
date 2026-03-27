@@ -46,20 +46,24 @@ fn provision_worktree(task: &Task, runner: &dyn ProcessRunner) -> Result<Provisi
     Ok(ProvisionResult { worktree_path, tmux_window })
 }
 
-/// Provision a git worktree, open a tmux window, and launch the Claude agent
-/// with a structured prompt.
-///
-/// This function is **synchronous** and should be called via
-/// `tokio::task::spawn_blocking` from async contexts.
-pub fn dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+/// Provision worktree, write prompt file, launch Claude via tmux.
+/// Shared by all dispatch variants.
+fn dispatch_with_prompt(
+    task: &Task,
+    prompt: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<DispatchResult> {
     let provision = provision_worktree(task, runner)?;
 
-    let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
-    fs::write(&prompt_file, &prompt)
+    fs::write(&prompt_file, prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
-    tmux::send_keys(&provision.tmux_window, "claude \"$(cat .claude-prompt)\"", runner)
-        .context("failed to send keys to tmux window")?;
+    tmux::send_keys(
+        &provision.tmux_window,
+        "claude \"$(cat .claude-prompt)\"",
+        runner,
+    )
+    .context("failed to send keys to tmux window")?;
 
     tracing::info!(task_id = task.id, worktree = %provision.worktree_path, "agent dispatched");
 
@@ -69,47 +73,19 @@ pub fn dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) ->
     })
 }
 
-/// Provision a worktree and launch a brainstorming session.
-///
-/// Same infrastructure as `dispatch_agent` but with a brainstorming-focused prompt.
-pub fn brainstorm_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let provision = provision_worktree(task, runner)?;
-
-    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, mcp_port);
-    let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
-    fs::write(&prompt_file, &prompt)
-        .with_context(|| format!("failed to write {prompt_file}"))?;
-    tmux::send_keys(&provision.tmux_window, "claude \"$(cat .claude-prompt)\"", runner)
-        .context("failed to send keys to tmux window")?;
-
-    tracing::info!(task_id = task.id, worktree = %provision.worktree_path, "brainstorm dispatched");
-
-    Ok(DispatchResult {
-        worktree_path: provision.worktree_path,
-        tmux_window: provision.tmux_window,
-    })
+pub fn dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+    let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
+    dispatch_with_prompt(task, &prompt, runner)
 }
 
-/// Provision a worktree and launch a quick dispatch session.
-///
-/// Same infrastructure as `dispatch_agent` but with a prompt that instructs
-/// the agent to rename the placeholder task after understanding user intent.
+pub fn brainstorm_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, mcp_port);
+    dispatch_with_prompt(task, &prompt, runner)
+}
+
 pub fn quick_dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let provision = provision_worktree(task, runner)?;
-
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, mcp_port);
-    let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
-    fs::write(&prompt_file, &prompt)
-        .with_context(|| format!("failed to write {prompt_file}"))?;
-    tmux::send_keys(&provision.tmux_window, "claude \"$(cat .claude-prompt)\"", runner)
-        .context("failed to send keys to tmux window")?;
-
-    tracing::info!(task_id = task.id, worktree = %provision.worktree_path, "quick dispatch agent launched");
-
-    Ok(DispatchResult {
-        worktree_path: provision.worktree_path,
-        tmux_window: provision.tmux_window,
-    })
+    dispatch_with_prompt(task, &prompt, runner)
 }
 
 // ---------------------------------------------------------------------------

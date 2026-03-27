@@ -329,6 +329,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             InputMode::InputDescription => "Creating task: enter description".to_string(),
             InputMode::InputRepoPath => "Creating task: enter repo path".to_string(),
             InputMode::ConfirmDelete => "Delete? (y/n)".to_string(),
+            InputMode::QuickDispatch => "Select repo path (1-9) or Esc to cancel".to_string(),
         }
     };
 

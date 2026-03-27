@@ -36,6 +36,7 @@ pub enum Message {
     Error(String),
     TaskEdited { id: i64, title: String, description: String, repo_path: String, status: TaskStatus, plan: Option<String> },
     RepoPathsUpdated(Vec<String>),
+    QuickDispatch { repo_path: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,7 @@ pub enum Command {
     SaveRepoPath(String),
     LoadNotes(i64),
     RefreshFromDb,
+    QuickDispatch { title: String, description: String, repo_path: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +72,7 @@ pub enum InputMode {
     InputDescription,
     InputRepoPath,
     ConfirmDelete,
+    QuickDispatch,
 }
 
 // ---------------------------------------------------------------------------

@@ -122,6 +122,7 @@ impl App {
             Message::TaskEdited { id, title, description, repo_path, status, plan } =>
                 self.handle_task_edited(id, title, description, repo_path, status, plan),
             Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
+            Message::QuickDispatch { repo_path } => vec![],
         }
     }
 

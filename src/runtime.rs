@@ -463,6 +463,8 @@ async fn execute_commands(
                 rt.exec_cleanup(repo_path, worktree, tmux_window),
             Command::Resume { task } => rt.exec_resume(task),
             Command::JumpToTmux { window } => rt.exec_jump_to_tmux(app, window),
+            Command::QuickDispatch { .. } =>
+                todo!("Task 8: exec_quick_dispatch"),
         }
     }
 

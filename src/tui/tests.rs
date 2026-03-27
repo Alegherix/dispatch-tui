@@ -1028,6 +1028,23 @@ fn e_key_on_empty_column_is_noop() {
     assert!(cmds.is_empty());
 }
 
+// --- action_hints ---
+
+#[test]
+fn action_hints_backlog_task() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[d]"), "should have dispatch/brainstorm hint");
+    assert!(text.contains("brainstorm"), "backlog dispatch means brainstorm");
+    assert!(text.contains("[e]"), "should have edit hint");
+    assert!(text.contains("[m]"), "should have move hint");
+    assert!(!text.contains("[M]"), "backlog has no back movement");
+    assert!(text.contains("[x]"), "should have delete hint");
+    assert!(text.contains("[n]"), "should have new hint");
+    assert!(text.contains("[q]"), "should have quit hint");
+}
+
 // --- Edit key ---
 
 #[test]

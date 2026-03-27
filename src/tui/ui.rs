@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::models::TaskStatus;
+use crate::models::{Task, TaskStatus};
 use super::{App, InputMode};
 
 /// Column color per status
@@ -346,4 +346,61 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let bar = Paragraph::new(text).style(style);
     frame.render_widget(bar, area);
+}
+
+/// Build context-sensitive keybinding hint spans for the status bar.
+/// Returns styled spans showing available actions for the selected task.
+pub(in crate::tui) fn action_hints(task: Option<&Task>) -> Vec<Span<'static>> {
+    let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let label_style = Style::default().fg(Color::DarkGray);
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    // Helper closure to push a hint like "[d]ispatch "
+    let mut push_hint = |key: &'static str, label: &'static str| {
+        spans.push(Span::styled(key, key_style));
+        spans.push(Span::styled(label, label_style));
+        spans.push(Span::raw(" "));
+    };
+
+    if let Some(task) = task {
+        match task.status {
+            TaskStatus::Backlog => {
+                push_hint("[d]", "brainstorm");
+                push_hint("[e]", "dit");
+                push_hint("[m]", "ove");
+                push_hint("[x]", "delete");
+            }
+            TaskStatus::Ready => {
+                push_hint("[d]", "ispatch");
+                push_hint("[e]", "dit");
+                push_hint("[m]", "ove");
+                push_hint("[M]", "back");
+                push_hint("[x]", "delete");
+            }
+            TaskStatus::Running | TaskStatus::Review => {
+                if task.tmux_window.is_some() {
+                    push_hint("[g]", "o to session");
+                } else if task.worktree.is_some() {
+                    push_hint("[d]", "resume");
+                }
+                push_hint("[e]", "dit");
+                push_hint("[m]", "ove");
+                push_hint("[M]", "back");
+                push_hint("[x]", "delete");
+            }
+            TaskStatus::Done => {
+                push_hint("[e]", "dit");
+                push_hint("[M]", "back");
+                push_hint("[x]", "delete");
+            }
+        }
+    }
+
+    // Global hints — always shown
+    push_hint("[n]", "ew");
+    push_hint("[D]", "quick");
+    push_hint("[q]", "uit");
+
+    spans
 }

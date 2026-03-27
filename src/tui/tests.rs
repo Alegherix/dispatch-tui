@@ -1466,3 +1466,40 @@ fn status_info_sets_message() {
     app.update(Message::StatusInfo("hello".to_string()));
     assert_eq!(app.status_message.as_deref(), Some("hello"));
 }
+
+#[test]
+fn start_quick_dispatch_selection_enters_mode() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.update(Message::StartQuickDispatchSelection);
+    assert_eq!(app.mode, InputMode::QuickDispatch);
+    assert!(app.status_message.as_deref().unwrap().contains("Select repo"));
+}
+
+#[test]
+fn select_quick_dispatch_repo_dispatches() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
+    let cmds = app.update(Message::SelectQuickDispatchRepo(1));
+    assert_eq!(app.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(c, Command::QuickDispatch(ref d) if d.repo_path == "/repo2")));
+}
+
+#[test]
+fn select_quick_dispatch_repo_out_of_range_is_noop() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/repo1".to_string()];
+    app.mode = InputMode::QuickDispatch;
+    let cmds = app.update(Message::SelectQuickDispatchRepo(5));
+    assert!(cmds.is_empty());
+    // Mode is not changed by the handler (stays as-is)
+}
+
+#[test]
+fn cancel_retry_returns_to_normal() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.mode = InputMode::ConfirmRetry(TaskId(4));
+    app.status_message = Some("Agent stale".to_string());
+    app.update(Message::CancelRetry);
+    assert_eq!(app.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
+}

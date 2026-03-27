@@ -150,21 +150,8 @@ struct TuiRuntime {
 
 impl TuiRuntime {
     fn exec_insert_task(&self, app: &mut App, title: String, description: String, repo_path: String) {
-        match self.database.create_task(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
-            Ok(new_id) => {
-                let now = chrono::Utc::now();
-                let task = models::Task {
-                    id: new_id,
-                    title,
-                    description,
-                    repo_path,
-                    status: models::TaskStatus::Backlog,
-                    worktree: None,
-                    tmux_window: None,
-                    plan: None,
-                    created_at: now,
-                    updated_at: now,
-                };
+        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
+            Ok(task) => {
                 app.update(Message::TaskCreated { task });
             }
             Err(e) => {
@@ -174,34 +161,12 @@ impl TuiRuntime {
     }
 
     fn exec_quick_dispatch(&self, app: &mut App, title: String, description: String, repo_path: String) {
-        // 1. Create task in DB with status Ready
-        match self.database.create_task(&title, &description, &repo_path, None, models::TaskStatus::Ready) {
-            Ok(new_id) => {
-                let now = chrono::Utc::now();
-                let task = models::Task {
-                    id: new_id,
-                    title,
-                    description,
-                    repo_path: repo_path.clone(),
-                    status: models::TaskStatus::Ready,
-                    worktree: None,
-                    tmux_window: None,
-                    plan: None,
-                    created_at: now,
-                    updated_at: now,
-                };
-                // 2. Add task to in-memory state
+        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Ready) {
+            Ok(task) => {
                 app.update(Message::TaskCreated { task: task.clone() });
-                // 3. Save repo path
-                if let Err(e) = self.database.save_repo_path(&repo_path) {
-                    tracing::warn!("failed to save repo path: {e}");
-                }
-                let paths = self.database.list_repo_paths().unwrap_or_else(|e| {
-                    tracing::warn!("failed to list repo paths: {e}");
-                    vec![]
-                });
+                let _ = self.database.save_repo_path(&repo_path);
+                let paths = self.database.list_repo_paths().unwrap_or_default();
                 app.update(Message::RepoPathsUpdated(paths));
-                // 4. Dispatch the agent
                 let tx = self.msg_tx.clone();
                 let port = self.port;
                 let runner = self.runner.clone();

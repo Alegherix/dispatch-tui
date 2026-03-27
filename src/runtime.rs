@@ -513,8 +513,8 @@ async fn execute_commands(
     for command in commands {
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
-            Command::InsertTask { title, description, repo_path } =>
-                rt.exec_insert_task(app, title, description, repo_path),
+            Command::InsertTask(draft) =>
+                rt.exec_insert_task(app, draft.title, draft.description, draft.repo_path),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::Dispatch { task } => rt.exec_dispatch(task),
             Command::Brainstorm { task } => rt.exec_brainstorm(task),
@@ -526,8 +526,8 @@ async fn execute_commands(
                 rt.exec_cleanup(repo_path, worktree, tmux_window),
             Command::Resume { task } => rt.exec_resume(task),
             Command::JumpToTmux { window } => rt.exec_jump_to_tmux(app, window),
-            Command::QuickDispatch { title, description, repo_path } =>
-                rt.exec_quick_dispatch(app, title, description, repo_path),
+            Command::QuickDispatch(draft) =>
+                rt.exec_quick_dispatch(app, draft.title, draft.description, draft.repo_path),
         }
     }
 

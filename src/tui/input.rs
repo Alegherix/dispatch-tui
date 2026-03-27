@@ -175,6 +175,7 @@ impl App {
                             self.task_draft = Some(TaskDraft {
                                 title: value,
                                 description: String::new(),
+                                repo_path: String::new(),
                             });
                             self.mode = InputMode::InputDescription;
                             self.status_message = Some("Enter description: ".to_string());
@@ -276,15 +277,12 @@ impl App {
     }
 
     fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {
-        let draft = self.task_draft.take().unwrap_or_default();
+        let mut draft = self.task_draft.take().unwrap_or_default();
+        draft.repo_path = repo_path.clone();
         self.mode = InputMode::Normal;
         self.status_message = None;
         vec![
-            Command::InsertTask {
-                title: draft.title,
-                description: draft.description,
-                repo_path: repo_path.clone(),
-            },
+            Command::InsertTask(draft),
             Command::SaveRepoPath(repo_path),
         ]
     }

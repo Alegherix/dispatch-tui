@@ -246,14 +246,14 @@ fn repo_path_empty_uses_saved_path() {
     app.repo_paths = vec!["/saved/repo".to_string()];
 
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string() });
+    app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string(), ..Default::default() });
     app.input_buffer.clear();
 
     let key = make_key(KeyCode::Enter);
     let cmds = app.handle_key(key);
 
     assert_eq!(app.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { repo_path, .. } if repo_path == "/saved/repo")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask(ref d) if d.repo_path == "/saved/repo")));
 }
 
 #[test]
@@ -263,7 +263,7 @@ fn repo_path_empty_no_saved_stays_in_mode() {
     app.repo_paths = vec![]; // no saved paths
 
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string() });
+    app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string(), ..Default::default() });
     app.input_buffer.clear();
 
     let key = make_key(KeyCode::Enter);
@@ -281,14 +281,14 @@ fn repo_path_nonempty_used_as_is() {
     app.repo_paths = vec!["/saved/repo".to_string()];
 
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string() });
+    app.task_draft = Some(TaskDraft { title: "Test".to_string(), description: "desc".to_string(), ..Default::default() });
     app.input_buffer = "/custom/path".to_string();
 
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     let cmds = app.handle_key(key);
 
     assert_eq!(app.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { repo_path, .. } if repo_path == "/custom/path")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask(ref d) if d.repo_path == "/custom/path")));
     assert_eq!(app.tasks.len(), 0); // task not added until TaskCreated
 }
 
@@ -563,7 +563,7 @@ fn enter_with_whitespace_only_title_cancels() {
 fn enter_in_description_advances_to_repo_path() {
     let mut app = App::new(vec![]);
     app.mode = InputMode::InputDescription;
-    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
+    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input_buffer = "some desc".to_string();
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.mode, InputMode::InputRepoPath);
@@ -576,19 +576,19 @@ fn enter_in_description_advances_to_repo_path() {
 fn number_key_in_repo_path_selects_saved_path() {
     let mut app = App::new(vec![]);
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: "d".to_string() });
+    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: "d".to_string(), ..Default::default() });
     app.input_buffer.clear();
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert_eq!(app.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { repo_path, .. } if repo_path == "/repo2")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask(ref d) if d.repo_path == "/repo2")));
 }
 
 #[test]
 fn number_key_out_of_range_appends_to_buffer() {
     let mut app = App::new(vec![]);
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
+    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input_buffer.clear();
     app.repo_paths = vec!["/repo1".to_string()]; // only 1 path
     app.handle_key(make_key(KeyCode::Char('5')));
@@ -600,7 +600,7 @@ fn number_key_out_of_range_appends_to_buffer() {
 fn number_key_with_nonempty_buffer_appends() {
     let mut app = App::new(vec![]);
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
+    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input_buffer = "/my".to_string();
     app.repo_paths = vec!["/repo1".to_string()];
     app.handle_key(make_key(KeyCode::Char('1')));
@@ -611,7 +611,7 @@ fn number_key_with_nonempty_buffer_appends() {
 fn zero_key_in_repo_path_appends_to_buffer() {
     let mut app = App::new(vec![]);
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
+    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input_buffer.clear();
     app.repo_paths = vec!["/repo".to_string()];
     app.handle_key(make_key(KeyCode::Char('0')));
@@ -634,7 +634,7 @@ fn escape_from_title_mode_cancels() {
 fn escape_from_description_mode_cancels() {
     let mut app = App::new(vec![]);
     app.mode = InputMode::InputDescription;
-    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
+    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input_buffer = "partial".to_string();
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.mode, InputMode::Normal);
@@ -647,7 +647,7 @@ fn escape_from_description_mode_cancels() {
 fn escape_from_repo_path_mode_cancels() {
     let mut app = App::new(vec![]);
     app.mode = InputMode::InputRepoPath;
-    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new() });
+    app.task_draft = Some(TaskDraft { title: "T".to_string(), description: String::new(), ..Default::default() });
     app.input_buffer = "/partial".to_string();
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.mode, InputMode::Normal);
@@ -745,7 +745,7 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
     app.repo_paths = vec!["/repo".to_string()];
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::QuickDispatch { repo_path, .. } if repo_path == "/repo"));
+    assert!(matches!(&cmds[0], Command::QuickDispatch(ref d) if d.repo_path == "/repo"));
     assert_eq!(app.mode, InputMode::Normal);
 }
 
@@ -775,7 +775,7 @@ fn quick_dispatch_mode_number_selects_repo() {
     app.mode = InputMode::QuickDispatch;
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::QuickDispatch { repo_path, .. } if repo_path == "/repo2"));
+    assert!(matches!(&cmds[0], Command::QuickDispatch(ref d) if d.repo_path == "/repo2"));
     assert_eq!(app.mode, InputMode::Normal);
 }
 
@@ -804,8 +804,8 @@ fn quick_dispatch_message_emits_command() {
     let mut app = App::new(vec![]);
     let cmds = app.update(Message::QuickDispatch { repo_path: "/my/repo".to_string() });
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::QuickDispatch { title, repo_path, .. }
-        if title == "Quick task" && repo_path == "/my/repo"));
+    assert!(matches!(&cmds[0], Command::QuickDispatch(ref d)
+        if d.title == "Quick task" && d.repo_path == "/my/repo"));
 }
 
 #[test]

@@ -337,11 +337,11 @@ impl App {
     }
 
     fn handle_quick_dispatch(&mut self, repo_path: String) -> Vec<Command> {
-        vec![Command::QuickDispatch {
+        vec![Command::QuickDispatch(TaskDraft {
             title: "Quick task".to_string(),
             description: String::new(),
             repo_path,
-        }]
+        })]
     }
 }
 

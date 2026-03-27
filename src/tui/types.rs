@@ -45,7 +45,7 @@ pub enum Message {
 #[derive(Debug, Clone)]
 pub enum Command {
     PersistTask(Task),
-    InsertTask { title: String, description: String, repo_path: String },
+    InsertTask(TaskDraft),
     DeleteTask(TaskId),
     Dispatch { task: Task },
     Brainstorm { task: Task },
@@ -56,7 +56,7 @@ pub enum Command {
     EditTaskInEditor(Task),
     SaveRepoPath(String),
     RefreshFromDb,
-    QuickDispatch { title: String, description: String, repo_path: String },
+    QuickDispatch(TaskDraft),
 }
 
 // ---------------------------------------------------------------------------
@@ -81,4 +81,5 @@ pub enum InputMode {
 pub struct TaskDraft {
     pub title: String,
     pub description: String,
+    pub repo_path: String,
 }

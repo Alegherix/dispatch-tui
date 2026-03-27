@@ -48,17 +48,38 @@ pub fn render(frame: &mut Frame, app: &App) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(6),      // kanban board
-            Constraint::Length(8),   // detail panel
-            Constraint::Length(1),   // status bar
+            Constraint::Length(1),   // summary row
+            Constraint::Min(6),     // kanban board
+            Constraint::Length(8),  // detail panel
+            Constraint::Length(1),  // status bar
         ])
         .split(area);
 
-    render_columns(frame, app, vertical[0], now);
-    render_detail(frame, app, vertical[1], now);
-    render_status_bar(frame, app, vertical[2]);
+    render_summary(frame, app, vertical[0]);
+    render_columns(frame, app, vertical[1], now);
+    render_detail(frame, app, vertical[2], now);
+    render_status_bar(frame, app, vertical[3]);
 
     render_error_popup(frame, app, area);
+}
+
+fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
+    let segments = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
+        )
+        .split(area);
+
+    for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
+        let count = app.tasks_by_status(status).len();
+        let color = column_color(status);
+        let text = format!("{}: {}", status.as_str().to_uppercase(), count);
+        let paragraph = Paragraph::new(text)
+            .style(Style::default().fg(color).add_modifier(Modifier::BOLD))
+            .alignment(Alignment::Center);
+        frame.render_widget(paragraph, segments[col_idx]);
+    }
 }
 
 fn render_columns(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {

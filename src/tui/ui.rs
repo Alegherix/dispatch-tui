@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::models::{TaskStatus, Staleness, format_age, format_detail_age};
+use crate::models::{Task, TaskStatus, Staleness, format_age, format_detail_age};
 use super::{App, InputMode};
 
 /// Column color per status
@@ -358,27 +358,100 @@ fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let text = if let Some(msg) = &app.status_message {
-        msg.as_str().to_string()
-    } else {
-        match &app.mode {
-            InputMode::Normal => {
-                "q:quit  h/l:col  j/k:row  n:new  D:quick  e:edit  m/M:move  d:dispatch  Enter:detail  x:delete"
-                    .to_string()
-            }
-            InputMode::InputTitle => "Creating task: enter title".to_string(),
-            InputMode::InputDescription => "Creating task: enter description".to_string(),
-            InputMode::InputRepoPath => "Creating task: enter repo path".to_string(),
-            InputMode::ConfirmDelete => "Delete? (y/n)".to_string(),
-            InputMode::QuickDispatch => "Quick dispatch: select repo path".to_string(),
+    if let Some(msg) = &app.status_message {
+        let bar = Paragraph::new(msg.as_str())
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(bar, area);
+        return;
+    }
+
+    match &app.mode {
+        InputMode::Normal => {
+            let spans = action_hints(app.selected_task());
+            let bar = Paragraph::new(Line::from(spans));
+            frame.render_widget(bar, area);
         }
+        InputMode::InputTitle => {
+            let bar = Paragraph::new("Creating task: enter title")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::InputDescription => {
+            let bar = Paragraph::new("Creating task: enter description")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::InputRepoPath => {
+            let bar = Paragraph::new("Creating task: enter repo path")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDelete => {
+            let bar = Paragraph::new("Delete? (y/n)")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::QuickDispatch => {
+            let bar = Paragraph::new("Quick dispatch: select repo path")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+    }
+}
+
+/// Build context-sensitive keybinding hint spans for the status bar.
+/// Returns styled spans showing available actions for the selected task.
+pub(in crate::tui) fn action_hints(task: Option<&Task>) -> Vec<Span<'static>> {
+    let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let label_style = Style::default().fg(Color::DarkGray);
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    // Helper closure to push a hint like "[d]ispatch "
+    let mut push_hint = |key: &'static str, label: &'static str| {
+        spans.push(Span::styled(key, key_style));
+        spans.push(Span::styled(label, label_style));
+        spans.push(Span::raw(" "));
     };
 
-    let style = match app.mode {
-        InputMode::Normal => Style::default().fg(Color::DarkGray),
-        _ => Style::default().fg(Color::Yellow),
-    };
+    if let Some(task) = task {
+        match task.status {
+            TaskStatus::Backlog => {
+                push_hint("[d]", "brainstorm");
+                push_hint("[e]", "dit");
+                push_hint("[m]", "ove");
+                push_hint("[x]", "delete");
+            }
+            TaskStatus::Ready => {
+                push_hint("[d]", "ispatch");
+                push_hint("[e]", "dit");
+                push_hint("[m]", "ove");
+                push_hint("[M]", "back");
+                push_hint("[x]", "delete");
+            }
+            TaskStatus::Running | TaskStatus::Review => {
+                if task.tmux_window.is_some() {
+                    push_hint("[g]", "o to session");
+                } else if task.worktree.is_some() {
+                    push_hint("[d]", "resume");
+                }
+                push_hint("[e]", "dit");
+                push_hint("[m]", "ove");
+                push_hint("[M]", "back");
+                push_hint("[x]", "delete");
+            }
+            TaskStatus::Done => {
+                push_hint("[e]", "dit");
+                push_hint("[M]", "back");
+                push_hint("[x]", "delete");
+            }
+        }
+    }
 
-    let bar = Paragraph::new(text).style(style);
-    frame.render_widget(bar, area);
+    // Global hints — always shown
+    push_hint("[n]", "ew");
+    push_hint("[D]", "quick");
+    push_hint("[q]", "uit");
+
+    spans
 }

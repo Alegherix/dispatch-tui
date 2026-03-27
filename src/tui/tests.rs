@@ -1028,6 +1028,95 @@ fn e_key_on_empty_column_is_noop() {
     assert!(cmds.is_empty());
 }
 
+// --- action_hints ---
+
+#[test]
+fn action_hints_backlog_task() {
+    let task = make_task(1, TaskStatus::Backlog);
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[d]"), "should have dispatch/brainstorm hint");
+    assert!(text.contains("brainstorm"), "backlog dispatch means brainstorm");
+    assert!(text.contains("[e]"), "should have edit hint");
+    assert!(text.contains("[m]"), "should have move hint");
+    assert!(!text.contains("[M]"), "backlog has no back movement");
+    assert!(text.contains("[x]"), "should have delete hint");
+    assert!(text.contains("[n]"), "should have new hint");
+    assert!(text.contains("[q]"), "should have quit hint");
+}
+
+#[test]
+fn action_hints_ready_task() {
+    let task = make_task(3, TaskStatus::Ready);
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[d]"), "should have dispatch hint");
+    assert!(text.contains("ispatch"), "ready dispatch means dispatch");
+    assert!(text.contains("[M]"), "ready has back movement");
+}
+
+#[test]
+fn action_hints_running_with_window() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("win-4".to_string());
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[g]"), "should have go-to-session hint");
+    assert!(!text.contains("[d]"), "should not have dispatch/resume when window exists");
+}
+
+#[test]
+fn action_hints_running_with_worktree_no_window() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/tmp/wt".to_string());
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[d]"), "should have resume hint");
+    assert!(text.contains("resume"), "d means resume here");
+    assert!(!text.contains("[g]"), "no go-to-session without window");
+}
+
+#[test]
+fn action_hints_running_no_worktree_no_window() {
+    let task = make_task(4, TaskStatus::Running);
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(!text.contains("[d]"), "no dispatch/resume without worktree");
+    assert!(!text.contains("[g]"), "no go-to-session without window");
+    assert!(text.contains("[e]"), "still has edit");
+}
+
+#[test]
+fn action_hints_review_with_window() {
+    let mut task = make_task(6, TaskStatus::Review);
+    task.tmux_window = Some("win-6".to_string());
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[g]"), "review with window shows go-to-session");
+}
+
+#[test]
+fn action_hints_done_task() {
+    let task = make_task(5, TaskStatus::Done);
+    let hints = ui::action_hints(Some(&task));
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[e]"), "done has edit");
+    assert!(text.contains("[M]"), "done has back");
+    assert!(text.contains("[x]"), "done has delete");
+    assert!(!text.contains("[m]ove"), "done has no forward move");
+    assert!(!text.contains("[d]"), "done has no dispatch");
+}
+
+#[test]
+fn action_hints_no_task() {
+    let hints = ui::action_hints(None);
+    let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("[n]"), "no-task shows new");
+    assert!(text.contains("[q]"), "no-task shows quit");
+    assert!(!text.contains("[d]"), "no-task has no dispatch");
+    assert!(!text.contains("[e]"), "no-task has no edit");
+}
+
 // --- Edit key ---
 
 #[test]

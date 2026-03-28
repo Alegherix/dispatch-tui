@@ -581,11 +581,12 @@ fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRp
     }
 
     // 4. Atomically set status + worktree + tmux_window
-    if let Err(e) = state.db.persist_task(
+    if let Err(e) = state.db.patch_task(
         TaskId(parsed.task_id),
-        TaskStatus::Running,
-        Some(&parsed.worktree),
-        Some(&parsed.tmux_window),
+        &db::TaskPatch::new()
+            .status(TaskStatus::Running)
+            .worktree(Some(&parsed.worktree))
+            .tmux_window(Some(&parsed.tmux_window)),
     ) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }

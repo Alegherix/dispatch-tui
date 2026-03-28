@@ -676,17 +676,17 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     // Archive mode status bar
     if app.show_archived() {
-        let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-        let label_style = Style::default().fg(Color::DarkGray);
+        let key_color = Color::Rgb(86, 95, 137);
+        let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
         let spans = vec![
-            Span::styled("[x]", key_style),
-            Span::styled("delete ", label_style),
-            Span::styled("[e]", key_style),
-            Span::styled("dit ", label_style),
-            Span::styled("[H]", key_style),
-            Span::styled("close ", label_style),
-            Span::styled("[q]", key_style),
-            Span::styled("uit ", label_style),
+            Span::styled("x", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" delete  ", label_style),
+            Span::styled("e", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" edit  ", label_style),
+            Span::styled("H", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" close  ", label_style),
+            Span::styled("q", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" quit  ", label_style),
         ];
         let bar = Paragraph::new(Line::from(spans));
         frame.render_widget(bar, area);
@@ -695,10 +695,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     match &app.input.mode {
         InputMode::Normal => {
+            let key_color = column_color(TaskStatus::ALL[app.selected_column()]);
             let spans = if !app.selected_tasks.is_empty() {
-                batch_action_hints(app.selected_tasks.len())
+                batch_action_hints(app.selected_tasks.len(), key_color)
             } else {
-                action_hints(app.selected_task())
+                action_hints(app.selected_task(), key_color)
             };
             let bar = Paragraph::new(Line::from(spans));
             frame.render_widget(bar, area);
@@ -768,80 +769,76 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Build context-sensitive keybinding hint spans for the status bar.
 /// Returns styled spans showing available actions for the selected task.
-pub(in crate::tui) fn action_hints(task: Option<&Task>) -> Vec<Span<'static>> {
-    let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-    let label_style = Style::default().fg(Color::DarkGray);
+pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec<Span<'static>> {
+    let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    // Helper closure to push a hint like "[d]ispatch "
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(key, key_style));
-        spans.push(Span::styled(label, label_style));
-        spans.push(Span::raw(" "));
+        spans.push(Span::styled(key, Style::default().fg(key_color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(format!(" {label}  "), label_style));
     };
 
     if let Some(task) = task {
         match task.status {
             TaskStatus::Backlog => {
-                push_hint("[d]", "brainstorm");
-                push_hint("[e]", "dit");
-                push_hint("[m]", "ove");
-                push_hint("[x]", "archive");
+                push_hint("d", "brainstorm");
+                push_hint("e", "edit");
+                push_hint("m", "move");
+                push_hint("x", "archive");
             }
             TaskStatus::Ready => {
-                push_hint("[d]", "ispatch");
-                push_hint("[e]", "dit");
-                push_hint("[m]", "ove");
-                push_hint("[M]", "back");
-                push_hint("[x]", "archive");
+                push_hint("d", "dispatch");
+                push_hint("e", "edit");
+                push_hint("m", "move");
+                push_hint("M", "back");
+                push_hint("x", "archive");
             }
             TaskStatus::Running | TaskStatus::Review => {
                 if task.tmux_window.is_some() {
-                    push_hint("[g]", "o to session");
+                    push_hint("g", "session");
                 } else if task.worktree.is_some() {
-                    push_hint("[d]", "resume");
+                    push_hint("d", "resume");
                 }
-                push_hint("[e]", "dit");
-                push_hint("[m]", "ove");
-                push_hint("[M]", "back");
-                push_hint("[x]", "archive");
+                push_hint("e", "edit");
+                push_hint("m", "move");
+                push_hint("M", "back");
+                push_hint("x", "archive");
             }
             TaskStatus::Done => {
-                push_hint("[e]", "dit");
-                push_hint("[M]", "back");
-                push_hint("[x]", "archive");
+                push_hint("e", "edit");
+                push_hint("M", "back");
+                push_hint("x", "archive");
             }
             TaskStatus::Archived => {}
         }
     }
 
-    // Global hints — always shown
-    push_hint("[n]", "ew");
-    push_hint("[D]", "quick");
-    push_hint("[H]", "istory");
-    push_hint("[q]", "uit");
+    push_hint("n", "new");
+    push_hint("D", "quick");
+    push_hint("H", "history");
+    push_hint("q", "quit");
 
     spans
 }
 
 /// Build status bar hints when tasks are batch-selected.
-fn batch_action_hints(count: usize) -> Vec<Span<'static>> {
-    let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-    let label_style = Style::default().fg(Color::DarkGray);
-    let count_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+fn batch_action_hints(count: usize, key_color: Color) -> Vec<Span<'static>> {
+    let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
+    let count_style = Style::default().fg(Color::Rgb(224, 175, 104)).add_modifier(Modifier::BOLD);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(format!("{count} selected "), count_style));
-    spans.push(Span::styled("[m]", key_style));
-    spans.push(Span::styled("ove ", label_style));
-    spans.push(Span::styled("[M]", key_style));
-    spans.push(Span::styled("back ", label_style));
-    spans.push(Span::styled("[x]", key_style));
-    spans.push(Span::styled("archive ", label_style));
-    spans.push(Span::styled("[Space]", key_style));
-    spans.push(Span::styled("toggle ", label_style));
-    spans.push(Span::styled("[Esc]", key_style));
-    spans.push(Span::styled("clear", label_style));
+    spans.push(Span::styled(format!("{count} selected  "), count_style));
+
+    let mut push_hint = |key: &'static str, label: &'static str| {
+        spans.push(Span::styled(key, Style::default().fg(key_color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(format!(" {label}  "), label_style));
+    };
+
+    push_hint("m", "move");
+    push_hint("M", "back");
+    push_hint("x", "archive");
+    push_hint("Space", "toggle");
+    push_hint("Esc", "clear");
     spans
 }

@@ -70,6 +70,19 @@ pub enum Message {
     EnterEpic(EpicId),
     ExitEpic,
     RefreshEpics(Vec<Epic>),
+    CreateEpic,
+    EpicCreated(Epic),
+    EditEpic(EpicId),
+    EpicEdited(Epic),
+    DeleteEpic(EpicId),
+    ConfirmDeleteEpic,
+    MarkEpicDone(EpicId),
+    ArchiveEpic(EpicId),
+    ConfirmArchiveEpic,
+    StartNewEpic,
+    SubmitEpicTitle(String),
+    SubmitEpicDescription(String),
+    SubmitEpicRepoPath(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +92,7 @@ pub enum Message {
 #[derive(Debug, Clone)]
 pub enum Command {
     PersistTask(Task),
-    InsertTask(TaskDraft),
+    InsertTask { draft: TaskDraft, epic_id: Option<EpicId> },
     DeleteTask(TaskId),
     Dispatch { task: Task },
     Brainstorm { task: Task },
@@ -92,6 +105,12 @@ pub enum Command {
     SaveRepoPath(String),
     RefreshFromDb,
     QuickDispatch(TaskDraft),
+    // Epic commands
+    InsertEpic(EpicDraft),
+    EditEpicInEditor(Epic),
+    DeleteEpic(EpicId),
+    PersistEpic { id: EpicId, done: Option<bool> },
+    RefreshEpicsFromDb,
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +127,12 @@ pub enum InputMode {
     QuickDispatch,
     ConfirmRetry(TaskId),
     ConfirmArchive,
+    // Epic input modes
+    InputEpicTitle,
+    InputEpicDescription,
+    InputEpicRepoPath,
+    ConfirmDeleteEpic,
+    ConfirmArchiveEpic,
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +188,7 @@ pub struct InputState {
     pub mode: InputMode,
     pub buffer: String,
     pub task_draft: Option<TaskDraft>,
+    pub epic_draft: Option<EpicDraft>,
 }
 
 impl Default for InputState {
@@ -171,6 +197,7 @@ impl Default for InputState {
             mode: InputMode::Normal,
             buffer: String::new(),
             task_draft: None,
+            epic_draft: None,
         }
     }
 }

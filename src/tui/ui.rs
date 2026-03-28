@@ -580,6 +580,31 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::InputEpicTitle => {
+            let bar = Paragraph::new("Creating epic: enter title")
+                .style(Style::default().fg(Color::Magenta));
+            frame.render_widget(bar, area);
+        }
+        InputMode::InputEpicDescription => {
+            let bar = Paragraph::new("Creating epic: enter description")
+                .style(Style::default().fg(Color::Magenta));
+            frame.render_widget(bar, area);
+        }
+        InputMode::InputEpicRepoPath => {
+            let bar = Paragraph::new("Creating epic: enter repo path")
+                .style(Style::default().fg(Color::Magenta));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDeleteEpic => {
+            let bar = Paragraph::new("Delete epic and subtasks? (y/n)")
+                .style(Style::default().fg(Color::Red));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmArchiveEpic => {
+            let bar = Paragraph::new("Archive epic and subtasks? (y/n)")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
     }
 }
 

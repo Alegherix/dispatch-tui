@@ -261,6 +261,19 @@ impl App {
             Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
             Message::ExitEpic => self.handle_exit_epic(),
             Message::RefreshEpics(epics) => self.handle_refresh_epics(epics),
+            Message::CreateEpic => vec![],
+            Message::EpicCreated(epic) => self.handle_epic_created(epic),
+            Message::EditEpic(id) => self.handle_edit_epic(id),
+            Message::EpicEdited(epic) => self.handle_epic_edited(epic),
+            Message::DeleteEpic(id) => self.handle_delete_epic(id),
+            Message::ConfirmDeleteEpic => self.handle_confirm_delete_epic(),
+            Message::MarkEpicDone(id) => self.handle_mark_epic_done(id),
+            Message::ArchiveEpic(id) => self.handle_archive_epic(id),
+            Message::ConfirmArchiveEpic => self.handle_confirm_archive_epic(),
+            Message::StartNewEpic => self.handle_start_new_epic(),
+            Message::SubmitEpicTitle(v) => self.handle_submit_epic_title(v),
+            Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
+            Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
         }
     }
 
@@ -811,8 +824,12 @@ impl App {
         draft.repo_path = repo_path.clone();
         self.input.mode = InputMode::Normal;
         self.status_message = None;
+        let epic_id = match &self.view_mode {
+            ViewMode::Epic { epic_id, .. } => Some(*epic_id),
+            _ => None,
+        };
         vec![
-            Command::InsertTask(draft),
+            Command::InsertTask { draft, epic_id },
             Command::SaveRepoPath(repo_path),
         ]
     }
@@ -846,6 +863,140 @@ impl App {
     fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
         self.epics = epics;
         vec![]
+    }
+
+    fn handle_epic_created(&mut self, epic: Epic) -> Vec<Command> {
+        self.epics.push(epic);
+        vec![]
+    }
+
+    fn handle_edit_epic(&mut self, id: EpicId) -> Vec<Command> {
+        if let Some(epic) = self.epics.iter().find(|e| e.id == id) {
+            vec![Command::EditEpicInEditor(epic.clone())]
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_epic_edited(&mut self, epic: Epic) -> Vec<Command> {
+        if let Some(e) = self.epics.iter_mut().find(|e| e.id == epic.id) {
+            e.title = epic.title;
+            e.description = epic.description;
+            e.plan = epic.plan;
+            e.updated_at = chrono::Utc::now();
+        }
+        vec![]
+    }
+
+    fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
+        self.epics.retain(|e| e.id != id);
+        self.tasks.retain(|t| t.epic_id != Some(id));
+        // If we were viewing this epic, exit
+        if matches!(&self.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
+            self.handle_exit_epic();
+        }
+        self.clamp_selection();
+        vec![Command::DeleteEpic(id)]
+    }
+
+    fn handle_confirm_delete_epic(&mut self) -> Vec<Command> {
+        if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+            self.input.mode = InputMode::ConfirmDeleteEpic;
+            self.status_message = Some("Delete epic and all subtasks? (y/n)".to_string());
+        }
+        vec![]
+    }
+
+    fn handle_mark_epic_done(&mut self, id: EpicId) -> Vec<Command> {
+        if let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) {
+            epic.done = true;
+        }
+        vec![Command::PersistEpic { id, done: Some(true) }]
+    }
+
+    fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
+        let mut cmds = Vec::new();
+        let subtask_ids: Vec<TaskId> = self.tasks
+            .iter()
+            .filter(|t| t.epic_id == Some(id) && t.status != TaskStatus::Archived)
+            .map(|t| t.id)
+            .collect();
+        for task_id in subtask_ids {
+            cmds.extend(self.handle_archive_task(task_id));
+        }
+        self.epics.retain(|e| e.id != id);
+        if matches!(&self.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
+            self.handle_exit_epic();
+        }
+        self.clamp_selection();
+        cmds.push(Command::DeleteEpic(id));
+        cmds
+    }
+
+    fn handle_confirm_archive_epic(&mut self) -> Vec<Command> {
+        if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
+            self.input.mode = InputMode::ConfirmArchiveEpic;
+            self.status_message = Some("Archive epic and all subtasks? (y/n)".to_string());
+        }
+        vec![]
+    }
+
+    fn handle_start_new_epic(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::InputEpicTitle;
+        self.input.buffer.clear();
+        self.input.epic_draft = None;
+        self.status_message = Some("Epic title: ".to_string());
+        vec![]
+    }
+
+    fn handle_submit_epic_title(&mut self, value: String) -> Vec<Command> {
+        self.input.buffer.clear();
+        if value.is_empty() {
+            self.input.mode = InputMode::Normal;
+            self.status_message = None;
+        } else {
+            self.input.epic_draft = Some(EpicDraft {
+                title: value,
+                description: String::new(),
+                repo_path: String::new(),
+            });
+            self.input.mode = InputMode::InputEpicDescription;
+            self.status_message = Some("Epic description: ".to_string());
+        }
+        vec![]
+    }
+
+    fn handle_submit_epic_description(&mut self, value: String) -> Vec<Command> {
+        self.input.buffer.clear();
+        if let Some(ref mut draft) = self.input.epic_draft {
+            draft.description = value;
+        }
+        self.input.mode = InputMode::InputEpicRepoPath;
+        self.status_message = Some("Epic repo path: ".to_string());
+        vec![]
+    }
+
+    fn handle_submit_epic_repo_path(&mut self, value: String) -> Vec<Command> {
+        self.input.buffer.clear();
+        let repo_path = if value.is_empty() {
+            if let Some(first) = self.repo_paths.first() {
+                first.clone()
+            } else {
+                self.status_message = Some("Repo path required".to_string());
+                return vec![];
+            }
+        } else {
+            value
+        };
+
+        let mut draft = self.input.epic_draft.take().unwrap_or_default();
+        draft.repo_path = repo_path.clone();
+        self.input.mode = InputMode::Normal;
+        self.status_message = None;
+        vec![
+            Command::InsertEpic(draft),
+            Command::SaveRepoPath(repo_path),
+        ]
     }
 }
 

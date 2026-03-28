@@ -300,7 +300,7 @@ fn repo_path_empty_uses_saved_path() {
     let cmds = app.handle_key(key);
 
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask(ref d) if d.repo_path == "/saved/repo")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/saved/repo")));
 }
 
 #[test]
@@ -335,7 +335,7 @@ fn repo_path_nonempty_used_as_is() {
     let cmds = app.handle_key(key);
 
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask(ref d) if d.repo_path == "/custom/path")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/custom/path")));
     assert_eq!(app.tasks.len(), 0); // task not added until TaskCreated
 }
 
@@ -629,7 +629,7 @@ fn number_key_in_repo_path_selects_saved_path() {
     app.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask(ref d) if d.repo_path == "/repo2")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/repo2")));
 }
 
 #[test]
@@ -1497,7 +1497,7 @@ fn submit_repo_path_creates_task() {
     app.input.task_draft = Some(TaskDraft { title: "T".to_string(), description: "D".to_string(), ..Default::default() });
     let cmds = app.update(Message::SubmitRepoPath("/my/repo".to_string()));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask(ref d) if d.repo_path == "/my/repo")));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/my/repo")));
 }
 
 #[test]
@@ -2275,4 +2275,45 @@ fn selected_column_item_returns_epic() {
         Some(ColumnItem::Epic(e)) => assert_eq!(e.id, EpicId(10)),
         other => panic!("Expected Epic, got {:?}", other),
     }
+}
+
+// --- Epic CRUD ---
+
+#[test]
+fn start_new_epic_sets_input_mode() {
+    let mut app = make_app();
+    app.update(Message::StartNewEpic);
+    assert_eq!(*app.mode(), InputMode::InputEpicTitle);
+}
+
+#[test]
+fn epic_created_adds_to_state() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let epic = make_epic(1);
+    app.update(Message::EpicCreated(epic));
+    assert_eq!(app.epics().len(), 1);
+}
+
+#[test]
+fn delete_epic_removes_from_state_and_tasks() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    let mut subtask = make_task(1, TaskStatus::Backlog);
+    subtask.epic_id = Some(EpicId(10));
+    app.tasks = vec![subtask, make_task(2, TaskStatus::Backlog)];
+
+    let cmds = app.update(Message::DeleteEpic(EpicId(10)));
+    assert!(app.epics.is_empty());
+    assert_eq!(app.tasks.len(), 1);
+    assert_eq!(app.tasks[0].id, TaskId(2));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteEpic(id) if *id == EpicId(10))));
+}
+
+#[test]
+fn mark_epic_done() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    let cmds = app.update(Message::MarkEpicDone(EpicId(10)));
+    assert!(app.epics[0].done);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { .. })));
 }

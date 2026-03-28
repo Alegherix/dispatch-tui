@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::models::{Epic, Task, TaskStatus, Staleness, format_age, format_detail_age};
+use crate::models::{Epic, Task, TaskStatus, Staleness, format_age};
 use super::{App, ColumnItem, InputMode, ViewMode};
 
 /// Column color per status
@@ -442,10 +442,10 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {
         return;
     }
 
+    // Top border separator
     let block = Block::default()
-        .title(" Detail ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(Color::Rgb(41, 46, 66)));
 
     if !app.detail_visible {
         let paragraph = Paragraph::new("").block(block);
@@ -454,40 +454,45 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {
     }
 
     let lines: Vec<Line> = if let Some(task) = app.selected_task() {
-        let status_suffix = if app.crashed_tasks().contains(&task.id) {
-            " (crashed)".to_string()
+        let status_color = column_color(task.status);
+
+        // Line 1: title (bold, colored) + inline metadata (dim)
+        let mut line1_spans = vec![
+            Span::styled(
+                task.title.clone(),
+                Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" \u{00b7} #{} \u{00b7} {} \u{00b7} {}", task.id, task.status.as_str(), task.repo_path),
+                Style::default().fg(Color::Rgb(86, 95, 137)),
+            ),
+        ];
+
+        // Add crash/stale suffix
+        if app.crashed_tasks().contains(&task.id) {
+            line1_spans.push(Span::styled(
+                " (crashed)",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
         } else if app.stale_tasks().contains(&task.id) {
             let mins = app.agents.last_output_change.get(&task.id)
                 .map(|t| t.elapsed().as_secs() / 60)
                 .unwrap_or(0);
-            format!(" (stale - inactive {}m)", mins)
-        } else {
-            String::new()
-        };
+            line1_spans.push(Span::styled(
+                format!(" (stale \u{00b7} {}m)", mins),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+
         let mut l = vec![
-            Line::from(format!(
-                "ID: {}  Status: {}{}  Repo: {}",
-                task.id,
-                task.status.as_str(),
-                status_suffix,
-                task.repo_path
-            )),
-            Line::from(format!("Title: {}", task.title)),
-            Line::from(format!("Description: {}", task.description)),
-            Line::from(format!(
-                "Plan: {}",
-                task.plan.as_deref().unwrap_or("-")
-            )),
-            Line::from(format!(
-                "Worktree: {}  Tmux: {}",
-                task.worktree.as_deref().unwrap_or("-"),
-                task.tmux_window.as_deref().unwrap_or("-")
-            )),
-            Line::from(format!(
-                "Updated: {} ago",
-                format_detail_age(task.updated_at, now)
+            Line::from(line1_spans),
+            Line::from(Span::styled(
+                task.description.clone(),
+                Style::default().fg(Color::Rgb(120, 124, 153)),
             )),
         ];
+
+        // Tmux output for running tasks
         if let Some(output) = app.agents.tmux_outputs.get(&task.id) {
             l.push(Line::from(""));
             for line in output.lines() {
@@ -496,7 +501,10 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, now: DateTime<Utc>) {
         }
         l
     } else {
-        vec![Line::from("No task selected")]
+        vec![Line::from(Span::styled(
+            "No task selected",
+            Style::default().fg(Color::Rgb(86, 95, 137)),
+        ))]
     };
 
     let paragraph = Paragraph::new(lines)

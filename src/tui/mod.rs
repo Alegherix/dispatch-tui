@@ -111,6 +111,23 @@ impl App {
         self.agents.clear(id);
     }
 
+    /// Take worktree/tmux fields from a task and build a Cleanup command.
+    /// Returns `None` if the task has no worktree (still clears tmux_window).
+    fn take_cleanup(task: &mut Task) -> Option<Command> {
+        match task.worktree.take() {
+            Some(wt) => Some(Command::Cleanup {
+                id: task.id,
+                repo_path: task.repo_path.clone(),
+                worktree: wt,
+                tmux_window: task.tmux_window.take(),
+            }),
+            None => {
+                task.tmux_window.take();
+                None
+            }
+        }
+    }
+
     /// Process a message and return a list of side-effect commands.
     pub fn update(&mut self, msg: Message) -> Vec<Command> {
         match msg {
@@ -211,18 +228,7 @@ impl App {
             let needs_cleanup = matches!(direction, MoveDirection::Backward)
                 || new_status == TaskStatus::Done;
             let cleanup = if needs_cleanup {
-                match task.worktree.take() {
-                    Some(wt) => Some(Command::Cleanup {
-                        id,
-                        repo_path: task.repo_path.clone(),
-                        worktree: wt,
-                        tmux_window: task.tmux_window.take(),
-                    }),
-                    None => {
-                        task.tmux_window.take(); // clear even if no worktree
-                        None
-                    },
-                }
+                Self::take_cleanup(task)
             } else {
                 None
             };
@@ -286,15 +292,7 @@ impl App {
     }
 
     fn handle_delete_task(&mut self, id: TaskId) -> Vec<Command> {
-        let cleanup = self.find_task_mut(id).and_then(|task| {
-            let wt = task.worktree.take()?;
-            Some(Command::Cleanup {
-                id,
-                repo_path: task.repo_path.clone(),
-                worktree: wt,
-                tmux_window: task.tmux_window.take(),
-            })
-        });
+        let cleanup = self.find_task_mut(id).and_then(Self::take_cleanup);
         self.clear_agent_tracking(id);
         self.tasks.retain(|t| t.id != id);
         self.clamp_selection();
@@ -512,19 +510,13 @@ impl App {
         self.clear_agent_tracking(id);
 
         if let Some(task) = self.find_task_mut(id) {
-            let worktree = task.worktree.take();
-            let tmux_window = task.tmux_window.take();
+            let cleanup = Self::take_cleanup(task);
             task.status = TaskStatus::Ready;
             let task_clone = task.clone();
 
             let mut cmds = Vec::new();
-            if let Some(wt) = worktree {
-                cmds.push(Command::Cleanup {
-                    id,
-                    repo_path: task_clone.repo_path.clone(),
-                    worktree: wt,
-                    tmux_window,
-                });
+            if let Some(c) = cleanup {
+                cmds.push(c);
             }
             cmds.push(Command::PersistTask(task_clone.clone()));
             cmds.push(Command::Dispatch { task: task_clone });
@@ -536,18 +528,7 @@ impl App {
 
     fn handle_archive_task(&mut self, id: TaskId) -> Vec<Command> {
         if let Some(task) = self.find_task_mut(id) {
-            let cleanup = match task.worktree.take() {
-                Some(wt) => Some(Command::Cleanup {
-                    id,
-                    repo_path: task.repo_path.clone(),
-                    worktree: wt,
-                    tmux_window: task.tmux_window.take(),
-                }),
-                None => {
-                    task.tmux_window.take();
-                    None
-                }
-            };
+            let cleanup = Self::take_cleanup(task);
             task.status = TaskStatus::Archived;
             let task_clone = task.clone();
             self.clear_agent_tracking(id);
@@ -638,7 +619,7 @@ impl App {
         self.status_message = None;
         if let Some(task) = self.selected_task() {
             let id = task.id;
-            self.update(Message::DeleteTask(id))
+            self.handle_delete_task(id)
         } else {
             vec![]
         }
@@ -726,7 +707,7 @@ impl App {
             let repo_path = self.repo_paths[idx].clone();
             self.input.mode = InputMode::Normal;
             self.status_message = None;
-            self.update(Message::QuickDispatch { repo_path })
+            self.handle_quick_dispatch(repo_path)
         } else {
             vec![]
         }

@@ -99,6 +99,30 @@ curl -s -X POST http://localhost:3142/mcp \
 6. Add an `exec_<name>` method on `TuiRuntime` in `src/runtime.rs`
 7. Add the routing arm in `execute_commands()` (one line)
 
+## MCP Notification Pattern
+
+MCP handlers (`src/mcp/handlers.rs`) run in a separate Axum context and cannot send `Message`s directly to the TUI event loop. Instead they:
+
+1. Write to the database directly via `TaskStore`
+2. Send a `()` notification on a channel
+3. The TUI main loop receives the notification and calls `exec_refresh_from_db()`, which re-reads all tasks and sends `Message::RefreshTasks`
+
+This is an intentional bypass of the Elm Architecture for cross-process mutations. App state may briefly lag behind the database until the next refresh (triggered immediately on notification, plus every tick at ~2s).
+
+## Tick Interval
+
+The TUI tick fires every ~2 seconds (`src/runtime.rs`). Each tick:
+- Captures tmux pane output for all running agents
+- Checks for stale agents (no output change beyond `inactivity_timeout`)
+- Triggers a `RefreshFromDb` to pick up external changes
+
+## Testing
+
+- **MockProcessRunner** (`src/process.rs`): Pre-queue responses with `MockProcessRunner::new(vec![...])`. Use `MockProcessRunner::ok()`, `::fail(stderr)`, `::ok_with_stdout(bytes)`. Call `recorded_calls()` to verify program names and arguments.
+- **In-memory SQLite**: Use `Database::open_in_memory()` for isolated tests with no file I/O.
+- **Test helpers** (`src/tui/tests.rs`): `make_app()` creates a default App, `make_task()` creates a task with defaults, `render_to_buffer()` renders to an in-memory terminal, `buffer_contains()` searches rendered output.
+- **Runtime tests** (`src/runtime.rs`): Use `test_runtime()` to get a `TuiRuntime` + `App` wired to in-memory DB, mock runner, and real message channels.
+
 ## Conventions
 
 - Rust edition 2021, SQLite with bundled `libsqlite3-sys`

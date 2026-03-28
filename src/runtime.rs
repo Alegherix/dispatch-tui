@@ -331,7 +331,14 @@ impl TuiRuntime {
                     let plan = if fields.plan.is_empty() { None } else { Some(fields.plan) };
 
                     if let Err(e) = self.database.update_task(
-                        task_id, &title, &description, &repo_path, new_status, plan.as_deref(),
+                        task_id,
+                        &db::TaskUpdate {
+                            title: &title,
+                            description: &description,
+                            repo_path: &repo_path,
+                            status: new_status,
+                            plan: plan.as_deref(),
+                        },
                     ) {
                         app.update(Message::Error(format!("DB error updating task: {e}")));
                     }

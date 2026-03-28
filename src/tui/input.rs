@@ -23,44 +23,8 @@ impl App {
     }
 
     fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
-        // Archive panel intercepts certain keys when visible
         if self.archive.visible {
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    let count = self.archived_tasks().len();
-                    if count > 0 && self.archive.selected_row < count - 1 {
-                        self.archive.selected_row += 1;
-                    }
-                    return vec![];
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.archive.selected_row = self.archive.selected_row.saturating_sub(1);
-                    return vec![];
-                }
-                KeyCode::Char('H') => {
-                    return self.update(Message::ToggleArchive);
-                }
-                KeyCode::Char('x') => {
-                    let archived = self.archived_tasks();
-                    if archived.get(self.archive.selected_row).is_some() {
-                        self.input.mode = InputMode::ConfirmDelete;
-                        self.status_message = Some("Delete permanently? (y/n)".to_string());
-                    }
-                    return vec![];
-                }
-                KeyCode::Char('e') => {
-                    let archived = self.archived_tasks();
-                    if let Some(task) = archived.get(self.archive.selected_row) {
-                        return vec![Command::EditTaskInEditor((*task).clone())];
-                    }
-                    return vec![];
-                }
-                KeyCode::Char('q') => return self.update(Message::Quit),
-                KeyCode::Esc => {
-                    return self.update(Message::ToggleArchive);
-                }
-                _ => return vec![],
-            }
+            return self.handle_key_archive(key);
         }
 
         match key.code {
@@ -72,43 +36,9 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateRow(-1)),
 
             KeyCode::Char('n') => self.update(Message::StartNewTask),
-
-            KeyCode::Char('d') => {
-                if let Some(task) = self.selected_task() {
-                    let id = task.id;
-                    let status = task.status;
-                    let has_window = task.tmux_window.is_some();
-                    let has_worktree = task.worktree.is_some();
-                    let is_problematic = self.agents.stale_tasks.contains(&id) || self.agents.crashed_tasks.contains(&id);
-                    match status {
-                        TaskStatus::Backlog => self.update(Message::BrainstormTask(id)),
-                        TaskStatus::Ready => self.update(Message::DispatchTask(id)),
-                        TaskStatus::Running | TaskStatus::Review => {
-                            if is_problematic {
-                                self.update(Message::KillAndRetry(id))
-                            } else if has_window {
-                                self.update(Message::StatusInfo(
-                                    "Agent already running, press g to jump".to_string(),
-                                ))
-                            } else if has_worktree {
-                                self.update(Message::ResumeTask(id))
-                            } else {
-                                self.update(Message::StatusInfo(
-                                    "No worktree to resume, move to Ready and re-dispatch".to_string(),
-                                ))
-                            }
-                        }
-                        TaskStatus::Done => self.update(Message::StatusInfo(
-                            "Task is done".to_string(),
-                        )),
-                        TaskStatus::Archived => self.update(Message::StatusInfo(
-                            "Task is archived".to_string(),
-                        )),
-                    }
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('d') => self.handle_key_dispatch(),
+            KeyCode::Char('m') => self.handle_key_move(MoveDirection::Forward),
+            KeyCode::Char('M') => self.handle_key_move(MoveDirection::Backward),
 
             KeyCode::Char('g') => {
                 if let Some(task) = self.selected_task() {
@@ -126,30 +56,6 @@ impl App {
                 if let Some(task) = self.selected_task() {
                     let id = task.id;
                     self.update(Message::ToggleSelect(id))
-                } else {
-                    vec![]
-                }
-            }
-
-            KeyCode::Char('m') => {
-                if !self.selected_tasks.is_empty() {
-                    let ids: Vec<_> = self.selected_tasks.iter().copied().collect();
-                    self.update(Message::BatchMoveTasks { ids, direction: MoveDirection::Forward })
-                } else if let Some(task) = self.selected_task() {
-                    let id = task.id;
-                    self.update(Message::MoveTask { id, direction: MoveDirection::Forward })
-                } else {
-                    vec![]
-                }
-            }
-
-            KeyCode::Char('M') => {
-                if !self.selected_tasks.is_empty() {
-                    let ids: Vec<_> = self.selected_tasks.iter().copied().collect();
-                    self.update(Message::BatchMoveTasks { ids, direction: MoveDirection::Backward })
-                } else if let Some(task) = self.selected_task() {
-                    let id = task.id;
-                    self.update(Message::MoveTask { id, direction: MoveDirection::Backward })
                 } else {
                     vec![]
                 }
@@ -201,6 +107,94 @@ impl App {
             }
 
             _ => vec![],
+        }
+    }
+
+    /// Handle keys when the archive overlay is visible.
+    fn handle_key_archive(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                let count = self.archived_tasks().len();
+                if count > 0 && self.archive.selected_row < count - 1 {
+                    self.archive.selected_row += 1;
+                }
+                vec![]
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.archive.selected_row = self.archive.selected_row.saturating_sub(1);
+                vec![]
+            }
+            KeyCode::Char('H') | KeyCode::Esc => self.update(Message::ToggleArchive),
+            KeyCode::Char('x') => {
+                let archived = self.archived_tasks();
+                if archived.get(self.archive.selected_row).is_some() {
+                    self.input.mode = InputMode::ConfirmDelete;
+                    self.status_message = Some("Delete permanently? (y/n)".to_string());
+                }
+                vec![]
+            }
+            KeyCode::Char('e') => {
+                let archived = self.archived_tasks();
+                if let Some(task) = archived.get(self.archive.selected_row) {
+                    vec![Command::EditTaskInEditor((*task).clone())]
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('q') => self.update(Message::Quit),
+            _ => vec![],
+        }
+    }
+
+    /// Handle the 'd' key: dispatch, brainstorm, resume, or retry depending on task status.
+    fn handle_key_dispatch(&mut self) -> Vec<Command> {
+        let Some(task) = self.selected_task() else {
+            return vec![];
+        };
+        let id = task.id;
+        let status = task.status;
+        let has_window = task.tmux_window.is_some();
+        let has_worktree = task.worktree.is_some();
+        let is_problematic = self.agents.stale_tasks.contains(&id)
+            || self.agents.crashed_tasks.contains(&id);
+
+        match status {
+            TaskStatus::Backlog => self.update(Message::BrainstormTask(id)),
+            TaskStatus::Ready => self.update(Message::DispatchTask(id)),
+            TaskStatus::Running | TaskStatus::Review => {
+                if is_problematic {
+                    self.update(Message::KillAndRetry(id))
+                } else if has_window {
+                    self.update(Message::StatusInfo(
+                        "Agent already running, press g to jump".to_string(),
+                    ))
+                } else if has_worktree {
+                    self.update(Message::ResumeTask(id))
+                } else {
+                    self.update(Message::StatusInfo(
+                        "No worktree to resume, move to Ready and re-dispatch".to_string(),
+                    ))
+                }
+            }
+            TaskStatus::Done => self.update(Message::StatusInfo(
+                "Task is done".to_string(),
+            )),
+            TaskStatus::Archived => self.update(Message::StatusInfo(
+                "Task is archived".to_string(),
+            )),
+        }
+    }
+
+    /// Handle 'm'/'M' key: move selected task(s) forward or backward.
+    fn handle_key_move(&mut self, direction: MoveDirection) -> Vec<Command> {
+        if !self.selected_tasks.is_empty() {
+            let ids: Vec<_> = self.selected_tasks.iter().copied().collect();
+            self.update(Message::BatchMoveTasks { ids, direction })
+        } else if let Some(task) = self.selected_task() {
+            let id = task.id;
+            self.update(Message::MoveTask { id, direction })
+        } else {
+            vec![]
         }
     }
 

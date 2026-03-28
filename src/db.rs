@@ -7,6 +7,18 @@ use std::sync::Mutex;
 use crate::models::{Task, TaskId, TaskStatus};
 
 // ---------------------------------------------------------------------------
+// TaskUpdate — grouped fields for full task updates
+// ---------------------------------------------------------------------------
+
+pub struct TaskUpdate<'a> {
+    pub title: &'a str,
+    pub description: &'a str,
+    pub repo_path: &'a str,
+    pub status: TaskStatus,
+    pub plan: Option<&'a str>,
+}
+
+// ---------------------------------------------------------------------------
 // TaskStore trait
 // ---------------------------------------------------------------------------
 
@@ -21,7 +33,7 @@ pub trait TaskStore: Send + Sync {
     fn update_dispatch(&self, id: TaskId, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()>;
     fn persist_task(&self, id: TaskId, status: TaskStatus, worktree: Option<&str>, tmux_window: Option<&str>) -> Result<()>;
     fn delete_task(&self, id: TaskId) -> Result<()>;
-    fn update_task(&self, id: TaskId, title: &str, description: &str, repo_path: &str, status: TaskStatus, plan: Option<&str>) -> Result<()>;
+    fn update_task(&self, id: TaskId, update: &TaskUpdate<'_>) -> Result<()>;
     fn update_plan(&self, id: TaskId, plan: Option<&str>) -> Result<()>;
     fn update_title_description(&self, id: TaskId, title: Option<&str>, description: Option<&str>) -> Result<()>;
     fn list_repo_paths(&self) -> Result<Vec<String>>;
@@ -273,20 +285,12 @@ impl TaskStore for Database {
         Ok(())
     }
 
-    fn update_task(
-        &self,
-        id: TaskId,
-        title: &str,
-        description: &str,
-        repo_path: &str,
-        status: TaskStatus,
-        plan: Option<&str>,
-    ) -> Result<()> {
+    fn update_task(&self, id: TaskId, update: &TaskUpdate<'_>) -> Result<()> {
         let conn = self.conn()?;
         let changed = conn
             .execute(
                 "UPDATE tasks SET title = ?1, description = ?2, repo_path = ?3, status = ?4, plan = ?5, updated_at = datetime('now') WHERE id = ?6",
-                params![title, description, repo_path, status.as_str(), plan, id.0],
+                params![update.title, update.description, update.repo_path, update.status.as_str(), update.plan, id.0],
             )
             .context("Failed to update task")?;
         if changed == 0 {

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use crate::models::{Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -193,4 +193,86 @@ pub struct TaskEdit {
     pub repo_path: String,
     pub status: TaskStatus,
     pub plan: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// BoardSelection — column + row selection state for a kanban view
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct BoardSelection {
+    pub(in crate::tui) selected_column: usize,
+    pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
+}
+
+impl BoardSelection {
+    pub fn new() -> Self {
+        Self {
+            selected_column: 0,
+            selected_row: [0; TaskStatus::COLUMN_COUNT],
+        }
+    }
+
+    pub fn column(&self) -> usize {
+        self.selected_column
+    }
+
+    pub fn row(&self, col: usize) -> usize {
+        self.selected_row[col]
+    }
+
+    pub fn set_column(&mut self, col: usize) {
+        self.selected_column = col;
+    }
+
+    pub fn set_row(&mut self, col: usize, row: usize) {
+        self.selected_row[col] = row;
+    }
+}
+
+impl Default for BoardSelection {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ViewMode — board vs epic view with preserved selection state
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum ViewMode {
+    Board(BoardSelection),
+    Epic {
+        epic_id: EpicId,
+        selection: BoardSelection,
+        saved_board: BoardSelection,
+    },
+}
+
+impl Default for ViewMode {
+    fn default() -> Self {
+        ViewMode::Board(BoardSelection::new())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ColumnItem — resolves whether cursor is on a task or an epic
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum ColumnItem<'a> {
+    Task(&'a Task),
+    Epic(&'a Epic),
+}
+
+// ---------------------------------------------------------------------------
+// EpicDraft — fields collected during epic creation
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct EpicDraft {
+    pub title: String,
+    pub description: String,
+    pub repo_path: String,
 }

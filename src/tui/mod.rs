@@ -295,13 +295,27 @@ impl App {
     }
 
     fn handle_delete_task(&mut self, id: TaskId) -> Vec<Command> {
+        let cleanup = self.find_task_mut(id).and_then(|task| {
+            let wt = task.worktree.take()?;
+            Some(Command::Cleanup {
+                repo_path: task.repo_path.clone(),
+                worktree: wt,
+                tmux_window: task.tmux_window.take(),
+            })
+        });
+        self.clear_agent_tracking(id);
         self.tasks.retain(|t| t.id != id);
         self.clamp_selection();
         let archive_count = self.archived_tasks().len();
         if self.selected_archive_row >= archive_count && archive_count > 0 {
             self.selected_archive_row = archive_count - 1;
         }
-        vec![Command::DeleteTask(id)]
+        let mut cmds = Vec::new();
+        if let Some(c) = cleanup {
+            cmds.push(c);
+        }
+        cmds.push(Command::DeleteTask(id));
+        cmds
     }
 
     fn handle_toggle_detail(&mut self) -> Vec<Command> {

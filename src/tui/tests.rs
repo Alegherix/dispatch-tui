@@ -175,7 +175,27 @@ fn delete_task_removes_and_returns_command() {
     let mut app = make_app();
     let cmds = app.update(Message::DeleteTask(TaskId(1)));
     assert!(app.tasks.iter().all(|t| t.id != TaskId(1)));
-    assert!(matches!(cmds[0], Command::DeleteTask(TaskId(1))));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteTask(TaskId(1)))));
+}
+
+#[test]
+fn delete_task_with_worktree_emits_cleanup() {
+    let mut app = make_app();
+    let task = app.find_task_mut(TaskId(4)).unwrap();
+    task.worktree = Some("/repo/.worktrees/4-task".to_string());
+    task.tmux_window = Some("task-4".to_string());
+
+    let cmds = app.update(Message::DeleteTask(TaskId(4)));
+    assert!(app.tasks.iter().all(|t| t.id != TaskId(4)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteTask(TaskId(4)))));
+}
+
+#[test]
+fn delete_task_without_worktree_no_cleanup() {
+    let mut app = make_app();
+    let cmds = app.update(Message::DeleteTask(TaskId(1)));
+    assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 }
 
 #[test]

@@ -24,6 +24,7 @@ impl App {
             | InputMode::InputEpicRepoPath => self.handle_key_epic_text_input(key),
             InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
             InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
+            InputMode::ConfirmFinish(_) => self.handle_key_confirm_finish(key),
             InputMode::Help => self.handle_key_help(key),
         }
     }
@@ -44,6 +45,14 @@ impl App {
             KeyCode::Char('n') => self.update(Message::StartNewTask),
             KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
+            KeyCode::Char('f') => {
+                if let Some(task) = self.selected_task() {
+                    let id = task.id;
+                    self.update(Message::FinishTask(id))
+                } else {
+                    vec![]
+                }
+            }
             KeyCode::Char('m') => {
                 if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
                     return self.update(Message::StatusInfo("Epic status is derived from subtasks".to_string()));
@@ -339,6 +348,13 @@ impl App {
                 self.status_message = None;
                 vec![]
             }
+        }
+    }
+
+    fn handle_key_confirm_finish(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmFinish),
+            _ => self.update(Message::CancelFinish),
         }
     }
 

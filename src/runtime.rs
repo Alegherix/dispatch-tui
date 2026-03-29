@@ -560,6 +560,59 @@ impl TuiRuntime {
         });
     }
 
+    fn exec_finish(
+        &self,
+        id: TaskId,
+        repo_path: String,
+        branch: String,
+        worktree: String,
+        tmux_window: Option<String>,
+    ) {
+        let shared = self
+            .database
+            .has_other_tasks_with_worktree(&worktree, id)
+            .unwrap_or(false);
+
+        if shared {
+            tracing::info!(task_id = id.0, "worktree shared, detaching only (no merge)");
+            if let Err(e) = self
+                .database
+                .patch_task(id, &db::TaskPatch::new().worktree(None).tmux_window(None))
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Message::Error(format!("Detach failed: {e:#}")));
+            }
+            let _ = self.msg_tx.send(Message::FinishComplete(id));
+            return;
+        }
+
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+
+        tokio::task::spawn_blocking(move || {
+            match dispatch::finish_task(
+                &repo_path,
+                &branch,
+                &worktree,
+                tmux_window.as_deref(),
+                &*runner,
+            ) {
+                Ok(()) => {
+                    let _ = tx.send(Message::FinishComplete(id));
+                }
+                Err(e) => {
+                    let is_conflict = matches!(e, dispatch::FinishError::MergeConflict(_));
+                    let _ = tx.send(Message::FinishFailed {
+                        id,
+                        error: e.to_string(),
+                        is_conflict,
+                    });
+                }
+            }
+        });
+    }
+
     fn exec_resume(&self, task: models::Task) {
         let tx = self.msg_tx.clone();
         let id = task.id;
@@ -679,6 +732,8 @@ async fn execute_commands(
             Command::QuickDispatch(draft) =>
                 rt.exec_quick_dispatch(app, draft.title, draft.description, draft.repo_path),
             Command::KillTmuxWindow { window } => rt.exec_kill_tmux_window(window),
+            Command::Finish { id, repo_path, branch, worktree, tmux_window } =>
+                rt.exec_finish(id, repo_path, branch, worktree, tmux_window),
             // Epic commands
             Command::InsertEpic(draft) =>
                 rt.exec_insert_epic(app, draft.title, draft.description, draft.repo_path),
@@ -957,5 +1012,150 @@ mod tests {
         // Task B should still have the worktree
         let task_b = rt.database.get_task(id_b).unwrap().unwrap();
         assert_eq!(task_b.worktree.as_deref(), Some(worktree));
+    }
+
+    #[tokio::test]
+    async fn exec_finish_happy_path_sends_complete() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+            MockProcessRunner::ok(),                       // git pull
+            MockProcessRunner::ok(),                       // git merge --no-ff
+            // cleanup_task internals (no tmux window):
+            MockProcessRunner::ok(),                       // git worktree remove
+            MockProcessRunner::ok(),                       // git branch -D (best-effort)
+            // finish_task best-effort remote delete:
+            MockProcessRunner::ok(),                       // git push origin --delete
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        let task = db
+            .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
+            .unwrap();
+        let id = task.id;
+
+        rt.exec_finish(
+            id,
+            "/repo".into(),
+            "1-test".into(),
+            "/repo/.worktrees/1-test".into(),
+            None,
+        );
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::FinishComplete(tid) if tid == id),
+            "Expected FinishComplete, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_finish_conflict_sends_failed() {
+        use crate::process::exit_fail;
+        use std::process::Output;
+
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
+            MockProcessRunner::ok(),                       // git pull
+            Ok(Output {
+                status: exit_fail(),
+                stdout: b"CONFLICT (content): Merge conflict\n".to_vec(),
+                stderr: b"Automatic merge failed\n".to_vec(),
+            }),
+            MockProcessRunner::ok(), // git merge --abort
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        let task = db
+            .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
+            .unwrap();
+        let id = task.id;
+
+        rt.exec_finish(
+            id,
+            "/repo".into(),
+            "1-test".into(),
+            "/repo/.worktrees/1-test".into(),
+            None,
+        );
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::FinishFailed {
+                id: tid,
+                is_conflict,
+                ..
+            } => {
+                assert_eq!(tid, id);
+                assert!(is_conflict, "Expected is_conflict=true");
+            }
+            other => panic!("Expected FinishFailed, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_finish_not_on_main_sends_failed() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD (not main)
+        ]));
+        let rt = TuiRuntime {
+            database: db.clone(),
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock,
+        };
+
+        let task = db
+            .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
+            .unwrap();
+        let id = task.id;
+
+        rt.exec_finish(
+            id,
+            "/repo".into(),
+            "1-test".into(),
+            "/repo/.worktrees/1-test".into(),
+            None,
+        );
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::FinishFailed {
+                id: tid,
+                is_conflict,
+                ..
+            } => {
+                assert_eq!(tid, id);
+                assert!(!is_conflict, "Expected is_conflict=false for not-on-main");
+            }
+            other => panic!("Expected FinishFailed, got: {other:?}"),
+        }
     }
 }

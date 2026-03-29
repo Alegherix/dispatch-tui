@@ -177,10 +177,16 @@ fn build_task_list_item<'a>(
     ]);
 
     // Line 2: metadata
+    let is_conflict = app.merge_conflict_tasks().contains(&task.id);
     let is_crashed = app.crashed_tasks().contains(&task.id);
     let is_stale = app.stale_tasks().contains(&task.id);
 
-    let line2 = if is_crashed {
+    let line2 = if is_conflict {
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled("\u{26a0} merge conflict", Style::default().fg(Color::Red)),
+        ])
+    } else if is_crashed {
         Line::from(vec![
             Span::raw("   "),
             Span::styled("\u{26a0} crashed", Style::default().fg(Color::Red)),
@@ -681,7 +687,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let popup_width = (area.width * 80 / 100).clamp(40, 72);
-    let popup_height = (area.height * 80 / 100).clamp(23, 28);
+    let popup_height = (area.height * 80 / 100).clamp(23, 29);
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -738,6 +744,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  H", key), Span::styled(" history    ", desc),
             Span::styled("V", key), Span::styled(" epic done  ", desc),
             Span::styled("Space", key), Span::styled(" select", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  f", key), Span::styled(" finish     ", desc),
+            Span::styled("(Review: merge + clean up worktree)", note),
         ]),
         Line::from(""),
         Line::from(Span::styled("  * d is context-dependent:", note)),
@@ -830,6 +840,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmFinish(_) => {
+            let bar = Paragraph::new("Finish: merge to main and clean up? (y/n)")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
         InputMode::InputEpicTitle => {
             let bar = Paragraph::new("Creating epic: enter title")
                 .style(Style::default().fg(Color::Magenta));
@@ -890,7 +905,21 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
                 push_hint("M", "back");
                 push_hint("x", "archive");
             }
-            TaskStatus::Running | TaskStatus::Review => {
+            TaskStatus::Running => {
+                if task.tmux_window.is_some() {
+                    push_hint("g", "session");
+                } else if task.worktree.is_some() {
+                    push_hint("d", "resume");
+                }
+                push_hint("e", "edit");
+                push_hint("m", "move");
+                push_hint("M", "back");
+                push_hint("x", "archive");
+            }
+            TaskStatus::Review => {
+                if task.worktree.is_some() {
+                    push_hint("f", "finish");
+                }
                 if task.tmux_window.is_some() {
                     push_hint("g", "session");
                 } else if task.worktree.is_some() {

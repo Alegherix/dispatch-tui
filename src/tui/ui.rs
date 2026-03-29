@@ -930,6 +930,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmDone(_) => {
+            let text = app.status_message.as_deref().unwrap_or("Move to Done? (y/n)");
+            let bar = Paragraph::new(text)
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
         InputMode::InputEpicTitle => {
             let bar = Paragraph::new("Creating epic: enter title")
                 .style(Style::default().fg(Color::Magenta));

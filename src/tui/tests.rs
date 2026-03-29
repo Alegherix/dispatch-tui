@@ -1682,6 +1682,10 @@ fn archive_panel_x_enters_confirm_delete() {
 
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::ConfirmDelete);
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("Delete \"Task 1\"? (y/n)")
+    );
 }
 
 #[test]

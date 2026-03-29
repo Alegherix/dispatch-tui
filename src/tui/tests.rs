@@ -2547,6 +2547,35 @@ fn esc_in_epic_view_exits_to_board() {
 }
 
 // ---------------------------------------------------------------------------
+// DispatchEpic message
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dispatch_epic_on_backlog_epic_produces_command() {
+    let mut app = make_app_with_epic_selected(); // epic at row 1, Backlog column
+    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(cmds[0], Command::DispatchEpic { ref epic } if epic.id == EpicId(10)));
+}
+
+#[test]
+fn dispatch_epic_on_non_backlog_shows_status() {
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Ready);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+
+    // Epic has a Ready subtask, so epic status is Ready (not Backlog)
+    let cmds = app.update(Message::DispatchEpic(EpicId(10)));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_ref().unwrap().contains("Backlog"));
+}
+
+// ---------------------------------------------------------------------------
 // input.rs — Normal mode: Arrow key variants
 // ---------------------------------------------------------------------------
 

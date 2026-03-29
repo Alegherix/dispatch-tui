@@ -720,6 +720,9 @@ async fn execute_commands(
             Command::DeleteEpic(id) => rt.exec_delete_epic(app, id),
             Command::PersistEpic { id, done } => rt.exec_persist_epic(app, id, done),
             Command::RefreshEpicsFromDb => rt.exec_refresh_epics_from_db(app),
+            Command::DispatchEpic { .. } => {
+                // Will be implemented in Task 5
+            }
         }
     }
 

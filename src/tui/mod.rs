@@ -312,6 +312,7 @@ impl App {
             Message::ConfirmDone => self.handle_confirm_done(),
             Message::CancelDone => self.handle_cancel_done(),
             // Epic messages
+            Message::DispatchEpic(id) => self.handle_dispatch_epic(id),
             Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
             Message::ExitEpic => self.handle_exit_epic(),
             Message::RefreshEpics(epics) => self.handle_refresh_epics(epics),
@@ -1065,6 +1066,18 @@ impl App {
     // -----------------------------------------------------------------------
     // Epic handlers
     // -----------------------------------------------------------------------
+
+    fn handle_dispatch_epic(&mut self, id: EpicId) -> Vec<Command> {
+        let Some(epic) = self.epics.iter().find(|e| e.id == id) else {
+            return vec![];
+        };
+        let status = crate::models::epic_status(epic, &self.subtask_statuses(id));
+        if status != TaskStatus::Backlog {
+            self.set_status("Epic must be in Backlog to dispatch planning".to_string());
+            return vec![];
+        }
+        vec![Command::DispatchEpic { epic: epic.clone() }]
+    }
 
     fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
         let saved_board = match &self.view_mode {

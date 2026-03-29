@@ -28,12 +28,13 @@ pub struct App {
     pub(in crate::tui) selected_tasks: HashSet<TaskId>,
 }
 
-/// Format a title for display in confirmation prompts, truncating if longer than `max_len`.
+/// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
 pub(in crate::tui) fn truncate_title(title: &str, max_len: usize) -> String {
-    if title.len() <= max_len {
+    if title.chars().count() <= max_len {
         format!("\"{title}\"")
     } else {
-        format!("\"{}...\"", &title[..max_len.saturating_sub(3)])
+        let truncated: String = title.chars().take(max_len.saturating_sub(3)).collect();
+        format!("\"{truncated}...\"")
     }
 }
 

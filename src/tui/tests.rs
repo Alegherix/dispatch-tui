@@ -3029,6 +3029,14 @@ fn truncate_title_over_limit() {
 }
 
 #[test]
+fn truncate_title_multibyte_chars() {
+    // Multi-byte UTF-8 characters must not panic on truncation
+    let title = "Fix the caf\u{00e9} rendering bug now";
+    // 31 chars, should truncate at char boundary not byte boundary
+    assert!(super::truncate_title(title, 10).ends_with("...\""));
+}
+
+#[test]
 fn confirm_delete_start_running_with_worktree_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = Some("/wt/4-test".to_string());

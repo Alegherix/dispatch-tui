@@ -23,6 +23,7 @@ pub struct TaskPatch<'a> {
     pub repo_path: Option<&'a str>,
     pub worktree: Option<Option<&'a str>>,
     pub tmux_window: Option<Option<&'a str>>,
+    pub needs_input: Option<bool>,
 }
 
 impl<'a> TaskPatch<'a> {
@@ -65,6 +66,11 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
+    pub fn needs_input(mut self, needs_input: bool) -> Self {
+        self.needs_input = Some(needs_input);
+        self
+    }
+
     pub fn has_changes(&self) -> bool {
         self.status.is_some()
             || self.plan.is_some()
@@ -73,6 +79,7 @@ impl<'a> TaskPatch<'a> {
             || self.repo_path.is_some()
             || self.worktree.is_some()
             || self.tmux_window.is_some()
+            || self.needs_input.is_some()
     }
 }
 
@@ -258,7 +265,11 @@ impl Database {
         }
 
         if current_version < 4 {
-            // Migration 4: drop plan column from epics.
+            // Migration 4: add needs_input column + drop plan column from epics.
+            let _ = conn.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN needs_input INTEGER NOT NULL DEFAULT 0"
+            );
+
             // SQLite doesn't support DROP COLUMN before 3.35.0; recreate the table.
             // Disable FK checks so DROP TABLE succeeds when tasks reference epics,
             // and wrap in a transaction for atomicity.
@@ -318,7 +329,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         conn.query_row(
             "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                    plan, epic_id, created_at, updated_at
+                    plan, epic_id, needs_input, created_at, updated_at
              FROM tasks WHERE id = ?1",
             params![id.0],
             row_to_task,
@@ -332,7 +343,7 @@ impl TaskStore for Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, epic_id, created_at, updated_at
+                        plan, epic_id, needs_input, created_at, updated_at
                  FROM tasks ORDER BY id",
             )
             .context("Failed to prepare list_all")?;
@@ -349,7 +360,7 @@ impl TaskStore for Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, epic_id, created_at, updated_at
+                        plan, epic_id, needs_input, created_at, updated_at
                  FROM tasks WHERE status = ?1 ORDER BY id",
             )
             .context("Failed to prepare list_by_status")?;
@@ -411,7 +422,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         conn.query_row(
             "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                    plan, epic_id, created_at, updated_at
+                    plan, epic_id, needs_input, created_at, updated_at
              FROM tasks WHERE plan = ?1",
             params![plan],
             row_to_task,
@@ -468,6 +479,10 @@ impl TaskStore for Database {
         if let Some(t) = patch.tmux_window {
             sets.push("tmux_window = ?");
             values.push(Box::new(t.map(|s| s.to_string())));
+        }
+        if let Some(ni) = patch.needs_input {
+            sets.push("needs_input = ?");
+            values.push(Box::new(ni as i64));
         }
 
         sets.push("updated_at = datetime('now')");
@@ -611,7 +626,7 @@ impl TaskStore for Database {
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, epic_id, created_at, updated_at
+                        plan, epic_id, needs_input, created_at, updated_at
                  FROM tasks WHERE epic_id = ?1 ORDER BY id",
             )
             .context("Failed to prepare list_tasks_for_epic")?;
@@ -650,6 +665,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         epic_id: row.get::<_, Option<i64>>("epic_id")
             .unwrap_or(None)
             .map(EpicId),
+        needs_input: row.get::<_, i64>("needs_input").unwrap_or(0) != 0,
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })

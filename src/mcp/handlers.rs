@@ -65,35 +65,33 @@ impl JsonRpcResponse {
 // ---------------------------------------------------------------------------
 
 /// Claude Code sometimes sends integer MCP arguments as strings.
-/// This deserializer accepts both native integers and string-encoded integers.
+/// Shared visitor that accepts both native integers and string-encoded integers.
+struct FlexibleI64Visitor;
+
+impl<'de> serde::de::Visitor<'de> for FlexibleI64Visitor {
+    type Value = i64;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("an integer or a string containing an integer")
+    }
+
+    fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<i64, E> {
+        Ok(v)
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<i64, E> {
+        i64::try_from(v).map_err(|_| E::custom(format!("u64 out of i64 range: {v}")))
+    }
+
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<i64, E> {
+        v.parse::<i64>().map_err(|_| E::custom(format!("invalid integer string: {v}")))
+    }
+}
+
 fn deserialize_flexible_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de;
-
-    struct FlexibleI64Visitor;
-
-    impl<'de> de::Visitor<'de> for FlexibleI64Visitor {
-        type Value = i64;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("an integer or a string containing an integer")
-        }
-
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<i64, E> {
-            Ok(v)
-        }
-
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<i64, E> {
-            i64::try_from(v).map_err(|_| E::custom(format!("u64 out of i64 range: {v}")))
-        }
-
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<i64, E> {
-            v.parse::<i64>().map_err(|_| E::custom(format!("invalid integer string: {v}")))
-        }
-    }
-
     deserializer.deserialize_any(FlexibleI64Visitor)
 }
 
@@ -149,15 +147,11 @@ where
         }
         fn visit_none<E: de::Error>(self) -> Result<Option<i64>, E> { Ok(None) }
         fn visit_unit<E: de::Error>(self) -> Result<Option<i64>, E> { Ok(None) }
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Option<i64>, E> { Ok(Some(v)) }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Option<i64>, E> {
-            i64::try_from(v).map(Some).map_err(|_| E::custom("out of range"))
-        }
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<i64>, E> {
-            v.parse::<i64>().map(Some).map_err(|_| E::custom("invalid integer string"))
+        fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<Option<i64>, D2::Error> {
+            d.deserialize_any(FlexibleI64Visitor).map(Some)
         }
     }
-    deserializer.deserialize_any(OptFlexI64)
+    deserializer.deserialize_option(OptFlexI64)
 }
 
 #[derive(Deserialize)]

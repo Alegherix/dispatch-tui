@@ -469,6 +469,14 @@ fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonR
         None
     };
 
+    if matches!(status, Some(TaskStatus::Done)) {
+        return JsonRpcResponse::err(
+            id,
+            -32602,
+            "Cannot set status to done via MCP. Please ask the human operator to move the task to done from the TUI.",
+        );
+    }
+
     let mut patch = db::TaskPatch::new();
     if let Some(s) = status {
         patch = patch.status(s);
@@ -930,6 +938,44 @@ mod tests {
             })),
         ).await;
         assert_error(&resp, "Unknown status");
+    }
+
+    #[tokio::test]
+    async fn update_task_rejects_done_status() {
+        let state = test_state();
+        let task_id = create_task_fixture(&state);
+
+        let resp = call(
+            &state,
+            "tools/call",
+            Some(json!({
+                "name": "update_task",
+                "arguments": { "task_id": task_id.0, "status": "done" }
+            })),
+        ).await;
+        assert_error(&resp, "Cannot set status to done via MCP");
+
+        // Verify task status unchanged
+        let task = state.db.get_task(task_id).unwrap().unwrap();
+        assert_ne!(task.status, crate::models::TaskStatus::Done);
+    }
+
+    #[tokio::test]
+    async fn update_task_still_allows_other_statuses() {
+        let state = test_state();
+        let task_id = create_task_fixture(&state);
+
+        for status in &["running", "review", "ready", "backlog"] {
+            let resp = call(
+                &state,
+                "tools/call",
+                Some(json!({
+                    "name": "update_task",
+                    "arguments": { "task_id": task_id.0, "status": status }
+                })),
+            ).await;
+            assert!(resp.error.is_none(), "status={status} should be allowed, got: {:?}", resp.error);
+        }
     }
 
     #[tokio::test]

@@ -25,6 +25,7 @@ impl App {
             InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
             InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
             InputMode::ConfirmFinish(_) => self.handle_key_confirm_finish(key),
+            InputMode::ConfirmPr(_) => vec![],
             InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
             InputMode::Help => self.handle_key_help(key),
         }

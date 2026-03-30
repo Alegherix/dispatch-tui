@@ -780,6 +780,9 @@ async fn execute_commands(
                 rt.exec_send_notification(&title, &body, urgent),
             Command::PersistSetting { key, value } =>
                 rt.exec_persist_setting(app, &key, value),
+            // PR commands — handlers added in a later task
+            Command::CreatePr { .. } => {}
+            Command::CheckPrStatus { .. } => {}
         }
     }
 

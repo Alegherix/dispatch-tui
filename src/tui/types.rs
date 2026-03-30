@@ -93,6 +93,13 @@ pub enum Message {
     CancelFinish,
     FinishComplete(TaskId),
     FinishFailed { id: TaskId, error: String, is_conflict: bool },
+    // PR flow
+    CreatePrTask(TaskId),
+    ConfirmPrStart,
+    CancelPr,
+    PrCreated { id: TaskId, pr_url: String, pr_number: i64 },
+    PrFailed { id: TaskId, error: String },
+    PrMerged(TaskId),
     // Done confirmation (no cleanup, just status change)
     ConfirmDone,
     CancelDone,
@@ -135,6 +142,18 @@ pub enum Command {
     RefreshEpicsFromDb,
     SendNotification { title: String, body: String, urgent: bool },
     PersistSetting { key: String, value: bool },
+    CreatePr {
+        id: TaskId,
+        repo_path: String,
+        branch: String,
+        title: String,
+        description: String,
+    },
+    CheckPrStatus {
+        id: TaskId,
+        pr_number: i64,
+        repo_path: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +171,7 @@ pub enum InputMode {
     ConfirmRetry(TaskId),
     ConfirmArchive,
     ConfirmFinish(TaskId),
+    ConfirmPr(TaskId),
     ConfirmDone(TaskId),
     // Epic input modes
     InputEpicTitle,
@@ -188,6 +208,7 @@ pub struct AgentTracking {
     pub inactivity_timeout: Duration,
     pub notified_review: HashSet<TaskId>,
     pub notified_needs_input: HashSet<TaskId>,
+    pub last_pr_poll: HashMap<TaskId, Instant>,
 }
 
 impl AgentTracking {
@@ -201,6 +222,7 @@ impl AgentTracking {
             inactivity_timeout,
             notified_review: HashSet::new(),
             notified_needs_input: HashSet::new(),
+            last_pr_poll: HashMap::new(),
         }
     }
 
@@ -213,6 +235,7 @@ impl AgentTracking {
         self.tmux_outputs.remove(&id);
         self.notified_review.remove(&id);
         self.notified_needs_input.remove(&id);
+        self.last_pr_poll.remove(&id);
     }
 }
 

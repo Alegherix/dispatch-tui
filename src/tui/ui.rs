@@ -998,6 +998,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmPr(_) => {
+            let bar = Paragraph::new("Create PR? (y/n)")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
         InputMode::Help => {
             let bar = Paragraph::new("Press ? or Esc to close help")
                 .style(Style::default().fg(Color::Cyan));

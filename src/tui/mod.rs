@@ -341,6 +341,13 @@ impl App {
             Message::SubmitEpicTitle(v) => self.handle_submit_epic_title(v),
             Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
             Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
+            // PR flow — handlers added in a later task
+            Message::CreatePrTask(_) => vec![],
+            Message::ConfirmPrStart => vec![],
+            Message::CancelPr => vec![],
+            Message::PrCreated { .. } => vec![],
+            Message::PrFailed { .. } => vec![],
+            Message::PrMerged(_) => vec![],
         }
     }
 

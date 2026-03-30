@@ -485,6 +485,7 @@ pub fn create_pr(
     let output = runner
         .run("gh", &[
             "pr", "create",
+            "--draft",
             "--title", title,
             "--body", description,
             "--head", branch,
@@ -1054,6 +1055,7 @@ mod tests {
         assert!(calls[1].1.contains(&"get-url".to_string()));
         assert_eq!(calls[2].0, "gh");
         assert!(calls[2].1.contains(&"create".to_string()));
+        assert!(calls[2].1.contains(&"--draft".to_string()));
         assert!(calls[2].1.contains(&"org/repo".to_string()));
     }
 

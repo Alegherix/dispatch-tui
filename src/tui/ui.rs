@@ -132,15 +132,26 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
-    let segments = Layout::default()
+    // Split into columns area + right sidebar, so column ratios match render_columns exactly
+    let top_split = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints({
-            let mut c = vec![Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT];
-            c.push(Constraint::Length(14)); // filter indicator
-            c.push(Constraint::Length(20)); // review badge + notification indicator
-            c
-        })
+        .constraints([
+            Constraint::Min(0),      // columns — same width as render_columns
+            Constraint::Length(34),   // filter (14) + notification (20)
+        ])
         .split(area);
+
+    let col_segments = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
+        )
+        .split(top_split[0]);
+
+    let right_segments = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(14), Constraint::Length(20)])
+        .split(top_split[1]);
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let count = app.column_items_for_status(status).len();
@@ -183,7 +194,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
 
         let paragraph = Paragraph::new(Line::from(spans))
             .alignment(Alignment::Center);
-        frame.render_widget(paragraph, segments[col_idx]);
+        frame.render_widget(paragraph, col_segments[col_idx]);
     }
 
     // Filter indicator
@@ -194,11 +205,11 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         let p = Paragraph::new(indicator)
             .style(Style::default().fg(Color::Rgb(86, 95, 137)))
             .alignment(Alignment::Right);
-        frame.render_widget(p, segments[TaskStatus::COLUMN_COUNT]);
+        frame.render_widget(p, right_segments[0]);
     }
 
     // Review badge + Notification indicator
-    let notif_area = segments[TaskStatus::COLUMN_COUNT + 1];
+    let notif_area = right_segments[1];
     let review_count = app.review_prs().len();
     let mut right_parts: Vec<Span> = Vec::new();
     if review_count > 0 {

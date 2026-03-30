@@ -885,7 +885,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let popup_width = (area.width * 80 / 100).clamp(40, 72);
-    let popup_height = (area.height * 80 / 100).clamp(25, 31);
+    let popup_height = (area.height * 80 / 100).clamp(25, 36);
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -965,6 +965,21 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  ?", key), Span::styled(" this help  ", desc),
             Span::styled("N", key), Span::styled(" notify on/off  ", desc),
             Span::styled("q", key), Span::styled(" quit (or exit epic)", desc),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  Review Board", header)),
+        Line::from(vec![
+            Span::styled("  Tab", key), Span::styled(" switch Task/Review board  ", desc),
+            Span::styled("r", key), Span::styled(" refresh from GitHub", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  h/\u{2190}", key), Span::styled(" prev column  ", desc),
+            Span::styled("l/\u{2192}", key), Span::styled(" next column  ", desc),
+            Span::styled("j/k", key), Span::styled(" navigate rows", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter", key), Span::styled(" open PR in browser  ", desc),
+            Span::styled("Esc", key), Span::styled(" back to task board", desc),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Press ? or Esc to close", note)),
@@ -1435,7 +1450,7 @@ fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool
 
     // Line 1: stripe + repo#number + title
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
-    let repo_short = pr.repo.split('/').last().unwrap_or(&pr.repo);
+    let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
     let header = format!("{repo_short}#{} {}", pr.number, pr.title);
     let header_truncated = truncate(&header, 60);
 

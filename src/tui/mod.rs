@@ -1511,11 +1511,11 @@ impl App {
                 .count()
         });
         if let Some(sel) = self.review_selection_mut() {
-            for col in 0..crate::models::ReviewDecision::COLUMN_COUNT {
-                if counts[col] == 0 {
+            for (col, &count) in counts.iter().enumerate() {
+                if count == 0 {
                     sel.selected_row[col] = 0;
-                } else if sel.selected_row[col] >= counts[col] {
-                    sel.selected_row[col] = counts[col] - 1;
+                } else if sel.selected_row[col] >= count {
+                    sel.selected_row[col] = count - 1;
                 }
             }
         }

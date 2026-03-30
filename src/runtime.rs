@@ -767,6 +767,33 @@ impl TuiRuntime {
             }
         });
     }
+
+    fn exec_fetch_review_prs(&self) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            match crate::github::fetch_review_prs(
+                &*runner,
+                crate::github::DEFAULT_EXCLUDED_AUTHORS,
+            ) {
+                Ok(prs) => {
+                    let _ = tx.send(Message::ReviewPrsLoaded(prs));
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::ReviewPrsFetchFailed(e));
+                }
+            }
+        });
+    }
+
+    fn exec_open_in_browser(&self, url: String) {
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = runner.run("xdg-open", &[&url]) {
+                tracing::warn!("Failed to open browser: {e}");
+            }
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -871,8 +898,8 @@ async fn execute_commands(
                 rt.exec_check_pr_status(id, pr_number, repo_path),
             Command::PersistStringSetting { key, value } =>
                 rt.exec_persist_string_setting(app, &key, &value),
-            Command::FetchReviewPrs => { /* TODO: implemented in a later task */ }
-            Command::OpenInBrowser { url: _ } => { /* TODO: implemented in a later task */ }
+            Command::FetchReviewPrs => rt.exec_fetch_review_prs(),
+            Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
         }
     }
 

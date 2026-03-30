@@ -5291,3 +5291,42 @@ fn confirm_delete_preset_out_of_range_ignored() {
     assert_eq!(app.input.mode, InputMode::ConfirmDeletePreset);
     assert_eq!(app.filter_presets.len(), 1);
 }
+
+// --- Overlay rendering tests ---
+
+#[test]
+fn repo_filter_overlay_shows_presets() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
+    app.filter_presets = vec![("frontend".to_string(), repos)];
+    app.input.mode = InputMode::RepoFilter;
+
+    let buf = render_to_buffer(&mut app, 80, 25);
+    assert!(buffer_contains(&buf, "A"), "Expected preset letter A");
+    assert!(buffer_contains(&buf, "frontend"), "Expected preset name 'frontend'");
+}
+
+#[test]
+fn repo_filter_overlay_shows_name_input() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::InputPresetName;
+    app.input.buffer = "myfilter".to_string();
+
+    let buf = render_to_buffer(&mut app, 80, 25);
+    assert!(buffer_contains(&buf, "Name:"), "Expected name input prompt");
+    assert!(buffer_contains(&buf, "myfilter"), "Expected buffer content");
+}
+
+#[test]
+fn repo_filter_overlay_shows_delete_help() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.repo_paths = vec!["/repo-a".to_string()];
+    let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
+    app.filter_presets = vec![("test".to_string(), repos)];
+    app.input.mode = InputMode::ConfirmDeletePreset;
+
+    let buf = render_to_buffer(&mut app, 80, 25);
+    assert!(buffer_contains(&buf, "delete preset"), "Expected delete help text");
+}

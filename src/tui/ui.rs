@@ -1024,12 +1024,20 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
-    if app.input.mode != InputMode::RepoFilter {
+    let is_filter_mode = matches!(
+        app.mode(),
+        InputMode::RepoFilter | InputMode::InputPresetName | InputMode::ConfirmDeletePreset
+    );
+    if !is_filter_mode {
         return;
     }
 
     let repo_count = app.repo_paths().len();
-    let popup_height = (repo_count as u16 + 5).clamp(7, area.height.saturating_sub(4));
+    let preset_count = app.filter_presets().len();
+    let preset_lines = if preset_count > 0 { preset_count + 2 } else { 0 }; // header + presets + blank line
+    let input_line = if matches!(app.mode(), InputMode::InputPresetName) { 1 } else { 0 };
+    let popup_height = (repo_count as u16 + preset_lines as u16 + input_line as u16 + 5)
+        .clamp(7, area.height.saturating_sub(4));
     let popup_width = (area.width * 70 / 100).clamp(30, 60);
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
@@ -1050,6 +1058,22 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines = vec![Line::from("")];
 
+    // Presets section
+    if !app.filter_presets().is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("  Presets:", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]));
+        for (i, (name, _)) in app.filter_presets().iter().enumerate() {
+            let letter = (b'A' + i as u8) as char;
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {letter}"), key_style),
+                Span::styled(format!(". {name}"), desc_style),
+            ]));
+        }
+        lines.push(Line::from(""));
+    }
+
+    // Repo list
     for (i, path) in app.repo_paths().iter().enumerate() {
         let num = i + 1;
         let checked = if app.repo_filter().contains(path) { "x" } else { " " };
@@ -1061,14 +1085,48 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
+    // Input line for preset name
+    if matches!(app.mode(), InputMode::InputPresetName) {
+        lines.push(Line::from(vec![
+            Span::styled("  Name: ", key_style),
+            Span::styled(app.input_buffer(), Style::default().fg(Color::White)),
+            Span::styled("_", Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    // Help text
     let all_selected = app.repo_filter().len() == app.repo_paths().len();
     let a_label = if all_selected { "clear all" } else { "select all" };
-    lines.push(Line::from(vec![
-        Span::styled("  a", key_style),
-        Span::styled(format!(": {a_label}  "), note_style),
-        Span::styled("Enter/Esc", key_style),
-        Span::styled(": close", note_style),
-    ]));
+    match app.mode() {
+        InputMode::InputPresetName => {
+            lines.push(Line::from(vec![
+                Span::styled("  Enter", key_style),
+                Span::styled(": save  ", note_style),
+                Span::styled("Esc", key_style),
+                Span::styled(": cancel", note_style),
+            ]));
+        }
+        InputMode::ConfirmDeletePreset => {
+            lines.push(Line::from(vec![
+                Span::styled("  A-Z", key_style),
+                Span::styled(": delete preset  ", note_style),
+                Span::styled("Esc", key_style),
+                Span::styled(": cancel", note_style),
+            ]));
+        }
+        _ => {
+            lines.push(Line::from(vec![
+                Span::styled("  a", key_style),
+                Span::styled(format!(": {a_label}  "), note_style),
+                Span::styled("s", key_style),
+                Span::styled(": save  ", note_style),
+                Span::styled("x", key_style),
+                Span::styled(": del  ", note_style),
+                Span::styled("Enter/Esc", key_style),
+                Span::styled(": close", note_style),
+            ]));
+        }
+    }
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup_area);
@@ -1206,13 +1264,13 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::InputPresetName => {
-            let bar = Paragraph::new("Save filter preset: enter name, Enter to confirm, Esc to cancel")
+            let bar = Paragraph::new("Enter preset name, Enter to save, Esc to cancel")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDeletePreset => {
-            let bar = Paragraph::new("Delete preset? (y/n)")
-                .style(Style::default().fg(Color::Red));
+            let bar = Paragraph::new("Press A-Z to delete preset, Esc to cancel")
+                .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
     }

@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: Use when implementation is complete and the task is in review status, to wrap up a dispatch worktree. Presents the user with a choice between rebasing onto main or creating a GitHub PR, then calls the wrap_up MCP tool.
+description: Use when implementation is complete to wrap up a dispatch worktree. Presents the user with a choice between rebasing onto main or creating a GitHub PR, then calls the wrap_up MCP tool.
 ---
 
 # Wrap Up

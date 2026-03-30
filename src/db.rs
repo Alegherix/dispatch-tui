@@ -175,6 +175,8 @@ pub trait TaskStore: Send + Sync {
     // Settings
     fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
     fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
+    fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
+    fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -715,6 +717,27 @@ impl TaskStore for Database {
         )?;
         Ok(())
     }
+
+    fn get_setting_string(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("Failed to get setting")
+    }
+
+    fn set_setting_string(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -897,6 +920,30 @@ mod tests {
 
         db.set_setting_bool("notifications_enabled", false).unwrap();
         assert_eq!(db.get_setting_bool("notifications_enabled").unwrap(), Some(false));
+    }
+
+    #[test]
+    fn get_setting_string_returns_none_when_absent() {
+        let db = Database::open_in_memory().unwrap();
+        assert_eq!(db.get_setting_string("repo_filter").unwrap(), None);
+    }
+
+    #[test]
+    fn set_and_get_setting_string() {
+        let db = Database::open_in_memory().unwrap();
+        db.set_setting_string("repo_filter", "/repo1\n/repo2").unwrap();
+        assert_eq!(
+            db.get_setting_string("repo_filter").unwrap(),
+            Some("/repo1\n/repo2".to_string())
+        );
+    }
+
+    #[test]
+    fn set_setting_string_upserts() {
+        let db = Database::open_in_memory().unwrap();
+        db.set_setting_string("repo_filter", "old").unwrap();
+        db.set_setting_string("repo_filter", "new").unwrap();
+        assert_eq!(db.get_setting_string("repo_filter").unwrap(), Some("new".to_string()));
     }
 
     #[test]

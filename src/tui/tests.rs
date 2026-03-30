@@ -5089,3 +5089,107 @@ fn handle_refresh_usage_stores_by_task_id() {
     assert!(app.usage.contains_key(&TaskId(1)));
     assert!((app.usage[&TaskId(1)].cost_usd - 0.42).abs() < 1e-9);
 }
+
+// --- Filter preset tests ---
+
+#[test]
+fn load_filter_preset_replaces_repo_filter() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.repo_filter.insert("/repo-a".to_string());
+
+    let preset_repos: HashSet<String> = ["/repo-b".to_string()].into_iter().collect();
+    app.filter_presets = vec![("backend".to_string(), preset_repos)];
+
+    app.update(Message::LoadFilterPreset("backend".to_string()));
+    assert!(app.repo_filter.contains("/repo-b"));
+    assert!(!app.repo_filter.contains("/repo-a"));
+}
+
+#[test]
+fn save_filter_preset_stores_and_persists() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.repo_filter.insert("/repo-a".to_string());
+    app.input.mode = InputMode::RepoFilter;
+
+    app.update(Message::StartSavePreset);
+    assert_eq!(app.input.mode, InputMode::InputPresetName);
+
+    let cmds = app.update(Message::SaveFilterPreset("frontend".to_string()));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert_eq!(app.filter_presets.len(), 1);
+    assert_eq!(app.filter_presets[0].0, "frontend");
+    assert!(app.filter_presets[0].1.contains("/repo-a"));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistFilterPreset { .. })));
+}
+
+#[test]
+fn save_filter_preset_empty_name_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    app.update(Message::SaveFilterPreset("  ".to_string()));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert!(app.filter_presets.is_empty());
+}
+
+#[test]
+fn save_filter_preset_overwrites_existing() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    let old: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
+    app.filter_presets = vec![("frontend".to_string(), old)];
+
+    app.repo_filter.insert("/repo-b".to_string());
+    app.update(Message::SaveFilterPreset("frontend".to_string()));
+    assert_eq!(app.filter_presets.len(), 1);
+    assert!(app.filter_presets[0].1.contains("/repo-b"));
+}
+
+#[test]
+fn delete_filter_preset_removes_and_returns_command() {
+    let mut app = make_app();
+    let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
+    app.filter_presets = vec![("frontend".to_string(), repos)];
+    app.input.mode = InputMode::ConfirmDeletePreset;
+
+    let cmds = app.update(Message::DeleteFilterPreset("frontend".to_string()));
+    assert!(app.filter_presets.is_empty());
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert!(cmds.iter().any(|c| matches!(c, Command::DeleteFilterPreset(_))));
+}
+
+#[test]
+fn cancel_preset_input_returns_to_repo_filter() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    app.input.buffer = "draft".to_string();
+    app.update(Message::CancelPresetInput);
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert!(app.input.buffer.is_empty());
+}
+
+#[test]
+fn filter_presets_loaded_sets_state() {
+    let mut app = make_app();
+    let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
+    app.update(Message::FilterPresetsLoaded(vec![("frontend".to_string(), repos.clone())]));
+    assert_eq!(app.filter_presets.len(), 1);
+    assert_eq!(app.filter_presets[0].0, "frontend");
+}
+
+#[test]
+fn load_filter_preset_unknown_name_is_noop() {
+    let mut app = make_app();
+    app.repo_filter.insert("/repo-a".to_string());
+    app.update(Message::LoadFilterPreset("nonexistent".to_string()));
+    assert!(app.repo_filter.contains("/repo-a"));
+}
+
+#[test]
+fn start_delete_preset_with_no_presets_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    app.update(Message::StartDeletePreset);
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}

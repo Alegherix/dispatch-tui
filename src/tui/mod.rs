@@ -32,6 +32,7 @@ pub struct App {
     pub(in crate::tui) pending_done_tasks: Vec<TaskId>,
     pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) repo_filter: HashSet<String>,
+    pub(in crate::tui) filter_presets: Vec<(String, HashSet<String>)>,
     pub(in crate::tui) review_prs: Vec<crate::models::ReviewPr>,
     pub(in crate::tui) review_board_loading: bool,
     pub(in crate::tui) last_review_fetch: Option<Instant>,
@@ -68,6 +69,7 @@ impl App {
             pending_done_tasks: Vec::new(),
             notifications_enabled: true,
             repo_filter: HashSet::new(),
+            filter_presets: Vec::new(),
             review_prs: Vec::new(),
             review_board_loading: false,
             last_review_fetch: None,
@@ -118,6 +120,7 @@ impl App {
     pub fn rebase_conflict_tasks(&self) -> &HashSet<TaskId> { &self.rebase_conflict_tasks }
     pub fn notifications_enabled(&self) -> bool { self.notifications_enabled }
     pub fn repo_filter(&self) -> &HashSet<String> { &self.repo_filter }
+    pub fn filter_presets(&self) -> &[(String, HashSet<String>)] { &self.filter_presets }
     pub fn review_prs(&self) -> &[crate::models::ReviewPr] { &self.review_prs }
     pub fn review_board_loading(&self) -> bool { self.review_board_loading }
 
@@ -408,14 +411,14 @@ impl App {
                 self.review_board_loading = true;
                 vec![Command::FetchReviewPrs]
             }
-            // Filter presets (handlers added in Task 3)
-            Message::StartSavePreset => todo!("StartSavePreset"),
-            Message::SaveFilterPreset(_) => todo!("SaveFilterPreset"),
-            Message::LoadFilterPreset(_) => todo!("LoadFilterPreset"),
-            Message::StartDeletePreset => todo!("StartDeletePreset"),
-            Message::DeleteFilterPreset(_) => todo!("DeleteFilterPreset"),
-            Message::CancelPresetInput => todo!("CancelPresetInput"),
-            Message::FilterPresetsLoaded(_) => todo!("FilterPresetsLoaded"),
+            // Filter presets
+            Message::StartSavePreset => self.handle_start_save_preset(),
+            Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),
+            Message::LoadFilterPreset(name) => self.handle_load_filter_preset(name),
+            Message::StartDeletePreset => self.handle_start_delete_preset(),
+            Message::DeleteFilterPreset(name) => self.handle_delete_filter_preset(name),
+            Message::CancelPresetInput => self.handle_cancel_preset_input(),
+            Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
         }
     }
 
@@ -1864,6 +1867,72 @@ impl App {
             self.repo_filter = self.repo_paths.iter().cloned().collect();
         }
         self.clamp_selection();
+        vec![]
+    }
+
+    fn handle_start_save_preset(&mut self) -> Vec<Command> {
+        self.input.buffer.clear();
+        self.input.mode = InputMode::InputPresetName;
+        vec![]
+    }
+
+    fn handle_save_filter_preset(&mut self, name: String) -> Vec<Command> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            self.input.mode = InputMode::RepoFilter;
+            return vec![];
+        }
+        let repos: HashSet<String> = self.repo_filter.clone();
+        // Update or insert in the presets list
+        if let Some(existing) = self.filter_presets.iter_mut().find(|(n, _)| *n == name) {
+            existing.1 = repos.clone();
+        } else {
+            self.filter_presets.push((name.clone(), repos));
+            self.filter_presets.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        self.input.buffer.clear();
+        self.input.mode = InputMode::RepoFilter;
+        self.set_status(format!("Saved preset \"{name}\""));
+        let mut paths: Vec<_> = self.repo_filter.iter().cloned().collect();
+        paths.sort();
+        vec![Command::PersistFilterPreset {
+            name,
+            repo_paths: paths.join("\n"),
+        }]
+    }
+
+    fn handle_load_filter_preset(&mut self, name: String) -> Vec<Command> {
+        if let Some((_, repos)) = self.filter_presets.iter().find(|(n, _)| *n == name) {
+            self.repo_filter = repos.clone();
+            self.clamp_selection();
+            self.set_status(format!("Loaded preset \"{name}\""));
+        }
+        vec![]
+    }
+
+    fn handle_start_delete_preset(&mut self) -> Vec<Command> {
+        if self.filter_presets.is_empty() {
+            return vec![];
+        }
+        self.input.mode = InputMode::ConfirmDeletePreset;
+        vec![]
+    }
+
+    fn handle_delete_filter_preset(&mut self, name: String) -> Vec<Command> {
+        self.filter_presets.retain(|(n, _)| *n != name);
+        self.input.mode = InputMode::RepoFilter;
+        self.set_status(format!("Deleted preset \"{name}\""));
+        vec![Command::DeleteFilterPreset(name)]
+    }
+
+    fn handle_cancel_preset_input(&mut self) -> Vec<Command> {
+        self.input.buffer.clear();
+        self.input.mode = InputMode::RepoFilter;
+        vec![]
+    }
+
+    fn handle_filter_presets_loaded(&mut self, presets: Vec<(String, HashSet<String>)>) -> Vec<Command> {
+        self.filter_presets = presets;
         vec![]
     }
 

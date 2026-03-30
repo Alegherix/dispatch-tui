@@ -3659,3 +3659,13 @@ fn status_message_does_not_clear_during_interactive_mode() {
     app.update(Message::Tick);
     assert!(app.status_message.is_some(), "should not clear during interactive mode");
 }
+
+// ---------------------------------------------------------------------------
+// Select-all toggle
+// ---------------------------------------------------------------------------
+
+#[test]
+fn on_select_all_defaults_to_false() {
+    let app = make_app();
+    assert!(!app.on_select_all());
+}

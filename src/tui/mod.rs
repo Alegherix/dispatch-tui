@@ -99,6 +99,7 @@ impl App {
     pub fn show_archived(&self) -> bool { self.archive.visible }
     pub fn selected_archive_row(&self) -> usize { self.archive.selected_row }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> { &self.selected_tasks }
+    pub fn on_select_all(&self) -> bool { self.selection().on_select_all }
     pub fn merge_conflict_tasks(&self) -> &HashSet<TaskId> { &self.merge_conflict_tasks }
 
     /// Set a transient status message with auto-clear timestamp.

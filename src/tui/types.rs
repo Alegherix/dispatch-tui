@@ -257,6 +257,7 @@ pub struct TaskEdit {
 pub struct BoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
+    pub(in crate::tui) on_select_all: bool,
 }
 
 impl BoardSelection {
@@ -264,6 +265,7 @@ impl BoardSelection {
         Self {
             selected_column: 0,
             selected_row: [0; TaskStatus::COLUMN_COUNT],
+            on_select_all: false,
         }
     }
 

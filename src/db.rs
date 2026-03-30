@@ -370,10 +370,15 @@ impl Database {
 
         if current_version < 8 {
             let _ = conn.execute_batch("ALTER TABLE epics ADD COLUMN plan TEXT");
-            let _ = conn.execute_batch("ALTER TABLE tasks ADD COLUMN sort_order INTEGER");
-            let _ = conn.execute_batch("ALTER TABLE epics ADD COLUMN sort_order INTEGER");
             conn.pragma_update(None, "user_version", 8i64)
                 .context("Failed to update schema version to 8")?;
+        }
+
+        if current_version < 9 {
+            let _ = conn.execute_batch("ALTER TABLE tasks ADD COLUMN sort_order INTEGER");
+            let _ = conn.execute_batch("ALTER TABLE epics ADD COLUMN sort_order INTEGER");
+            conn.pragma_update(None, "user_version", 9i64)
+                .context("Failed to update schema version to 9")?;
         }
 
         Ok(())

@@ -213,6 +213,11 @@ pub trait TaskStore: Send + Sync {
     ) -> Result<()>;
 
     fn get_all_usage(&self) -> Result<Vec<crate::models::TaskUsage>>;
+
+    // Filter presets
+    fn save_filter_preset(&self, name: &str, repo_paths: &str) -> Result<()>;
+    fn delete_filter_preset(&self, name: &str) -> Result<()>;
+    fn list_filter_presets(&self) -> Result<Vec<(String, String)>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +414,18 @@ impl Database {
             .context("Failed to create task_usage table")?;
             conn.pragma_update(None, "user_version", 10i64)
                 .context("Failed to update schema version to 10")?;
+        }
+
+        if current_version < 11 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS filter_presets (
+                    name       TEXT PRIMARY KEY,
+                    repo_paths TEXT NOT NULL
+                )",
+            )
+            .context("Failed to create filter_presets table")?;
+            conn.pragma_update(None, "user_version", 11i64)
+                .context("Failed to update schema version to 11")?;
         }
 
         Ok(())
@@ -886,6 +903,31 @@ impl TaskStore for Database {
         }
         Ok(out)
     }
+
+    fn save_filter_preset(&self, name: &str, repo_paths: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO filter_presets (name, repo_paths) VALUES (?1, ?2)
+             ON CONFLICT(name) DO UPDATE SET repo_paths = ?2",
+            params![name, repo_paths],
+        )?;
+        Ok(())
+    }
+
+    fn delete_filter_preset(&self, name: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
+        Ok(())
+    }
+
+    fn list_filter_presets(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT name, repo_paths FROM filter_presets ORDER BY name")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().context("Failed to list filter presets")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,7 +1144,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 10, "fresh DB should be at schema version 10");
+        assert_eq!(version, 11, "fresh DB should be at schema version 11");
     }
 
     #[test]
@@ -1153,7 +1195,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1216,7 +1258,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
     }
 
     #[test]
@@ -1657,5 +1699,33 @@ mod tests {
     fn get_all_usage_empty() {
         let db = Database::open_in_memory().unwrap();
         assert!(db.get_all_usage().unwrap().is_empty());
+    }
+
+    #[test]
+    fn filter_presets_save_and_list() {
+        let db = Database::open_in_memory().unwrap();
+        db.save_filter_preset("frontend", "/repo-a\n/repo-b").unwrap();
+        db.save_filter_preset("backend", "/repo-c").unwrap();
+
+        let presets = db.list_filter_presets().unwrap();
+        assert_eq!(presets.len(), 2);
+        assert_eq!(presets[0].0, "backend"); // sorted by name
+        assert_eq!(presets[1].0, "frontend");
+        assert_eq!(presets[1].1, "/repo-a\n/repo-b");
+    }
+
+    #[test]
+    fn filter_presets_overwrite_and_delete() {
+        let db = Database::open_in_memory().unwrap();
+        db.save_filter_preset("frontend", "/repo-a").unwrap();
+        db.save_filter_preset("frontend", "/repo-x\n/repo-y").unwrap();
+
+        let presets = db.list_filter_presets().unwrap();
+        assert_eq!(presets.len(), 1);
+        assert_eq!(presets[0].1, "/repo-x\n/repo-y");
+
+        db.delete_filter_preset("frontend").unwrap();
+        let presets = db.list_filter_presets().unwrap();
+        assert!(presets.is_empty());
     }
 }

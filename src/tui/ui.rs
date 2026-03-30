@@ -10,14 +10,26 @@ use ratatui::{
 use crate::models::{Epic, ReviewDecision, ReviewPr, Task, TaskStatus, TaskUsage, Staleness, format_age};
 use super::{App, ColumnItem, InputMode, ViewMode};
 
+// ── Tokyo Night palette ─────────────────────────────────────────────
+const MUTED: Color = Color::Rgb(86, 95, 137);
+const MUTED_LIGHT: Color = Color::Rgb(120, 124, 153);
+const FG: Color = Color::Rgb(192, 202, 245);
+const BORDER: Color = Color::Rgb(41, 46, 66);
+const YELLOW: Color = Color::Rgb(224, 175, 104);
+const PURPLE: Color = Color::Rgb(187, 154, 247);
+const GREEN: Color = Color::Rgb(158, 206, 106);
+const CYAN: Color = Color::Rgb(86, 182, 194);
+const RED: Color = Color::Rgb(247, 118, 142);
+const RED_DIM: Color = Color::Rgb(224, 130, 130);
+
 /// Column color per status
 fn column_color(status: TaskStatus) -> Color {
     match status {
-        TaskStatus::Backlog => Color::Rgb(86, 95, 137),
-        TaskStatus::Running => Color::Rgb(224, 175, 104),
-        TaskStatus::Review => Color::Rgb(187, 154, 247),
-        TaskStatus::Done => Color::Rgb(158, 206, 106),
-        TaskStatus::Archived => Color::Rgb(86, 95, 137),
+        TaskStatus::Backlog => MUTED,
+        TaskStatus::Running => YELLOW,
+        TaskStatus::Review => PURPLE,
+        TaskStatus::Done => GREEN,
+        TaskStatus::Archived => MUTED,
     }
 }
 
@@ -57,6 +69,8 @@ fn status_icon(status: TaskStatus) -> &'static str {
 }
 
 /// Map a staleness tier to a terminal color.
+/// Uses indexed terminal colors (not palette constants) so these adapt to the
+/// user's terminal theme rather than being locked to Tokyo Night RGB values.
 fn staleness_color(staleness: Staleness) -> Color {
     match staleness {
         Staleness::Fresh => Color::Green,
@@ -150,7 +164,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED))
         } else {
-            ("\u{25e6} ", Style::default().fg(Color::Rgb(86, 95, 137)))
+            ("\u{25e6} ", Style::default().fg(MUTED))
         };
 
         let label = format!("{}{} {}", prefix, status.as_str(), count);
@@ -164,10 +178,10 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
             let checkbox_style = if app.on_select_all() {
                 Style::default()
                     .bg(cursor_bg_color(status))
-                    .fg(Color::Rgb(192, 202, 245))
+                    .fg(FG)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(86, 95, 137))
+                Style::default().fg(MUTED)
             };
 
             vec![
@@ -190,20 +204,20 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         let total = app.repo_paths().len();
         right_parts.push(Span::styled(
             format!("[{active}/{total} repos]  "),
-            Style::default().fg(Color::Rgb(86, 95, 137)),
+            Style::default().fg(MUTED),
         ));
     }
     let review_count = app.review_prs().len();
     if review_count > 0 {
         right_parts.push(Span::styled(
             format!("\u{21e5}{review_count} "),
-            Style::default().fg(Color::Rgb(86, 182, 194)),
+            Style::default().fg(CYAN),
         ));
     }
     if app.notifications_enabled() {
         right_parts.push(Span::styled("\u{1F514}", Style::default().fg(Color::Yellow)));
     } else {
-        right_parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(Color::Rgb(86, 95, 137))));
+        right_parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(MUTED)));
     }
     let right_line = Line::from(right_parts);
     let p = Paragraph::new(right_line).alignment(Alignment::Right);
@@ -244,7 +258,7 @@ fn build_task_list_item<'a>(
     let line1 = Line::from(vec![
         Span::styled(select_prefix.to_string(), title_style),
         Span::styled(stripe_char, stripe_style),
-        Span::styled(format!(" #{} ", task.id), Style::default().fg(Color::Rgb(86, 95, 137))),
+        Span::styled(format!(" #{} ", task.id), Style::default().fg(MUTED)),
         Span::styled(title_text.to_string(), title_style),
     ]);
 
@@ -279,7 +293,7 @@ fn build_task_list_item<'a>(
             Span::raw("   "),
             Span::styled(
                 format!("{} running", status_icon(status)),
-                Style::default().fg(Color::Rgb(86, 95, 137)),
+                Style::default().fg(MUTED),
             ),
         ])
     } else if status == TaskStatus::Review && task.needs_input {
@@ -331,7 +345,7 @@ fn build_task_list_item<'a>(
         item = item.style(
             Style::default()
                 .bg(cursor_bg_color(status))
-                .fg(Color::Rgb(192, 202, 245))
+                .fg(FG)
                 .add_modifier(Modifier::BOLD),
         );
     }
@@ -416,11 +430,11 @@ fn render_epic_item(
     let stripe_char = if is_cursor { "\u{258c}" } else { "\u{258e}" };
     let line1 = Line::from(vec![
         Span::raw("  "),
-        Span::styled(stripe_char, Style::default().fg(Color::Rgb(187, 154, 247))),
-        Span::styled(format!(" #{} ", epic.id), Style::default().fg(Color::Rgb(86, 95, 137))),
+        Span::styled(stripe_char, Style::default().fg(PURPLE)),
+        Span::styled(format!(" #{} ", epic.id), Style::default().fg(MUTED)),
         Span::styled(
             format!("{title_text}{plan_indicator}"),
-            Style::default().fg(Color::Rgb(187, 154, 247)).add_modifier(Modifier::BOLD),
+            Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
         ),
     ]);
 
@@ -441,7 +455,7 @@ fn render_epic_item(
     if review_count > 0 {
         meta_spans.push(Span::styled(
             format!("\u{25cf} {review_count} "),
-            Style::default().fg(Color::Rgb(247, 118, 142)),
+            Style::default().fg(RED),
         ));
     }
     if done_count > 0 {
@@ -459,7 +473,7 @@ fn render_epic_item(
         item = item.style(
             Style::default()
                 .bg(cursor_bg_color(status))
-                .fg(Color::Rgb(192, 202, 245))
+                .fg(FG)
                 .add_modifier(Modifier::BOLD),
         );
     }
@@ -583,7 +597,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
     // Top border separator
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().fg(Color::Rgb(41, 46, 66)));
+        .border_style(Style::default().fg(BORDER));
 
     if !app.detail_visible {
         let paragraph = Paragraph::new("").block(block);
@@ -602,7 +616,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
             ),
             Span::styled(
                 format!(" \u{00b7} #{} \u{00b7} {} \u{00b7} {}", task.id, task.status.as_str(), task.repo_path),
-                Style::default().fg(Color::Rgb(86, 95, 137)),
+                Style::default().fg(MUTED),
             ),
         ];
 
@@ -633,13 +647,13 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
             Line::from(line1_spans),
             Line::from(Span::styled(
                 task.description.clone(),
-                Style::default().fg(Color::Rgb(120, 124, 153)),
+                Style::default().fg(MUTED_LIGHT),
             )),
         ];
         if let Some(u) = app.usage.get(&task.id) {
             lines.push(Line::from(Span::styled(
                 format_usage(u),
-                Style::default().fg(Color::Rgb(86, 95, 137)),
+                Style::default().fg(MUTED),
             )));
         }
         lines
@@ -651,25 +665,25 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
             ),
             Span::styled(
                 format!(" \u{00b7} #{} \u{00b7} {}", epic.id, epic.repo_path),
-                Style::default().fg(Color::Rgb(86, 95, 137)),
+                Style::default().fg(MUTED),
             ),
         ]);
         let line2 = Line::from(Span::styled(
             epic.description.clone(),
-            Style::default().fg(Color::Rgb(120, 124, 153)),
+            Style::default().fg(MUTED_LIGHT),
         ));
         let mut lines = vec![line1, line2];
         if let Some(plan) = &epic.plan {
             lines.push(Line::from(Span::styled(
                 format!("plan: {plan}"),
-                Style::default().fg(Color::Rgb(86, 95, 137)),
+                Style::default().fg(MUTED),
             )));
         }
         lines
     } else {
         vec![Line::from(Span::styled(
             "No task selected",
-            Style::default().fg(Color::Rgb(86, 95, 137)),
+            Style::default().fg(MUTED),
         ))]
     };
 
@@ -1127,8 +1141,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     // Archive mode status bar
     if app.show_archived() {
-        let key_color = Color::Rgb(86, 95, 137);
-        let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
+        let key_color = MUTED;
+        let label_style = Style::default().fg(MUTED);
         let spans = vec![
             Span::styled("x", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
             Span::styled(" delete  ", label_style),
@@ -1264,7 +1278,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 /// Build context-sensitive keybinding hint spans for the status bar.
 /// Returns styled spans showing available actions for the selected task.
 pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
+    let label_style = Style::default().fg(MUTED);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
@@ -1328,7 +1342,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
 
 /// Build context-sensitive keybinding hints for a selected epic.
 pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
+    let label_style = Style::default().fg(MUTED);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
@@ -1366,8 +1380,8 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
 
 /// Build status bar hints when tasks are batch-selected.
 fn batch_action_hints(count: usize, key_color: Color) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(Color::Rgb(86, 95, 137));
-    let count_style = Style::default().fg(Color::Rgb(224, 175, 104)).add_modifier(Modifier::BOLD);
+    let label_style = Style::default().fg(MUTED);
+    let count_style = Style::default().fg(YELLOW).add_modifier(Modifier::BOLD);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::styled(format!("{count} selected  "), count_style));
@@ -1392,10 +1406,10 @@ fn batch_action_hints(count: usize, key_color: Color) -> Vec<Span<'static>> {
 
 fn review_column_color(decision: ReviewDecision) -> Color {
     match decision {
-        ReviewDecision::ReviewRequired => Color::Rgb(86, 182, 194),
-        ReviewDecision::WaitingForResponse => Color::Rgb(224, 175, 104),
-        ReviewDecision::ChangesRequested => Color::Rgb(224, 130, 130),
-        ReviewDecision::Approved => Color::Rgb(158, 206, 106),
+        ReviewDecision::ReviewRequired => CYAN,
+        ReviewDecision::WaitingForResponse => YELLOW,
+        ReviewDecision::ChangesRequested => RED_DIM,
+        ReviewDecision::Approved => GREEN,
     }
 }
 

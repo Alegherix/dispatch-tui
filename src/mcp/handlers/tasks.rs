@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::db;
 use crate::dispatch;
-use crate::models::{EpicId, TaskId, TaskStatus};
+use crate::models::{EpicId, TaskId, TaskStatus, UsageReport};
 use crate::mcp::McpState;
 
 use super::types::{JsonRpcResponse, deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args};
@@ -551,11 +551,13 @@ pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Val
 
     match state.db.report_usage(
         TaskId(parsed.task_id),
-        parsed.cost_usd,
-        parsed.input_tokens,
-        parsed.output_tokens,
-        parsed.cache_read_tokens,
-        parsed.cache_write_tokens,
+        &UsageReport {
+            cost_usd: parsed.cost_usd,
+            input_tokens: parsed.input_tokens,
+            output_tokens: parsed.output_tokens,
+            cache_read_tokens: parsed.cache_read_tokens,
+            cache_write_tokens: parsed.cache_write_tokens,
+        },
     ) {
         Ok(()) => {
             state.notify();

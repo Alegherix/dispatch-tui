@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus, TaskUsage, UsageReport};
 
 // ---------------------------------------------------------------------------
 // TaskPatch — builder for selective field updates
@@ -202,17 +202,9 @@ pub trait TaskStore: Send + Sync {
     fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
 
     // Usage tracking
-    fn report_usage(
-        &self,
-        task_id: TaskId,
-        cost_usd: f64,
-        input: i64,
-        output: i64,
-        cache_read: i64,
-        cache_write: i64,
-    ) -> Result<()>;
+    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
 
-    fn get_all_usage(&self) -> Result<Vec<crate::models::TaskUsage>>;
+    fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
 
     // Filter presets
     fn save_filter_preset(&self, name: &str, repo_paths: &str) -> Result<()>;
@@ -438,6 +430,11 @@ impl Database {
     }
 }
 
+/// Column list shared by all task SELECT queries. Pair with `row_to_task`.
+const TASK_COLUMNS: &str =
+    "id, title, description, repo_path, status, worktree, tmux_window, \
+     plan, epic_id, needs_input, pr_url, pr_number, sort_order, created_at, updated_at";
+
 impl TaskStore for Database {
     fn create_task(
         &self,
@@ -459,9 +456,7 @@ impl TaskStore for Database {
     fn get_task(&self, id: TaskId) -> Result<Option<Task>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                    plan, epic_id, needs_input, pr_url, pr_number, sort_order, created_at, updated_at
-             FROM tasks WHERE id = ?1",
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"),
             params![id.0],
             row_to_task,
         )
@@ -473,9 +468,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, epic_id, needs_input, pr_url, pr_number, sort_order, created_at, updated_at
-                 FROM tasks ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+                &format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
             )
             .context("Failed to prepare list_all")?;
         let tasks = stmt
@@ -490,9 +483,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, epic_id, needs_input, pr_url, pr_number, sort_order, created_at, updated_at
-                 FROM tasks WHERE status = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE status = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
             )
             .context("Failed to prepare list_by_status")?;
         let tasks = stmt
@@ -552,9 +543,7 @@ impl TaskStore for Database {
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                    plan, epic_id, needs_input, pr_url, pr_number, sort_order, created_at, updated_at
-             FROM tasks WHERE plan = ?1",
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE plan = ?1"),
             params![plan],
             row_to_task,
         )
@@ -776,9 +765,7 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, worktree, tmux_window,
-                        plan, epic_id, needs_input, pr_url, pr_number, sort_order, created_at, updated_at
-                 FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
             )
             .context("Failed to prepare list_tasks_for_epic")?;
         let tasks = stmt
@@ -834,15 +821,7 @@ impl TaskStore for Database {
         Ok(())
     }
 
-    fn report_usage(
-        &self,
-        task_id: TaskId,
-        cost_usd: f64,
-        input: i64,
-        output: i64,
-        cache_read: i64,
-        cache_write: i64,
-    ) -> Result<()> {
+    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "INSERT INTO task_usage
@@ -856,14 +835,14 @@ impl TaskStore for Database {
                  cache_read_tokens  = cache_read_tokens  + excluded.cache_read_tokens,
                  cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
                  updated_at         = excluded.updated_at",
-            params![task_id.0, cost_usd, input, output, cache_read, cache_write],
+            params![task_id.0, usage.cost_usd, usage.input_tokens, usage.output_tokens,
+                    usage.cache_read_tokens, usage.cache_write_tokens],
         )
         .context("Failed to upsert task_usage")?;
         Ok(())
     }
 
-    fn get_all_usage(&self) -> Result<Vec<crate::models::TaskUsage>> {
-        use crate::models::TaskUsage;
+    fn get_all_usage(&self) -> Result<Vec<TaskUsage>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT task_id, cost_usd, input_tokens, output_tokens,
@@ -1668,7 +1647,7 @@ mod tests {
     fn report_usage_first_insert() {
         let db = Database::open_in_memory().unwrap();
         let id = db.create_task("T", "D", "/r", None, TaskStatus::Backlog).unwrap();
-        db.report_usage(id, 0.42, 10_000, 2_000, 0, 0).unwrap();
+        db.report_usage(id, &UsageReport { cost_usd: 0.42, input_tokens: 10_000, output_tokens: 2_000, cache_read_tokens: 0, cache_write_tokens: 0 }).unwrap();
         let all = db.get_all_usage().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].task_id, id);
@@ -1683,8 +1662,8 @@ mod tests {
     fn report_usage_accumulates() {
         let db = Database::open_in_memory().unwrap();
         let id = db.create_task("T", "D", "/r", None, TaskStatus::Backlog).unwrap();
-        db.report_usage(id, 0.10, 1_000, 500, 100, 50).unwrap();
-        db.report_usage(id, 0.05, 500, 250, 50, 25).unwrap();
+        db.report_usage(id, &UsageReport { cost_usd: 0.10, input_tokens: 1_000, output_tokens: 500, cache_read_tokens: 100, cache_write_tokens: 50 }).unwrap();
+        db.report_usage(id, &UsageReport { cost_usd: 0.05, input_tokens: 500, output_tokens: 250, cache_read_tokens: 50, cache_write_tokens: 25 }).unwrap();
         let all = db.get_all_usage().unwrap();
         assert_eq!(all.len(), 1);
         let u = &all[0];

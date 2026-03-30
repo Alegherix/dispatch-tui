@@ -301,6 +301,17 @@ pub struct ResumeResult {
 // TaskUsage
 // ---------------------------------------------------------------------------
 
+/// Usage metrics for a single reporting interval (no task_id or timestamp).
+#[derive(Debug, Clone)]
+pub struct UsageReport {
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+}
+
+/// Accumulated usage stored in the database, keyed by task.
 #[derive(Debug, Clone)]
 pub struct TaskUsage {
     pub task_id: TaskId,

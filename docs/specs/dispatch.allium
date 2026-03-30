@@ -506,8 +506,8 @@ rule DispatchEpicPlanning {
     requires: epic.derived_status = backlog
 
     -- Creates a planning subtask and dispatches a planning agent.
-    -- The planning agent brainstorms, writes a plan, and decomposes
-    -- it into subtasks under this epic.
+    -- The planning agent brainstorms and writes an implementation plan
+    -- for this epic.
     ensures:
         let planning_task = Task.created(
             title: "Plan: " + epic.title,
@@ -525,7 +525,6 @@ rule DispatchEpicPlanning {
         -- The planning task is created as Ready and then dispatched
         -- through the standard DispatchTask flow, which provisions
         -- a worktree and tmux window and transitions it to Running.
-        -- The agent runs in epic_planning mode.
 }
 
 rule MarkEpicDone {

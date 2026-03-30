@@ -346,42 +346,29 @@ attach the plan (tool: dispatch, tool name: update_task — set the plan field).
 
 fn build_epic_planning_prompt(epic_id: EpicId, title: &str, description: &str, mcp_port: u16) -> String {
     format!(
-        "You are a planning agent. Your job is ONLY to plan — do NOT implement anything.\n\
+        "You are an autonomous coding agent starting a brainstorming session.\n\
 \n\
-## Context\n\
+Epic:\n\
+  ID: {epic_id}\n\
+  Title: {title}\n\
+  Description: {description}\n\
 \n\
-Epic ID: {epic_id}\n\
-Epic Title: {title}\n\
-Epic Description: {description}\n\
+Your goal is to explore the codebase, brainstorm approaches, and write an \
+implementation plan for this epic. When done, save the plan and attach it to the epic:\n\
+\n\
+1. Write the plan to docs/plans/ (or docs/superpowers/specs/ if using the brainstorming skill)\n\
+2. Call update_epic via MCP to set the plan field to the plan file path\n\
+\n\
+After planning, ask whether to continue creating subtasks or stop.\n\
 \n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
-query and update tasks/epics (tool: dispatch).\n\
+attach the plan (tool: dispatch, tool name: update_epic — set the plan field).\n\
 \n\
-## Instructions\n\
-\n\
-Follow these steps in order:\n\
-\n\
-### Step 1: Understand the Epic\n\
-Fetch the full epic details via MCP: get_epic({epic_id_raw})\n\
-\n\
-### Step 2: Brainstorm the Design\n\
-Run /brainstorming to explore the problem space and design the solution \
-with the user. Use the epic's description as your starting context.\n\
-\n\
-### Step 3: Create Implementation Plan\n\
-The brainstorming skill will transition to /writing-plans. Follow that \
-through to produce a detailed implementation plan.\n\
-\n\
-### Step 4: Decompose into Subtasks\n\
-After the implementation plan is written, run /decompose-plan {epic_id_raw}\n\
-This will read the plan and interactively create subtasks under the epic.\n\
-\n\
-IMPORTANT: Do NOT start implementing. Your job ends after decomposition.",
+IMPORTANT: Do NOT start implementing. Your job ends after planning.",
         epic_id = epic_id,
         title = title,
         description = description,
         mcp_port = mcp_port,
-        epic_id_raw = epic_id.0,
     )
 }
 
@@ -873,13 +860,12 @@ mod tests {
     // --- finish_task tests ---
 
     #[test]
-    fn epic_planning_prompt_contains_epic_id_and_skills() {
+    fn epic_planning_prompt_contains_epic_context() {
         let prompt = build_epic_planning_prompt(EpicId(42), "Redesign auth", "Rework the login flow", 3142);
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Redesign auth"));
-        assert!(prompt.contains("/brainstorming"));
-        assert!(prompt.contains("/writing-plans"));
-        assert!(prompt.contains("/decompose-plan"));
+        assert!(prompt.contains("Rework the login flow"));
+        assert!(prompt.contains("update_epic"));
         assert!(prompt.contains("Do NOT start implementing"));
         assert!(prompt.contains("3142"));
     }

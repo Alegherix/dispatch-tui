@@ -46,6 +46,8 @@ entity Task {
     tmux_window: TmuxWindow?
     plan: String?
     epic: Epic?
+    pr_url: String?
+    pr_number: Integer?
     needs_input: Boolean
     created_at: Timestamp
     updated_at: Timestamp
@@ -414,14 +416,20 @@ rule RetryFresh {
 
     requires: task.status = running
 
-    -- Destroys existing worktree, resets to ready, then re-dispatches
+    -- Destroys existing worktree, resets to backlog, then re-dispatches
     ensures:
         if task.worktree != null:
             not exists task.worktree
     ensures: task.worktree = null
     ensures: task.tmux_window = null
     ensures: task.status = backlog
-    ensures: DispatchTask(task)
+    ensures: AgentLaunched(task: task, mode: standard)
+
+    @guidance
+        -- RetryFresh dispatches directly via the standard dispatch
+        -- path, bypassing the DispatchTask rule's has_plan precondition.
+        -- This means a task without a plan will be dispatched in
+        -- standard mode rather than brainstorm mode.
 }
 
 -- == MCP Constraints ==
@@ -507,7 +515,7 @@ rule DispatchEpicPlanning {
     ensures:
         let planning_task = Task.created(
             title: "Plan: " + epic.title,
-            description: epic.description,
+            description: "Planning subtask for epic: " + epic.title + "\n\n" + epic.description,
             repo_path: epic.repo_path,
             status: backlog,
             epic: epic,
@@ -515,14 +523,14 @@ rule DispatchEpicPlanning {
             created_at: now,
             updated_at: now
         )
-        DispatchTask(planning_task)
+        AgentLaunched(task: planning_task, mode: epic_planning)
 
     @guidance
-        -- The planning task is created as Backlog (with a plan set
-        -- implicitly by dispatch) and then dispatched through the
-        -- standard DispatchTask flow, which provisions a worktree
-        -- and tmux window and transitions it to Running.
-        -- The agent runs in epic_planning mode.
+        -- The planning task is dispatched directly via epic_planning
+        -- mode, bypassing the standard DispatchTask flow. This is
+        -- because the planning task has no plan — the agent's job is
+        -- to create one. The dispatch provisions a worktree and tmux
+        -- window and transitions the task to Running.
 }
 
 rule MarkEpicDone {

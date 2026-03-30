@@ -91,7 +91,7 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
                     id,
                     -32602,
                     format!(
-                        "Unknown status: {status_str}. Valid values: backlog, running, review, done, archived"
+                        "Unknown status: {status_str}. Valid values: backlog, running, review"
                     ),
                 )
             }

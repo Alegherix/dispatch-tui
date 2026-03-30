@@ -1205,6 +1205,16 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::InputPresetName => {
+            let bar = Paragraph::new("Save filter preset: enter name, Enter to confirm, Esc to cancel")
+                .style(Style::default().fg(Color::Cyan));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDeletePreset => {
+            let bar = Paragraph::new("Delete preset? (y/n)")
+                .style(Style::default().fg(Color::Red));
+            frame.render_widget(bar, area);
+        }
     }
 }
 

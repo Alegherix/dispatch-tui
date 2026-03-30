@@ -408,6 +408,14 @@ impl App {
                 self.review_board_loading = true;
                 vec![Command::FetchReviewPrs]
             }
+            // Filter presets (handlers added in Task 3)
+            Message::StartSavePreset => todo!("StartSavePreset"),
+            Message::SaveFilterPreset(_) => todo!("SaveFilterPreset"),
+            Message::LoadFilterPreset(_) => todo!("LoadFilterPreset"),
+            Message::StartDeletePreset => todo!("StartDeletePreset"),
+            Message::DeleteFilterPreset(_) => todo!("DeleteFilterPreset"),
+            Message::CancelPresetInput => todo!("CancelPresetInput"),
+            Message::FilterPresetsLoaded(_) => todo!("FilterPresetsLoaded"),
         }
     }
 

@@ -29,6 +29,8 @@ impl App {
             InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
+            InputMode::InputPresetName => self.handle_key_text_input(key),
+            InputMode::ConfirmDeletePreset => vec![],
         }
     }
 

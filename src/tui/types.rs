@@ -115,6 +115,14 @@ pub enum Message {
     CloseRepoFilter,
     ToggleRepoFilter(String),
     ToggleAllRepoFilter,
+    // Filter presets
+    StartSavePreset,
+    SaveFilterPreset(String),
+    LoadFilterPreset(String),
+    StartDeletePreset,
+    DeleteFilterPreset(String),
+    CancelPresetInput,
+    FilterPresetsLoaded(Vec<(String, HashSet<String>)>),
     // Wrap up (replaces finish + PR)
     StartWrapUp(TaskId),
     WrapUpRebase,
@@ -159,6 +167,9 @@ pub enum Command {
     SendNotification { title: String, body: String, urgent: bool },
     PersistSetting { key: String, value: bool },
     PersistStringSetting { key: String, value: String },
+    PersistFilterPreset { name: String, repo_paths: String },
+    DeleteFilterPreset(String),
+    LoadFilterPresets,
     CreatePr {
         id: TaskId,
         repo_path: String,
@@ -201,6 +212,8 @@ pub enum InputMode {
     // Overlay modes
     Help,
     RepoFilter,
+    InputPresetName,
+    ConfirmDeletePreset,
 }
 
 // ---------------------------------------------------------------------------

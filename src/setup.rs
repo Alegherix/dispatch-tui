@@ -173,10 +173,10 @@ pub fn run_setup(port: u16) -> Result<()> {
     let mcp_result = merge_mcp_config(existing_mcp, port);
     if mcp_result.changed {
         write_json_file(&mcp_path, &mcp_result.value)?;
-        println!("MCP config: added task-orchestrator to ~/.claude/.mcp.json (port {port})");
+        println!("MCP config: added dispatch to ~/.claude/.mcp.json (port {port})");
         any_changes = true;
     } else {
-        println!("MCP config: task-orchestrator already configured in ~/.claude/.mcp.json");
+        println!("MCP config: dispatch already configured in ~/.claude/.mcp.json");
     }
 
     // 2. Permissions

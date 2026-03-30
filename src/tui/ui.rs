@@ -399,6 +399,11 @@ fn render_epic_item(
     let pending_count = subtask_statuses.len() - done_count - running_count;
 
     let title_text = truncate(&epic.title, 28);
+    let plan_indicator = if epic.plan.is_some() && status == TaskStatus::Backlog {
+        " \u{25b8}" // ▸
+    } else {
+        ""
+    };
 
     // Line 1: stripe + title (thicker stripe for cursor)
     let stripe_char = if is_cursor { "\u{258c}" } else { "\u{258e}" };
@@ -406,7 +411,7 @@ fn render_epic_item(
         Span::raw("  "),
         Span::styled(stripe_char, Style::default().fg(Color::Rgb(187, 154, 247))),
         Span::styled(
-            format!(" {title_text}"),
+            format!(" {title_text}{plan_indicator}"),
             Style::default().fg(Color::Rgb(187, 154, 247)).add_modifier(Modifier::BOLD),
         ),
     ]);
@@ -1186,6 +1191,11 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
         spans.push(Span::styled(format!(" {label}  "), label_style));
     };
 
+    if epic.plan.is_some() {
+        push_hint("d", "dispatch");
+    } else {
+        push_hint("d", "plan");
+    }
     push_hint("Enter", "open");
     if epic.done {
         push_hint("M", "undone");

@@ -288,6 +288,7 @@ impl App {
             Message::NavigateColumn(delta) => self.handle_navigate_column(delta),
             Message::NavigateRow(delta) => self.handle_navigate_row(delta),
             Message::MoveTask { id, direction } => self.handle_move_task(id, direction),
+            Message::ReorderItem(dir) => self.handle_reorder_item(dir),
             Message::DispatchTask(id) => self.handle_dispatch_task(id),
             Message::BrainstormTask(id) => self.handle_brainstorm_task(id),
             Message::Dispatched { id, worktree, tmux_window, switch_focus } =>
@@ -426,6 +427,72 @@ impl App {
             }
         }
         vec![]
+    }
+
+    fn handle_reorder_item(&mut self, direction: isize) -> Vec<Command> {
+        let col = self.selection().column();
+        let Some(status) = TaskStatus::from_column_index(col) else {
+            return vec![];
+        };
+        let row = self.selection().row(col);
+        let items = self.column_items_for_status(status);
+        let target_row = row as isize + direction;
+        if target_row < 0 || target_row >= items.len() as isize {
+            return vec![];
+        }
+        let target_row = target_row as usize;
+
+        // Get IDs and effective sort values
+        let (a_task_id, a_epic_id, a_eff) = match &items[row] {
+            ColumnItem::Task(t) => (Some(t.id), None, t.sort_order.unwrap_or(t.id.0)),
+            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
+        };
+        let (b_task_id, b_epic_id, b_eff) = match &items[target_row] {
+            ColumnItem::Task(t) => (Some(t.id), None, t.sort_order.unwrap_or(t.id.0)),
+            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
+        };
+
+        // Swap effective values; offset if equal
+        let (new_a, new_b) = if a_eff == b_eff {
+            if direction > 0 { (a_eff + 1, b_eff) } else { (a_eff - 1, b_eff) }
+        } else {
+            (b_eff, a_eff)
+        };
+
+        // Drop the borrowed items before mutating
+        drop(items);
+
+        let mut cmds = vec![];
+
+        if let Some(tid) = a_task_id {
+            if let Some(t) = self.find_task_mut(tid) {
+                t.sort_order = Some(new_a);
+                cmds.push(Command::PersistTask(t.clone()));
+            }
+        }
+        if let Some(eid) = a_epic_id {
+            if let Some(e) = self.epics.iter_mut().find(|e2| e2.id == eid) {
+                e.sort_order = Some(new_a);
+                cmds.push(Command::PersistEpic { id: eid, done: None, sort_order: Some(new_a) });
+            }
+        }
+        if let Some(tid) = b_task_id {
+            if let Some(t) = self.find_task_mut(tid) {
+                t.sort_order = Some(new_b);
+                cmds.push(Command::PersistTask(t.clone()));
+            }
+        }
+        if let Some(eid) = b_epic_id {
+            if let Some(e) = self.epics.iter_mut().find(|e2| e2.id == eid) {
+                e.sort_order = Some(new_b);
+                cmds.push(Command::PersistEpic { id: eid, done: None, sort_order: Some(new_b) });
+            }
+        }
+
+        // Cursor follows the moved item
+        self.selection_mut().set_row(col, target_row);
+
+        cmds
     }
 
     fn handle_move_task(&mut self, id: TaskId, direction: MoveDirection) -> Vec<Command> {
@@ -1474,7 +1541,7 @@ impl App {
         if let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) {
             epic.done = true;
         }
-        vec![Command::PersistEpic { id, done: Some(true) }]
+        vec![Command::PersistEpic { id, done: Some(true), sort_order: None }]
     }
 
     fn handle_mark_epic_undone(&mut self, id: EpicId) -> Vec<Command> {

@@ -26,6 +26,7 @@ pub enum Message {
     NavigateColumn(isize),
     NavigateRow(isize),
     MoveTask { id: TaskId, direction: MoveDirection },
+    ReorderItem(isize),  // +1 = down, -1 = up
     DispatchTask(TaskId),
     BrainstormTask(TaskId),
     Dispatched { id: TaskId, worktree: String, tmux_window: String, switch_focus: bool },
@@ -145,7 +146,7 @@ pub enum Command {
     InsertEpic(EpicDraft),
     EditEpicInEditor(Epic),
     DeleteEpic(EpicId),
-    PersistEpic { id: EpicId, done: Option<bool> },
+    PersistEpic { id: EpicId, done: Option<bool>, sort_order: Option<i64> },
     RefreshEpicsFromDb,
     SendNotification { title: String, body: String, urgent: bool },
     PersistSetting { key: String, value: bool },

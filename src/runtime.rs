@@ -266,7 +266,8 @@ impl TuiRuntime {
                 .worktree(task.worktree.as_deref())
                 .tmux_window(task.tmux_window.as_deref())
                 .pr_url(task.pr_url.as_deref())
-                .pr_number(task.pr_number),
+                .pr_number(task.pr_number)
+                .sort_order(task.sort_order),
         ) {
             app.update(Message::Error(Self::db_error("persisting task", e)));
         }
@@ -511,9 +512,16 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_persist_epic(&self, app: &mut App, id: models::EpicId, done: Option<bool>) {
+    fn exec_persist_epic(&self, app: &mut App, id: models::EpicId, done: Option<bool>, sort_order: Option<i64>) {
+        let mut patch = EpicPatch::new();
         if let Some(d) = done {
-            if let Err(e) = self.database.patch_epic(id, &EpicPatch::new().done(d)) {
+            patch = patch.done(d);
+        }
+        if let Some(so) = sort_order {
+            patch = patch.sort_order(Some(so));
+        }
+        if patch.has_changes() {
+            if let Err(e) = self.database.patch_epic(id, &patch) {
                 app.update(Message::Error(Self::db_error("updating epic", e)));
             }
         }
@@ -850,7 +858,7 @@ async fn execute_commands(
                 rt.exec_insert_epic(app, draft.title, draft.description, draft.repo_path),
             Command::EditEpicInEditor(epic) => rt.exec_edit_epic_in_editor(app, epic, terminal)?,
             Command::DeleteEpic(id) => rt.exec_delete_epic(app, id),
-            Command::PersistEpic { id, done } => rt.exec_persist_epic(app, id, done),
+            Command::PersistEpic { id, done, sort_order } => rt.exec_persist_epic(app, id, done, sort_order),
             Command::RefreshEpicsFromDb => rt.exec_refresh_epics_from_db(app),
             Command::DispatchEpic { epic } => rt.exec_dispatch_epic(app, epic),
             Command::SendNotification { title, body, urgent } =>

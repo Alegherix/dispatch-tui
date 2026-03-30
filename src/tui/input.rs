@@ -44,6 +44,8 @@ impl App {
             KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateRow(1)),
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateRow(-1)),
+            KeyCode::Char('J') => self.update(Message::ReorderItem(1)),
+            KeyCode::Char('K') => self.update(Message::ReorderItem(-1)),
 
             KeyCode::Char('n') => self.update(Message::StartNewTask),
             KeyCode::Char('N') => self.update(Message::ToggleNotifications),

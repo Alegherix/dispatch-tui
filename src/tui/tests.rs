@@ -4761,3 +4761,71 @@ fn column_items_null_sort_order_uses_id() {
         _ => panic!("expected task"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Reorder item (J/K) tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reorder_task_down_swaps_sort_order() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    let t2 = make_task(2, TaskStatus::Backlog);
+    app.tasks = vec![t1, t2];
+
+    // Cursor on first task (row 0, column 0 = Backlog)
+    let cmds = app.update(Message::ReorderItem(1));
+
+    // After reorder, task 1 should have a higher sort value than task 2
+    let t1 = app.find_task(TaskId(1)).unwrap();
+    let t2 = app.find_task(TaskId(2)).unwrap();
+    let eff1 = t1.sort_order.unwrap_or(t1.id.0);
+    let eff2 = t2.sort_order.unwrap_or(t2.id.0);
+    assert!(eff1 > eff2, "task 1 ({eff1}) should be after task 2 ({eff2}) after move down");
+    // Should emit PersistTask for both
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::PersistTask(_))).count(), 2);
+    // Cursor should have moved down
+    assert_eq!(app.selection().row(0), 1);
+}
+
+#[test]
+fn reorder_task_up_at_top_is_noop() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    app.tasks = vec![t1];
+
+    let cmds = app.update(Message::ReorderItem(-1));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn reorder_task_down_at_bottom_is_noop() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    app.tasks = vec![t1];
+
+    let cmds = app.update(Message::ReorderItem(1));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn reorder_task_up_swaps_sort_order() {
+    let mut app = make_app();
+    let t1 = make_task(1, TaskStatus::Backlog);
+    let t2 = make_task(2, TaskStatus::Backlog);
+    app.tasks = vec![t1, t2];
+
+    // Move cursor to row 1 (second task), then reorder up
+    app.selection_mut().set_row(0, 1);
+    let cmds = app.update(Message::ReorderItem(-1));
+
+    // After reorder, task 2 should have a lower sort value than task 1
+    let t1 = app.find_task(TaskId(1)).unwrap();
+    let t2 = app.find_task(TaskId(2)).unwrap();
+    let eff1 = t1.sort_order.unwrap_or(t1.id.0);
+    let eff2 = t2.sort_order.unwrap_or(t2.id.0);
+    assert!(eff2 < eff1, "task 2 ({eff2}) should be before task 1 ({eff1}) after move up");
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::PersistTask(_))).count(), 2);
+    // Cursor should have moved up
+    assert_eq!(app.selection().row(0), 0);
+}

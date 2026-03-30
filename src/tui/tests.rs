@@ -3843,7 +3843,7 @@ fn esc_clears_selection_and_exits_toggle() {
 }
 
 #[test]
-fn space_is_noop_on_toggle_row() {
+fn space_is_noop_when_on_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -3851,7 +3851,7 @@ fn space_is_noop_on_toggle_row() {
 }
 
 #[test]
-fn dispatch_is_noop_on_toggle_row() {
+fn dispatch_is_noop_when_on_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));

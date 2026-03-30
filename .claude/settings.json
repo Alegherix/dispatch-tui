@@ -12,7 +12,8 @@
       "mcp__dispatch__update_task",
       "mcp__dispatch__create_task",
       "mcp__dispatch__list_tasks",
-      "mcp__dispatch__claim_task"
+      "mcp__dispatch__claim_task",
+      "mcp__dispatch__report_usage"
     ]
   },
   "hooks": {
@@ -34,6 +35,15 @@
           {
             "type": "command",
             "command": "task-status-hook"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "task-usage-hook"
           }
         ]
       }

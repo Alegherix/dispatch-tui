@@ -4348,3 +4348,64 @@ fn pr_merged_preserves_worktree() {
     // Should NOT emit a Cleanup command
     assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 }
+
+#[test]
+fn card_shows_pr_badge() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.pr_number = Some(42);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    // Navigate to Review column (index 2)
+    for _ in 0..2 {
+        app.update(Message::NavigateColumn(1));
+    }
+
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "PR #42"), "Card should show PR #42 badge");
+}
+
+#[test]
+fn card_shows_merged_pr_badge() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.pr_number = Some(42);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    // Navigate to Done column (index 3)
+    for _ in 0..3 {
+        app.update(Message::NavigateColumn(1));
+    }
+
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "PR #42 merged"), "Done card should show merged PR badge");
+}
+
+#[test]
+fn status_bar_shows_pr_hint_for_review_task() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    // Navigate to Review column (index 2)
+    for _ in 0..2 {
+        app.update(Message::NavigateColumn(1));
+    }
+
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "pr"), "Status bar should show pr hint for Review tasks");
+}
+
+#[test]
+fn detail_panel_shows_pr_url() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.pr_number = Some(42);
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    // Navigate to Review column (index 2) and open detail panel
+    for _ in 0..2 {
+        app.update(Message::NavigateColumn(1));
+    }
+    app.update(Message::ToggleDetail);
+
+    let buf = render_to_buffer(&mut app, 200, 20);
+    assert!(buffer_contains(&buf, "PR:"), "Detail panel should show PR label");
+    assert!(buffer_contains(&buf, "pull/42"), "Detail panel should show PR URL");
+}

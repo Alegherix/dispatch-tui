@@ -269,6 +269,22 @@ fn build_task_list_item<'a>(
                 Style::default().fg(Color::Yellow),
             ),
         ])
+    } else if let (TaskStatus::Review, Some(pr_num)) = (status, task.pr_number) {
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                format!("PR #{pr_num}"),
+                Style::default().fg(Color::Cyan),
+            ),
+        ])
+    } else if let (TaskStatus::Done, Some(pr_num)) = (status, task.pr_number) {
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled(
+                format!("\u{2714} PR #{pr_num} merged"),
+                Style::default().fg(Color::Green),
+            ),
+        ])
     } else {
         let age = format_age(task.updated_at, now);
         let staleness = Staleness::from_age(task.updated_at, now);
@@ -557,15 +573,20 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
             ));
         }
 
-        let l = vec![
+        if let Some(pr_url) = &task.pr_url {
+            line1_spans.push(Span::styled(
+                format!(" \u{00b7} PR: {pr_url}"),
+                Style::default().fg(Color::Cyan),
+            ));
+        }
+
+        vec![
             Line::from(line1_spans),
             Line::from(Span::styled(
                 task.description.clone(),
                 Style::default().fg(Color::Rgb(120, 124, 153)),
             )),
-        ];
-
-        l
+        ]
     } else {
         vec![Line::from(Span::styled(
             "No task selected",
@@ -1046,6 +1067,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
             TaskStatus::Review => {
                 if task.worktree.is_some() {
                     push_hint("f", "finish");
+                    push_hint("p", "pr");
                 }
                 if task.tmux_window.is_some() {
                     push_hint("g", "session");

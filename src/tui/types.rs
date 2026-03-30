@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::widgets::ListState;
 
-use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, ReviewDecision, Task, TaskId, TaskStatus};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -102,6 +102,13 @@ pub enum Message {
     ConfirmDone,
     CancelDone,
     ToggleNotifications,
+    // Review board
+    SwitchToReviewBoard,
+    SwitchToTaskBoard,
+    ReviewPrsLoaded(Vec<crate::models::ReviewPr>),
+    ReviewPrsFetchFailed(String),
+    OpenInBrowser { url: String },
+    RefreshReviewPrs,
     // Repo filter
     StartRepoFilter,
     CloseRepoFilter,
@@ -163,6 +170,8 @@ pub enum Command {
         pr_number: i64,
         repo_path: String,
     },
+    FetchReviewPrs,
+    OpenInBrowser { url: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +358,53 @@ impl Default for BoardSelection {
 }
 
 // ---------------------------------------------------------------------------
+// ReviewBoardSelection — column + row selection state for review board
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct ReviewBoardSelection {
+    pub(in crate::tui) selected_column: usize,
+    pub(in crate::tui) selected_row: [usize; ReviewDecision::COLUMN_COUNT],
+    pub(in crate::tui) list_states: [ListState; ReviewDecision::COLUMN_COUNT],
+}
+
+impl ReviewBoardSelection {
+    pub fn new() -> Self {
+        Self {
+            selected_column: 0,
+            selected_row: [0; ReviewDecision::COLUMN_COUNT],
+            list_states: std::array::from_fn(|_| ListState::default()),
+        }
+    }
+
+    pub fn column(&self) -> usize {
+        self.selected_column
+    }
+
+    pub fn row(&self, col: usize) -> usize {
+        self.selected_row[col]
+    }
+
+    pub fn set_column(&mut self, col: usize) {
+        self.selected_column = col;
+    }
+
+    pub fn set_row(&mut self, col: usize, row: usize) {
+        self.selected_row[col] = row;
+    }
+
+    pub fn list_state_index(&self, col: usize) -> Option<usize> {
+        Some(self.selected_row[col])
+    }
+}
+
+impl Default for ReviewBoardSelection {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ViewMode — board vs epic view with preserved selection state
 // ---------------------------------------------------------------------------
 
@@ -358,6 +414,10 @@ pub enum ViewMode {
     Epic {
         epic_id: EpicId,
         selection: BoardSelection,
+        saved_board: BoardSelection,
+    },
+    ReviewBoard {
+        selection: ReviewBoardSelection,
         saved_board: BoardSelection,
     },
 }

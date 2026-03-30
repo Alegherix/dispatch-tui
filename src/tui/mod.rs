@@ -31,6 +31,9 @@ pub struct App {
     pub(in crate::tui) pending_done_tasks: Vec<TaskId>,
     pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) repo_filter: HashSet<String>,
+    pub(in crate::tui) review_prs: Vec<crate::models::ReviewPr>,
+    pub(in crate::tui) review_board_loading: bool,
+    pub(in crate::tui) last_review_fetch: Option<Instant>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -63,6 +66,9 @@ impl App {
             pending_done_tasks: Vec::new(),
             notifications_enabled: true,
             repo_filter: HashSet::new(),
+            review_prs: Vec::new(),
+            review_board_loading: false,
+            last_review_fetch: None,
         }
     }
 
@@ -71,6 +77,7 @@ impl App {
         match &self.view_mode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
+            ViewMode::ReviewBoard { saved_board, .. } => saved_board,
         }
     }
 
@@ -79,6 +86,7 @@ impl App {
         match &mut self.view_mode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
+            ViewMode::ReviewBoard { saved_board, .. } => saved_board,
         }
     }
 
@@ -107,6 +115,23 @@ impl App {
     pub fn rebase_conflict_tasks(&self) -> &HashSet<TaskId> { &self.rebase_conflict_tasks }
     pub fn notifications_enabled(&self) -> bool { self.notifications_enabled }
     pub fn repo_filter(&self) -> &HashSet<String> { &self.repo_filter }
+    pub fn review_prs(&self) -> &[crate::models::ReviewPr] { &self.review_prs }
+    pub fn review_board_loading(&self) -> bool { self.review_board_loading }
+
+    /// Get the review board selection state, if currently in review board mode.
+    pub fn review_selection(&self) -> Option<&ReviewBoardSelection> {
+        match &self.view_mode {
+            ViewMode::ReviewBoard { selection, .. } => Some(selection),
+            _ => None,
+        }
+    }
+
+    pub(in crate::tui) fn review_selection_mut(&mut self) -> Option<&mut ReviewBoardSelection> {
+        match &mut self.view_mode {
+            ViewMode::ReviewBoard { selection, .. } => Some(selection),
+            _ => None,
+        }
+    }
 
     pub fn set_notifications_enabled(&mut self, enabled: bool) {
         self.notifications_enabled = enabled;
@@ -143,6 +168,7 @@ impl App {
             ViewMode::Epic { epic_id, .. } => {
                 self.tasks.iter().filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived).filter(repo_match).collect()
             }
+            ViewMode::ReviewBoard { .. } => vec![],
         }
     }
 
@@ -376,6 +402,16 @@ impl App {
             Message::WrapUpRebase => self.handle_wrap_up_rebase(),
             Message::WrapUpPr => self.handle_wrap_up_pr(),
             Message::CancelWrapUp => self.handle_cancel_wrap_up(),
+            // Review board
+            Message::SwitchToReviewBoard => self.handle_switch_to_review_board(),
+            Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
+            Message::ReviewPrsLoaded(prs) => self.handle_review_prs_loaded(prs),
+            Message::ReviewPrsFetchFailed(err) => self.handle_review_prs_fetch_failed(err),
+            Message::OpenInBrowser { url } => vec![Command::OpenInBrowser { url }],
+            Message::RefreshReviewPrs => {
+                self.review_board_loading = true;
+                vec![Command::FetchReviewPrs]
+            }
         }
     }
 
@@ -1414,6 +1450,73 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
+    // Review board handlers
+    // -----------------------------------------------------------------------
+
+    fn handle_switch_to_review_board(&mut self) -> Vec<Command> {
+        if matches!(self.view_mode, ViewMode::ReviewBoard { .. }) {
+            return vec![];
+        }
+        let saved_board = match &self.view_mode {
+            ViewMode::Board(sel) => sel.clone(),
+            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
+            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
+        };
+        self.view_mode = ViewMode::ReviewBoard {
+            selection: ReviewBoardSelection::new(),
+            saved_board,
+        };
+        self.review_board_loading = true;
+        let needs_fetch = self.last_review_fetch
+            .map(|t| t.elapsed() > Duration::from_secs(60))
+            .unwrap_or(true);
+        if needs_fetch {
+            vec![Command::FetchReviewPrs]
+        } else {
+            self.review_board_loading = false;
+            vec![]
+        }
+    }
+
+    fn handle_switch_to_task_board(&mut self) -> Vec<Command> {
+        if let ViewMode::ReviewBoard { saved_board, .. } = &self.view_mode {
+            self.view_mode = ViewMode::Board(saved_board.clone());
+        }
+        vec![]
+    }
+
+    fn handle_review_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
+        self.review_prs = prs;
+        self.review_board_loading = false;
+        self.last_review_fetch = Some(Instant::now());
+        self.clamp_review_selection();
+        vec![]
+    }
+
+    fn clamp_review_selection(&mut self) {
+        let counts: [usize; 3] = std::array::from_fn(|col| {
+            self.review_prs.iter()
+                .filter(|pr| pr.review_decision.column_index() == col)
+                .count()
+        });
+        if let Some(sel) = self.review_selection_mut() {
+            for col in 0..crate::models::ReviewDecision::COLUMN_COUNT {
+                if counts[col] == 0 {
+                    sel.selected_row[col] = 0;
+                } else if sel.selected_row[col] >= counts[col] {
+                    sel.selected_row[col] = counts[col] - 1;
+                }
+            }
+        }
+    }
+
+    fn handle_review_prs_fetch_failed(&mut self, error: String) -> Vec<Command> {
+        self.review_board_loading = false;
+        self.set_status(format!("Failed to fetch review PRs: {error}"));
+        vec![]
+    }
+
+    // -----------------------------------------------------------------------
     // Epic handlers
     // -----------------------------------------------------------------------
 
@@ -1460,6 +1563,7 @@ impl App {
         let saved_board = match &self.view_mode {
             ViewMode::Board(sel) => sel.clone(),
             ViewMode::Epic { saved_board, .. } => saved_board.clone(),
+            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
         };
         self.view_mode = ViewMode::Epic {
             epic_id,

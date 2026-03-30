@@ -2954,6 +2954,17 @@ fn d_key_on_backlog_epic_dispatches_epic() {
     assert!(matches!(cmds[0], Command::DispatchEpic { ref epic } if epic.id == EpicId(10)));
 }
 
+#[test]
+fn d_key_in_epic_view_with_no_subtasks_dispatches_epic() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let epic = make_epic(10);
+    app.epics = vec![epic];
+    app.update(Message::EnterEpic(EpicId(10)));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchEpic { ref epic } if epic.id == EpicId(10))));
+}
+
 // ---------------------------------------------------------------------------
 // DispatchEpic message
 // ---------------------------------------------------------------------------

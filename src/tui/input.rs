@@ -313,7 +313,13 @@ impl App {
                     )),
                 }
             }
-            None => vec![],
+            None => {
+                if let ViewMode::Epic { epic_id, .. } = self.view_mode {
+                    self.update(Message::DispatchEpic(epic_id))
+                } else {
+                    vec![]
+                }
+            }
         }
     }
 

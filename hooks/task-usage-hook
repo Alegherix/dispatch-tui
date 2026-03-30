@@ -36,12 +36,12 @@ result=$(
 
         reduce .[] as $line (
             {input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0};
-            if $line.usage then
-                ($line.usage.input_tokens              // 0) as $in  |
-                ($line.usage.output_tokens             // 0) as $out |
-                ($line.usage.cache_read_input_tokens   // 0) as $cr  |
-                ($line.usage.cache_creation_input_tokens // 0) as $cw |
-                pricing($line.model // "") as $p |
+            if $line.message.usage then
+                ($line.message.usage.input_tokens              // 0) as $in  |
+                ($line.message.usage.output_tokens             // 0) as $out |
+                ($line.message.usage.cache_read_input_tokens   // 0) as $cr  |
+                ($line.message.usage.cache_creation_input_tokens // 0) as $cw |
+                pricing($line.message.model // "") as $p |
                 .input      += $in  |
                 .output     += $out |
                 .cache_read += $cr  |

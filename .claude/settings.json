@@ -13,7 +13,8 @@
       "mcp__dispatch__create_task",
       "mcp__dispatch__list_tasks",
       "mcp__dispatch__claim_task",
-      "mcp__dispatch__report_usage"
+      "mcp__dispatch__report_usage",
+      "mcp__dispatch__wrap_up"
     ]
   },
   "hooks": {

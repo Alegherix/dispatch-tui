@@ -189,7 +189,7 @@ pub(super) fn tool_definitions() -> Value {
             },
             {
                 "name": "wrap_up",
-                "description": "Wrap up a review-status task: rebase the branch onto main or push and create a GitHub PR. Returns immediately; the operation runs in the background. For rebase, the tmux window is killed when done, ending your session.",
+                "description": "Wrap up a running or review task: rebase the branch onto main or push and create a GitHub PR. The task is moved to done on success. Returns immediately; the operation runs in the background. For rebase, the tmux window is killed when done, ending your session.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -457,6 +457,7 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
 
     match parsed.action.as_str() {
         "rebase" => {
+            let db = state.db.clone();
             tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
                 let result = dispatch::finish_task(
@@ -466,8 +467,19 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
                     tmux_window.as_deref(),
                     &*runner,
                 );
-                if let Err(e) = result {
-                    tracing::warn!(task_id = task_id.0, "MCP wrap_up rebase failed: {e}");
+                match result {
+                    Ok(()) => {
+                        let patch = db::TaskPatch::new().status(TaskStatus::Done);
+                        if let Err(e) = db.patch_task(task_id, &patch) {
+                            tracing::warn!(
+                                task_id = task_id.0,
+                                "MCP wrap_up: failed to set task to done: {e}"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(task_id = task_id.0, "MCP wrap_up rebase failed: {e}");
+                    }
                 }
                 if let Some(tx) = notify_tx {
                     let _ = tx.send(());
@@ -484,6 +496,7 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
                 match dispatch::create_pr(&repo_path, &branch, &title, &description, &*runner) {
                     Ok(result) => {
                         let patch = db::TaskPatch::new()
+                            .status(TaskStatus::Done)
                             .pr_url(Some(result.pr_url.as_str()))
                             .pr_number(Some(result.pr_number));
                         if let Err(e) = db.patch_task(task_id, &patch) {

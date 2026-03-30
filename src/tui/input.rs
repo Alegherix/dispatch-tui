@@ -38,7 +38,13 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Char('q') => self.update(Message::Quit),
+            KeyCode::Char('q') => {
+                if matches!(self.view_mode, ViewMode::Epic { .. }) {
+                    self.update(Message::ExitEpic)
+                } else {
+                    self.update(Message::Quit)
+                }
+            }
 
             KeyCode::Char('h') | KeyCode::Left => self.update(Message::NavigateColumn(-1)),
             KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),

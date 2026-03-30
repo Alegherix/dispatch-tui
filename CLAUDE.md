@@ -160,6 +160,7 @@ Normal ──W──▶ ConfirmWrapUp(id) ──r──▶ Normal (rebase)
 Normal ──d (stale/crashed)──▶ ConfirmRetry(id) ──r/f──▶ Normal
 Normal ──J/K──▶ reorder item up/down (stays Normal)
 Normal ──?──▶ Help ──?/Esc──▶ Normal
+Normal (in epic view) ──q──▶ ExitEpic (q quits only from board view)
 
 Any input mode ──Esc──▶ Normal (cancels)
 Error popup ──any key──▶ dismisses

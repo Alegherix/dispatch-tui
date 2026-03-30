@@ -905,7 +905,8 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  Enter", key), Span::styled(" detail panel / enter epic", desc),
         ]),
         Line::from(vec![
-            Span::styled("  Esc", key), Span::styled(" exit epic / clear selection", desc),
+            Span::styled("  q", key), Span::styled(" exit epic (in epic view)   ", desc),
+            Span::styled("Esc", key), Span::styled(" clear selection", desc),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Actions", header)),
@@ -949,7 +950,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  ?", key), Span::styled(" this help  ", desc),
             Span::styled("N", key), Span::styled(" notify on/off  ", desc),
-            Span::styled("q", key), Span::styled(" quit", desc),
+            Span::styled("q", key), Span::styled(" quit (or exit epic)", desc),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Press ? or Esc to close", note)),

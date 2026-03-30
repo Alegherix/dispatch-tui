@@ -101,6 +101,7 @@ config {
     status_message_expiry: Duration = 5.seconds
     staleness_fresh_threshold: Duration = 3.days
     staleness_aging_threshold: Duration = 7.days
+    notifications_enabled: Boolean = true
 }
 
 ------------------------------------------------------------
@@ -248,6 +249,8 @@ rule FinishTaskSuccess {
     @guidance
         -- Worktree is preserved after finish.
         -- It will be cleaned up when the task is archived.
+        -- If another active task shares the same worktree, the worktree
+        -- is detached from this task but not removed from disk.
 }
 
 rule FinishTaskConflict {
@@ -280,8 +283,26 @@ rule ArchiveTask {
     @guidance
         -- Removes the git worktree and tmux window if present.
         -- Best-effort branch deletion.
+        -- If another active task shares the same worktree (e.g. epic
+        -- subtasks), the worktree is detached from this task but not
+        -- removed from disk.
         -- The TUI typically restricts archive to Done tasks,
         -- but the handler accepts any non-archived task.
+}
+
+rule DeleteTask {
+    when: DeleteTask(task)
+
+    requires: task.status = archived
+
+    ensures:
+        if task.worktree != null:
+            not exists task.worktree
+    ensures: not exists task
+
+    @guidance
+        -- Permanent removal. Only accessible from the archive view.
+        -- Worktree and branch are cleaned up best-effort.
 }
 
 -- == Agent Health ==
@@ -307,6 +328,34 @@ rule DetectCrashedAgent {
         about: agent_crashed,
         task: task
     )
+}
+
+-- == Notifications ==
+
+rule NotifyNeedsInput {
+    when: task: Task.needs_input becomes true
+
+    requires: task.status = running
+
+    ensures: DesktopNotification(
+        task: task,
+        urgency: urgent,
+        about: needs_input
+    )
+}
+
+rule NotifyReview {
+    when: task: Task.status transitions_to review
+
+    ensures: DesktopNotification(
+        task: task,
+        urgency: normal,
+        about: status_review
+    )
+
+    @guidance
+        -- Notifications are gated by a user-togglable notifications_enabled
+        -- setting (N key in TUI). When disabled, no notifications are sent.
 }
 
 rule ClearNeedsInput {
@@ -373,11 +422,26 @@ rule ClaimTaskViaMcp {
     when: McpClaimTask(task, worktree, tmux_window)
 
     requires: task.status in {backlog, ready}
+    requires: worktree.path starts_with task.repo_path
 
     ensures: task.status = running
     ensures: task.worktree = worktree
     ensures: task.tmux_window = tmux_window
     ensures: task.updated_at = now
+}
+
+rule UpdateEpicViaMcp {
+    when: McpUpdateEpic(epic, title?, description?, done?)
+
+    requires: title != null or description != null or done != null
+
+    ensures:
+        if title != null: epic.title = title
+    ensures:
+        if description != null: epic.description = description
+    ensures:
+        if done != null: epic.done = done
+    ensures: epic.updated_at = now
 }
 
 -- == Epics ==
@@ -457,10 +521,11 @@ rule DeleteEpic {
 -- Invariants
 ------------------------------------------------------------
 
-invariant RunningTaskHasWorktree {
-    for task in Tasks where status = running:
-        task.worktree != null
-}
+@invariant RunningTaskHasWorktree
+    -- Tasks dispatched via DispatchTask, BrainstormTask, or ClaimTaskViaMcp
+    -- always have a worktree. However, manual forward movement (m key)
+    -- can move a task to running without provisioning a worktree.
+    -- The dispatch flow is the canonical path; manual moves are overrides.
 
 @invariant DoneRequiresHumanConfirmation
     -- The Done status transition requires explicit human confirmation

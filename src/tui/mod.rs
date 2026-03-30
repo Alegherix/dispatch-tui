@@ -451,6 +451,9 @@ impl App {
         let mut cmds = Vec::new();
         for id in ids {
             if let Some(task) = self.find_task_mut(id) {
+                if task.status != TaskStatus::Review {
+                    continue;
+                }
                 let detach = Self::take_detach(task);
                 task.status = TaskStatus::Done;
                 let task_clone = task.clone();
@@ -782,6 +785,10 @@ impl App {
         self.clear_agent_tracking(id);
 
         if let Some(task) = self.find_task_mut(id) {
+            if task.worktree.is_none() {
+                self.set_status("Cannot resume: task has no worktree".to_string());
+                return vec![];
+            }
             let old_window = task.tmux_window.take();
             let task_clone = task.clone();
 

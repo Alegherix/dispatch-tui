@@ -91,7 +91,7 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
                     id,
                     -32602,
                     format!(
-                        "Unknown status: {status_str}. Valid values: backlog, ready, running, review, done"
+                        "Unknown status: {status_str}. Valid values: backlog, ready, running, review, done, archived"
                     ),
                 )
             }
@@ -100,11 +100,11 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
         None
     };
 
-    if matches!(status, Some(TaskStatus::Done)) {
+    if matches!(status, Some(TaskStatus::Done | TaskStatus::Archived)) {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "Cannot set status to done via MCP. Please ask the human operator to move the task to done from the TUI.",
+            "Cannot set status to done or archived via MCP. Please ask the human operator to manage this from the TUI.",
         );
     }
 

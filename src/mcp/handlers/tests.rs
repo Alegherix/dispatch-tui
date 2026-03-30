@@ -133,11 +133,22 @@ async fn update_task_rejects_done_status() {
             "arguments": { "task_id": task_id.0, "status": "done" }
         })),
     ).await;
-    assert_error(&resp, "Cannot set status to done via MCP");
+    assert_error(&resp, "Cannot set status to done or archived via MCP");
 
     // Verify task status unchanged
     let task = state.db.get_task(task_id).unwrap().unwrap();
     assert_ne!(task.status, crate::models::TaskStatus::Done);
+
+    // Also verify archived is rejected
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "status": "archived" }
+        })),
+    ).await;
+    assert_error(&resp, "Cannot set status to done or archived via MCP");
 }
 
 #[tokio::test]

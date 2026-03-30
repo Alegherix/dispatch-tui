@@ -309,6 +309,19 @@ rule DetectCrashedAgent {
     )
 }
 
+rule ClearNeedsInput {
+    when: task: Task.status transitions_to running
+
+    requires: task.needs_input = true
+
+    ensures: task.needs_input = false
+
+    @guidance
+        -- The needs_input flag is set by CLI hooks when an agent
+        -- requests human interaction. It is cleared automatically
+        -- via notification hook when the agent resumes running.
+}
+
 rule RetryResume {
     when: RetryResume(task)
 
@@ -414,6 +427,10 @@ rule MarkEpicDone {
 rule ArchiveEpic {
     when: ArchiveEpic(epic)
 
+    requires:
+        epic.active_subtasks.count = 0
+        or epic.active_subtasks.all(t => t.status = done)
+
     ensures:
         for task in epic.active_subtasks:
             ArchiveTask(task)
@@ -464,11 +481,3 @@ invariant RunningTaskHasWorktree {
 -- Q1: Should stale/crashed detection trigger automatic status changes
 --     (e.g., moving back to Ready), or should it remain advisory-only
 --     as it is today?
-
--- Q2: Should epic archive require all subtasks to be Done first,
---     or should it force-archive regardless of subtask status
---     (current behavior)?
-
--- Q3: The needs_input flag is set but never cleared automatically.
---     Should there be a rule for clearing it when the agent resumes
---     producing output?

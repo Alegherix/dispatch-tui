@@ -737,6 +737,27 @@ async fn report_usage_stores_and_accumulates() {
     assert_eq!(u.cache_write_tokens, 50);
 }
 
+#[tokio::test]
+async fn report_usage_unknown_task_returns_error() {
+    let state = test_state();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "report_usage",
+            "arguments": {
+                "task_id": 9999,
+                "cost_usd": 0.10,
+                "input_tokens": 1000,
+                "output_tokens": 500
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "not found");
+}
+
 /// Validates that JSON schemas in `tool_definitions()` match the argument structs.
 /// Catches drift when a field is added/removed from a struct but not the schema
 /// (or vice versa). The `expected_props` lists must be kept in sync with struct

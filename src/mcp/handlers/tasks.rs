@@ -517,6 +517,12 @@ pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Val
     };
     tracing::info!(task_id = parsed.task_id, cost_usd = parsed.cost_usd, "MCP report_usage");
 
+    match state.db.get_task(TaskId(parsed.task_id)) {
+        Ok(Some(_)) => {}
+        Ok(None) => return JsonRpcResponse::err(id, -32602, format!("Task {} not found", parsed.task_id)),
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
+    }
+
     match state.db.report_usage(
         TaskId(parsed.task_id),
         parsed.cost_usd,
@@ -532,6 +538,6 @@ pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Val
                 json!({"content": [{"type": "text", "text": format!("Usage recorded for task {}", parsed.task_id)}]}),
             )
         }
-        Err(e) => JsonRpcResponse::err(id, -32000, format!("Failed to record usage: {e}")),
+        Err(e) => JsonRpcResponse::err(id, -32603, format!("Failed to record usage: {e}")),
     }
 }

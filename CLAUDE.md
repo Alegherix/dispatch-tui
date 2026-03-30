@@ -60,6 +60,8 @@ Backlog → Running → Review → Done
 - **Dispatch** (`d` on a Backlog task with a plan): creates a fresh git worktree + tmux window and launches Claude with the task prompt
 - **Brainstorm** (`d` on a Backlog task without a plan): creates a worktree and launches Claude in brainstorm mode to explore and plan
 - **Resume** (`d` on a Running task whose window is gone): re-opens a tmux window in the existing worktree and runs `claude --continue`. Closing a tmux window does **not** delete the worktree.
+- **Epic dispatch** (`d` on an epic): dispatches the next backlog subtask by `sort_order`. If the epic has no subtasks, falls back to creating a planning subtask.
+- **Reorder** (`J`/`K`): moves the selected item up or down within its column. In the main view this is cosmetic; in the epic view it determines dispatch order via `sort_order`.
 - Status transitions (running/review) are handled by hooks in `.claude/settings.json` that extract the task ID from the git branch name (`{id}-{slug}` pattern)
 - Press `g` to jump to an agent's tmux window
 
@@ -156,6 +158,7 @@ Normal ──W──▶ ConfirmWrapUp(id) ──r──▶ Normal (rebase)
                                 ──p──▶ Normal (PR)
                                 ──Esc──▶ Normal
 Normal ──d (stale/crashed)──▶ ConfirmRetry(id) ──r/f──▶ Normal
+Normal ──J/K──▶ reorder item up/down (stays Normal)
 Normal ──?──▶ Help ──?/Esc──▶ Normal
 
 Any input mode ──Esc──▶ Normal (cancels)

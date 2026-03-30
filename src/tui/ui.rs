@@ -843,7 +843,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let popup_width = (area.width * 80 / 100).clamp(40, 72);
-    let popup_height = (area.height * 80 / 100).clamp(23, 29);
+    let popup_height = (area.height * 80 / 100).clamp(25, 31);
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -907,11 +907,15 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("W", key), Span::styled(" wrap up    ", desc),
             Span::styled("(Review: rebase or PR)", note),
         ]),
+        Line::from(vec![
+            Span::styled("  J/K", key), Span::styled(" reorder item up/down in column", desc),
+        ]),
         Line::from(""),
         Line::from(Span::styled("  * d is context-dependent:", note)),
         Line::from(Span::styled("    Backlog (no plan) \u{2192} brainstorm", note)),
         Line::from(Span::styled("    Backlog (has plan) \u{2192} dispatch", note)),
         Line::from(Span::styled("    Running \u{2192} resume (if window gone)", note)),
+        Line::from(Span::styled("    Epic \u{2192} dispatch next backlog subtask", note)),
         Line::from(""),
         Line::from(Span::styled("  General", header)),
         Line::from(vec![

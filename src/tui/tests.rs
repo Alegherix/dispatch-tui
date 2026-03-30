@@ -3840,3 +3840,12 @@ fn render_shows_unchecked_toggle_when_not_all_selected() {
     let buf = render_to_buffer(&app, 120, 30);
     assert!(buffer_contains(&buf, "[ ]"));
 }
+
+#[test]
+fn action_hints_include_select_all() {
+    let app = make_app();
+    let task = app.selected_task();
+    let spans = ui::action_hints(task, Color::Blue);
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains("select all"), "action hints should include 'select all'");
+}

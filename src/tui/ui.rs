@@ -858,10 +858,11 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  H", key), Span::styled(" history    ", desc),
             Span::styled("V", key), Span::styled(" epic done  ", desc),
-            Span::styled("Space", key), Span::styled(" select", desc),
+            Span::styled("a", key), Span::styled(" select all", desc),
         ]),
         Line::from(vec![
-            Span::styled("  f", key), Span::styled(" finish     ", desc),
+            Span::styled("  Space", key), Span::styled(" select  ", desc),
+            Span::styled("f", key), Span::styled(" finish     ", desc),
             Span::styled("(Review: merge + clean up worktree)", note),
         ]),
         Line::from(""),
@@ -1062,6 +1063,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
         }
     }
 
+    push_hint("a", "select all");
     push_hint("n", "new");
     push_hint("E", "epic");
     push_hint("D", "quick");
@@ -1087,6 +1089,7 @@ fn batch_action_hints(count: usize, key_color: Color) -> Vec<Span<'static>> {
     push_hint("m", "move");
     push_hint("M", "back");
     push_hint("x", "archive");
+    push_hint("a", "select all");
     push_hint("Space", "toggle");
     push_hint("Esc", "clear");
     spans

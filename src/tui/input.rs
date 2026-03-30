@@ -144,13 +144,7 @@ impl App {
                 if self.selection().on_select_all {
                     return self.update(Message::SelectAllColumn);
                 }
-                match self.selected_column_item() {
-                    Some(ColumnItem::Epic(epic)) => {
-                        let id = epic.id;
-                        self.update(Message::EnterEpic(id))
-                    }
-                    _ => self.update(Message::ToggleDetail),
-                }
+                self.update(Message::ToggleDetail)
             }
 
             KeyCode::Char('e') => {
@@ -159,7 +153,10 @@ impl App {
                     return self.update(Message::EditEpic(id));
                 }
                 match self.selected_column_item() {
-                    Some(ColumnItem::Epic(_)) => self.update(Message::ToggleDetail),
+                    Some(ColumnItem::Epic(epic)) => {
+                        let id = epic.id;
+                        self.update(Message::EnterEpic(id))
+                    }
                     Some(ColumnItem::Task(task)) => vec![Command::EditTaskInEditor(task.clone())],
                     None => vec![],
                 }

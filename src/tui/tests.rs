@@ -2544,6 +2544,50 @@ fn tasks_for_current_view_epic_shows_only_subtasks() {
 // --- enter/exit epic ---
 
 #[test]
+fn enter_on_epic_toggles_detail() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    // Epic is at row 0 in Backlog column (no standalone tasks)
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    assert!(!app.detail_visible);
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.detail_visible, "Enter on epic should toggle detail panel");
+    assert!(matches!(app.view_mode, ViewMode::Board(_)), "Should stay in board view");
+}
+
+#[test]
+fn e_on_epic_enters_epic_view() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    app.handle_key(make_key(KeyCode::Char('e')));
+
+    match &app.view_mode {
+        ViewMode::Epic { epic_id, .. } => assert_eq!(*epic_id, EpicId(10)),
+        _ => panic!("Expected ViewMode::Epic after pressing 'e' on epic"),
+    }
+}
+
+#[test]
+fn enter_on_task_still_toggles_detail() {
+    let mut app = make_app();
+    assert!(!app.detail_visible);
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.detail_visible, "Enter on task should still toggle detail");
+}
+
+#[test]
+fn e_on_task_still_edits() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::EditTaskInEditor(_))));
+}
+
+#[test]
 fn enter_epic_switches_to_epic_view() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.epics = vec![make_epic(10)];
@@ -2959,8 +3003,9 @@ fn confirm_archive_epic_no_subtasks_allows_archive() {
 
 #[test]
 fn enter_key_on_epic_enters_epic_view() {
+    // After keybinding swap: 'e' enters epic view, Enter toggles detail
     let mut app = make_app_with_epic_selected();
-    app.handle_key(make_key(KeyCode::Enter));
+    app.handle_key(make_key(KeyCode::Char('e')));
     assert!(matches!(app.view_mode, ViewMode::Epic { epic_id: EpicId(10), .. }));
 }
 

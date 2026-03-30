@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use dispatch::db::{self, Database, TaskStore};
-use dispatch::models::{Task, TaskId, TaskStatus};
-use dispatch::tui::{App, Command, Message, MoveDirection};
+use dispatch_agent::db::{self, Database, TaskStore};
+use dispatch_agent::models::{Task, TaskId, TaskStatus};
+use dispatch_agent::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
     let db = Database::open_in_memory().unwrap();

@@ -5432,3 +5432,157 @@ fn repo_filter_overlay_shows_delete_help() {
     let buf = render_to_buffer(&mut app, 80, 25);
     assert!(buffer_contains(&buf, "delete preset"), "Expected delete help text");
 }
+
+// --- Epic batch wrap-up ---
+
+fn make_review_subtask(id: i64, epic_id: i64, sort_order: i64) -> Task {
+    let mut task = make_task(id, TaskStatus::Review);
+    task.epic_id = Some(EpicId(epic_id));
+    task.worktree = Some(format!("/repo/.worktrees/{id}-task-{id}"));
+    task.sort_order = Some(sort_order);
+    task
+}
+
+#[test]
+fn epic_wrap_up_with_review_tasks_enters_confirm() {
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 1),
+        make_review_subtask(2, 10, 2),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+
+    app.update(Message::StartEpicWrapUp(EpicId(10)));
+
+    assert!(matches!(app.input.mode, InputMode::ConfirmEpicWrapUp(EpicId(10))));
+}
+
+#[test]
+fn epic_wrap_up_without_review_tasks_shows_info() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.epic_id = Some(EpicId(10));
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+
+    app.update(Message::StartEpicWrapUp(EpicId(10)));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.as_ref().unwrap().contains("No review tasks"));
+}
+
+#[test]
+fn epic_wrap_up_rebase_creates_queue_and_emits_first_finish() {
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
+
+    let cmds = app.update(Message::EpicWrapUpRebase);
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    let queue = app.merge_queue.as_ref().expect("merge queue should exist");
+    assert_eq!(queue.action, MergeAction::Rebase);
+    // Task 2 has sort_order 1, so it comes first
+    assert_eq!(queue.task_ids, vec![TaskId(2), TaskId(1)]);
+    assert_eq!(queue.current, Some(TaskId(2)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { id, .. } if *id == TaskId(2))));
+}
+
+#[test]
+fn epic_wrap_up_finish_complete_advances_queue() {
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
+    app.update(Message::EpicWrapUpRebase);
+
+    // First task completes
+    let cmds = app.update(Message::FinishComplete(TaskId(2)));
+
+    let queue = app.merge_queue.as_ref().expect("queue should still exist");
+    assert_eq!(queue.completed, 1);
+    assert_eq!(queue.current, Some(TaskId(1)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { id, .. } if *id == TaskId(1))));
+}
+
+#[test]
+fn epic_wrap_up_all_complete_clears_queue() {
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
+    app.update(Message::EpicWrapUpRebase);
+
+    app.update(Message::FinishComplete(TaskId(2)));
+    app.update(Message::FinishComplete(TaskId(1)));
+
+    assert!(app.merge_queue.is_none(), "queue should be cleared after all tasks complete");
+}
+
+#[test]
+fn epic_wrap_up_finish_failed_pauses_queue() {
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
+    app.update(Message::EpicWrapUpRebase);
+
+    app.update(Message::FinishFailed {
+        id: TaskId(2),
+        error: "rebase conflict".to_string(),
+        is_conflict: true,
+    });
+
+    let queue = app.merge_queue.as_ref().expect("queue should still exist");
+    assert_eq!(queue.failed, Some(TaskId(2)));
+    assert!(queue.current.is_none());
+}
+
+#[test]
+fn epic_wrap_up_cancel_clears_queue() {
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 1),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.merge_queue = Some(MergeQueue {
+        epic_id: EpicId(10),
+        action: MergeAction::Rebase,
+        task_ids: vec![TaskId(1)],
+        completed: 0,
+        current: Some(TaskId(1)),
+        failed: None,
+    });
+
+    app.update(Message::CancelMergeQueue);
+
+    assert!(app.merge_queue.is_none());
+}
+
+#[test]
+fn epic_wrap_up_pr_mode_advances_on_pr_created() {
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
+    app.update(Message::EpicWrapUpPr);
+
+    let cmds = app.update(Message::PrCreated {
+        id: TaskId(2),
+        pr_url: "https://github.com/org/repo/pull/1".to_string(),
+        pr_number: 1,
+    });
+
+    let queue = app.merge_queue.as_ref().expect("queue should still exist");
+    assert_eq!(queue.completed, 1);
+    assert_eq!(queue.current, Some(TaskId(1)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { id, .. } if *id == TaskId(1))));
+}

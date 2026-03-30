@@ -696,7 +696,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
             .iter()
             .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
             .collect();
-        subtasks.sort_by_key(|t| (t.status.column_index(), t.sort_order.unwrap_or(i64::from(t.id.0))));
+        subtasks.sort_by_key(|t| (t.status.column_index(), t.sort_order.unwrap_or(t.id.0)));
 
         if !subtasks.is_empty() {
             lines.push(Line::from(""));

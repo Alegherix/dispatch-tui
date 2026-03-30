@@ -1577,7 +1577,7 @@ impl App {
                     && t.worktree.is_some()
             })
             .collect();
-        review_tasks.sort_by_key(|t| t.sort_order.unwrap_or(i64::from(t.id.0)));
+        review_tasks.sort_by_key(|t| t.sort_order.unwrap_or(t.id.0));
 
         let task_ids: Vec<TaskId> = review_tasks.iter().map(|t| t.id).collect();
 

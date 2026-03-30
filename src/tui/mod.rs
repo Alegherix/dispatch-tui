@@ -105,6 +105,10 @@ impl App {
     pub fn merge_conflict_tasks(&self) -> &HashSet<TaskId> { &self.merge_conflict_tasks }
     pub fn notifications_enabled(&self) -> bool { self.notifications_enabled }
 
+    pub fn set_notifications_enabled(&mut self, enabled: bool) {
+        self.notifications_enabled = enabled;
+    }
+
     /// Set a transient status message with auto-clear timestamp.
     pub(in crate::tui) fn set_status(&mut self, msg: String) {
         self.status_message = Some(msg);

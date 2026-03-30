@@ -46,6 +46,12 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let paths = database.list_repo_paths().unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
 
+    // Load notification preference
+    let notif_enabled = database.get_setting_bool("notifications_enabled")
+        .unwrap_or(None)
+        .unwrap_or(true);
+    app.set_notifications_enabled(notif_enabled);
+
     // 4. Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -422,12 +428,17 @@ impl TuiRuntime {
         cmds
     }
 
-    fn exec_send_notification(&self, _title: &str, _body: &str, _urgent: bool) {
-        // Stub — will be replaced in Task 5
+    fn exec_send_notification(&self, title: &str, body: &str, urgent: bool) {
+        let urgency = if urgent { "critical" } else { "normal" };
+        if let Err(e) = self.runner.run("notify-send", &["-u", urgency, title, body]) {
+            tracing::warn!("notify-send failed: {e}");
+        }
     }
 
-    fn exec_persist_setting(&self, _key: &str, _value: bool) {
-        // Stub — will be replaced in Task 5
+    fn exec_persist_setting(&self, key: &str, value: bool) {
+        if let Err(e) = self.database.set_setting_bool(key, value) {
+            tracing::warn!("Failed to persist setting {key}: {e}");
+        }
     }
 
     fn exec_insert_epic(&self, app: &mut App, title: String, description: String, repo_path: String) {
@@ -1240,5 +1251,74 @@ mod tests {
             }
             other => panic!("Expected FinishFailed, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn exec_send_notification_calls_notify_send() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // notify-send call
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "notify-send");
+        assert!(calls[0].1.contains(&"Task #1: Fix bug".to_string()));
+        assert!(calls[0].1.contains(&"Ready for review".to_string()));
+    }
+
+    #[test]
+    fn exec_send_notification_urgent_uses_critical() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        rt.exec_send_notification("Task #1: Fix bug", "Agent needs your input", true);
+        let calls = mock.recorded_calls();
+        assert!(calls[0].1.contains(&"critical".to_string()));
+    }
+
+    #[test]
+    fn exec_send_notification_failure_does_not_panic() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("command not found"),
+        ]));
+        let rt = TuiRuntime {
+            database: db,
+            msg_tx: tx,
+            port: 3142,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner: mock.clone(),
+        };
+        // Should not panic — just logs a warning
+        rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
+    }
+
+    #[test]
+    fn exec_persist_setting_writes_to_db() {
+        let (rt, _app) = test_runtime();
+        rt.exec_persist_setting("notifications_enabled", true);
+        assert_eq!(
+            rt.database.get_setting_bool("notifications_enabled").unwrap(),
+            Some(true)
+        );
     }
 }

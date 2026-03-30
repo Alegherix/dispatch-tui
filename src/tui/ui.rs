@@ -148,11 +148,6 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         )
         .split(top_split[0]);
 
-    let right_segments = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(14), Constraint::Length(20)])
-        .split(top_split[1]);
-
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let count = app.column_items_for_status(status).len();
         let is_focused = app.selected_column() == col_idx;
@@ -197,21 +192,17 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(paragraph, col_segments[col_idx]);
     }
 
-    // Filter indicator
+    // Right sidebar: filter indicator + review badge + notification indicator
+    let mut right_parts: Vec<Span> = Vec::new();
     if !app.repo_filter().is_empty() {
         let active = app.repo_filter().len();
         let total = app.repo_paths().len();
-        let indicator = format!("[{active}/{total} repos]");
-        let p = Paragraph::new(indicator)
-            .style(Style::default().fg(Color::Rgb(86, 95, 137)))
-            .alignment(Alignment::Right);
-        frame.render_widget(p, right_segments[0]);
+        right_parts.push(Span::styled(
+            format!("[{active}/{total} repos]  "),
+            Style::default().fg(Color::Rgb(86, 95, 137)),
+        ));
     }
-
-    // Review badge + Notification indicator
-    let notif_area = right_segments[1];
     let review_count = app.review_prs().len();
-    let mut right_parts: Vec<Span> = Vec::new();
     if review_count > 0 {
         right_parts.push(Span::styled(
             format!("\u{21e5}{review_count} "),
@@ -225,7 +216,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
     }
     let right_line = Line::from(right_parts);
     let p = Paragraph::new(right_line).alignment(Alignment::Right);
-    frame.render_widget(p, notif_area);
+    frame.render_widget(p, top_split[1]);
 }
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).

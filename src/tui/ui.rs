@@ -393,10 +393,9 @@ fn render_epic_item(
         .collect();
 
     let done_count = subtask_statuses.iter().filter(|s| **s == TaskStatus::Done).count();
-    let running_count = subtask_statuses.iter().filter(|s| {
-        matches!(s, TaskStatus::Running | TaskStatus::Review)
-    }).count();
-    let pending_count = subtask_statuses.len() - done_count - running_count;
+    let running_count = subtask_statuses.iter().filter(|s| **s == TaskStatus::Running).count();
+    let review_count = subtask_statuses.iter().filter(|s| **s == TaskStatus::Review).count();
+    let pending_count = subtask_statuses.len() - done_count - running_count - review_count;
 
     let title_text = truncate(&epic.title, 28);
     let plan_indicator = if epic.plan.is_some() && status == TaskStatus::Backlog {
@@ -428,6 +427,12 @@ fn render_epic_item(
         meta_spans.push(Span::styled(
             format!("\u{25cf} {running_count} "),
             Style::default().fg(column_color(TaskStatus::Running)),
+        ));
+    }
+    if review_count > 0 {
+        meta_spans.push(Span::styled(
+            format!("\u{25cf} {review_count} "),
+            Style::default().fg(Color::Rgb(247, 118, 142)),
         ));
     }
     if done_count > 0 {

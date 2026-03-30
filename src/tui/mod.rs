@@ -1553,7 +1553,7 @@ impl App {
         if let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) {
             epic.done = false;
         }
-        vec![Command::PersistEpic { id, done: Some(false) }]
+        vec![Command::PersistEpic { id, done: Some(false), sort_order: None }]
     }
 
     fn handle_confirm_epic_done(&mut self) -> Vec<Command> {

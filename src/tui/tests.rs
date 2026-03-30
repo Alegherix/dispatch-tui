@@ -2678,7 +2678,7 @@ fn confirm_epic_done_marks_done() {
     app.input.mode = InputMode::ConfirmEpicDone(EpicId(10));
     let cmds = app.update(Message::ConfirmEpicDone);
     assert!(app.epics[0].done);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(true) })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(true), .. })));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -2752,7 +2752,7 @@ fn shift_m_on_done_epic_undoes_done() {
     app.selection_mut().set_row(3, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('M')));
     assert!(!app.epics[0].done);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(false) })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(false), .. })));
 }
 
 #[test]
@@ -2763,7 +2763,7 @@ fn mark_epic_undone() {
     app.epics = vec![epic];
     let cmds = app.update(Message::MarkEpicUndone(EpicId(10)));
     assert!(!app.epics[0].done);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(false) })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(false), .. })));
 }
 
 #[test]
@@ -4836,19 +4836,22 @@ fn reorder_task_up_swaps_sort_order() {
 fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
     let mut app = make_app();
 
-    // Create epic
-    let epic = make_epic(1);
+    // Create epic with a plan so subtask dispatch path is taken
+    let mut epic = make_epic(1);
+    epic.plan = Some("docs/plans/epic-1.md".to_string());
     app.epics = vec![epic];
 
-    // Create two backlog subtasks with different sort orders
+    // Create two backlog subtasks with different sort orders (both have plans)
     let mut t1 = make_task(10, TaskStatus::Backlog);
     t1.epic_id = Some(EpicId(1));
     t1.sort_order = Some(200);
     t1.title = "Second task".to_string();
+    t1.plan = Some("docs/plans/task-10.md".to_string());
     let mut t2 = make_task(11, TaskStatus::Backlog);
     t2.epic_id = Some(EpicId(1));
     t2.sort_order = Some(100);
     t2.title = "First task".to_string();
+    t2.plan = Some("docs/plans/task-11.md".to_string());
     app.tasks = vec![t1, t2];
 
     let cmds = app.update(Message::DispatchEpic(EpicId(1)));

@@ -25,6 +25,8 @@ pub(super) struct UpdateTaskArgs {
     pub(super) description: Option<String>,
     #[serde(default)]
     pub(super) repo_path: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) sort_order: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -56,6 +58,8 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) plan: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) sort_order: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -73,13 +77,14 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
         || parsed.plan.is_some()
         || parsed.title.is_some()
         || parsed.description.is_some()
-        || parsed.repo_path.is_some();
+        || parsed.repo_path.is_some()
+        || parsed.sort_order.is_some();
 
     if !has_update {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "At least one of status, plan, title, description, or repo_path must be provided",
+            "At least one of status, plan, title, description, repo_path, or sort_order must be provided",
         );
     }
 
@@ -124,6 +129,9 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if let Some(ref r) = parsed.repo_path {
         patch = patch.repo_path(r);
     }
+    if let Some(so) = parsed.sort_order {
+        patch = patch.sort_order(Some(so));
+    }
 
     if let Err(e) = state.db.patch_task(TaskId(parsed.task_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
@@ -137,6 +145,7 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if parsed.title.is_some() { updated.push("title".to_string()); }
     if parsed.description.is_some() { updated.push("description".to_string()); }
     if parsed.repo_path.is_some() { updated.push("repo_path".to_string()); }
+    if parsed.sort_order.is_some() { updated.push("sort_order".to_string()); }
 
     JsonRpcResponse::ok(
         id,
@@ -171,6 +180,9 @@ pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Valu
                 if let Err(e) = state.db.set_task_epic_id(task_id, Some(EpicId(eid))) {
                     return JsonRpcResponse::err(id, -32603, format!("Failed to link task to epic: {e}"));
                 }
+            }
+            if let Some(so) = parsed.sort_order {
+                let _ = state.db.patch_task(task_id, &db::TaskPatch::new().sort_order(Some(so)));
             }
             state.notify();
             JsonRpcResponse::ok(

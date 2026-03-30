@@ -5,7 +5,7 @@ use crate::db::EpicPatch;
 use crate::models::{EpicId, TaskStatus};
 use crate::mcp::McpState;
 
-use super::types::{JsonRpcResponse, deserialize_flexible_i64, parse_args};
+use super::types::{JsonRpcResponse, deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args};
 
 // ---------------------------------------------------------------------------
 // Typed argument structs
@@ -17,6 +17,8 @@ pub(super) struct CreateEpicArgs {
     pub(super) repo_path: String,
     #[serde(default)]
     pub(super) description: String,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) sort_order: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -37,6 +39,8 @@ pub(super) struct UpdateEpicArgs {
     pub(super) done: Option<bool>,
     #[serde(default)]
     pub(super) plan: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) sort_order: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -52,6 +56,9 @@ pub(super) fn handle_create_epic(state: &McpState, id: Option<Value>, args: Valu
 
     match state.db.create_epic(&parsed.title, &parsed.description, &parsed.repo_path) {
         Ok(epic) => {
+            if let Some(so) = parsed.sort_order {
+                let _ = state.db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(so)));
+            }
             state.notify();
             JsonRpcResponse::ok(
                 id,
@@ -125,13 +132,14 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     let has_update = parsed.title.is_some()
         || parsed.description.is_some()
         || parsed.done.is_some()
-        || parsed.plan.is_some();
+        || parsed.plan.is_some()
+        || parsed.sort_order.is_some();
 
     if !has_update {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "At least one of title, description, done, or plan must be provided",
+            "At least one of title, description, done, plan, or sort_order must be provided",
         );
     }
 
@@ -140,6 +148,7 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     if let Some(ref d) = parsed.description { patch = patch.description(d); }
     if let Some(d) = parsed.done { patch = patch.done(d); }
     if let Some(ref p) = parsed.plan { patch = patch.plan(Some(p.as_str())); }
+    if let Some(so) = parsed.sort_order { patch = patch.sort_order(Some(so)); }
 
     if let Err(e) = state.db.patch_epic(EpicId(parsed.epic_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
@@ -151,6 +160,7 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     if parsed.description.is_some() { updated.push("description"); }
     if parsed.done.is_some() { updated.push("done"); }
     if parsed.plan.is_some() { updated.push("plan"); }
+    if parsed.sort_order.is_some() { updated.push("sort_order"); }
 
     JsonRpcResponse::ok(
         id,

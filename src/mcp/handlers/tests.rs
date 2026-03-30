@@ -719,9 +719,9 @@ fn tool_schemas_match_arg_structs() {
     let cases: Vec<(&str, BTreeSet<&str>, BTreeSet<&str>, Value)> = vec![
         (
             "update_task",
-            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path"]),
+            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order"]),
             BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r"}),
+            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100}),
         ),
         (
             "get_task",
@@ -731,9 +731,9 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "create_task",
-            BTreeSet::from(["title", "repo_path", "description", "plan", "epic_id"]),
+            BTreeSet::from(["title", "repo_path", "description", "plan", "epic_id", "sort_order"]),
             BTreeSet::from(["title", "repo_path"]),
-            json!({"title": "t", "repo_path": "/r", "description": "d", "plan": "/p.md"}),
+            json!({"title": "t", "repo_path": "/r", "description": "d", "plan": "/p.md", "sort_order": 10}),
         ),
         (
             "list_tasks",
@@ -749,9 +749,9 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "create_epic",
-            BTreeSet::from(["title", "repo_path", "description"]),
+            BTreeSet::from(["title", "repo_path", "description", "sort_order"]),
             BTreeSet::from(["title", "repo_path"]),
-            json!({"title": "Epic", "repo_path": "/repo"}),
+            json!({"title": "Epic", "repo_path": "/repo", "sort_order": 5}),
         ),
         (
             "get_epic",
@@ -767,9 +767,9 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "update_epic",
-            BTreeSet::from(["epic_id", "title", "description", "done", "plan"]),
+            BTreeSet::from(["epic_id", "title", "description", "done", "plan", "sort_order"]),
             BTreeSet::from(["epic_id"]),
-            json!({"epic_id": 1, "plan": "docs/plan.md"}),
+            json!({"epic_id": 1, "plan": "docs/plan.md", "sort_order": 42}),
         ),
     ];
 

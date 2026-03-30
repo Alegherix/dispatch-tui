@@ -28,16 +28,20 @@ fn provision_worktree(task: &Task, runner: &dyn ProcessRunner) -> Result<Provisi
     fs::create_dir_all(format!("{repo_path}/.worktrees"))
         .context("failed to create .worktrees directory")?;
 
-    let output = runner
-        .run(
-            "git",
-            &["-C", &repo_path, "worktree", "add", &worktree_path, "-B", &worktree_name],
-        )
-        .context("failed to run git worktree add")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let msg = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or(stderr.trim());
-        anyhow::bail!("git worktree add failed: {msg}");
+    if std::path::Path::new(&worktree_path).exists() {
+        tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
+    } else {
+        let output = runner
+            .run(
+                "git",
+                &["-C", &repo_path, "worktree", "add", &worktree_path, "-B", &worktree_name],
+            )
+            .context("failed to run git worktree add")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git worktree add failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
 
     tmux::new_window(&tmux_window, &worktree_path, runner)
@@ -670,16 +674,16 @@ mod tests {
     // --- ProcessRunner-based tests ---
 
     #[test]
-    fn dispatch_creates_worktree_then_opens_tmux() {
+    fn dispatch_reuses_existing_worktree() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo_path = dir.path().to_str().unwrap().to_string();
-        // Pre-create worktree dir so fs::write for the prompt succeeds
-        // (git is mocked and won't create it).
+        // Pre-create worktree dir — simulates a re-dispatch where the worktree
+        // already exists on disk from a previous dispatch cycle.
         let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // git worktree add
+            // git worktree add is skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
@@ -690,13 +694,11 @@ mod tests {
         dispatch_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].0, "git", "first call should be git");
-        assert!(calls[0].1.contains(&"worktree".to_string()));
-        assert!(calls[0].1.contains(&"add".to_string()));
+        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped for existing worktree");
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "new-window");
         assert_eq!(calls[1].0, "tmux");
-        assert_eq!(calls[1].1[0], "new-window");
-        assert_eq!(calls[2].0, "tmux");
-        assert_eq!(calls[2].1[0], "set-hook");
+        assert_eq!(calls[1].1[0], "set-hook");
     }
 
     #[test]
@@ -707,7 +709,6 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l (the claude command)
@@ -718,11 +719,59 @@ mod tests {
         dispatch_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        // The literal send-keys call (index 3) carries the claude invocation
+        // The literal send-keys call (index 2) carries the claude invocation
         assert!(
-            calls[3].1.iter().any(|a| a.contains("claude")),
+            calls[2].1.iter().any(|a| a.contains("claude")),
             "send-keys should include claude"
         );
+    }
+
+    #[test]
+    fn provision_worktree_creates_new_when_dir_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        // Do NOT pre-create the worktree dir — test the "create" path
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+        ]);
+
+        let task = make_task(&repo_path);
+        let result = provision_worktree(&task, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[0].0, "git", "first call should be git worktree add");
+        assert!(calls[0].1.contains(&"worktree".to_string()));
+        assert!(calls[0].1.contains(&"add".to_string()));
+        assert_eq!(calls[1].0, "tmux");
+        assert_eq!(calls[1].1[0], "new-window");
+
+        let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
+        assert_eq!(result.worktree_path, expected_path);
+    }
+
+    #[test]
+    fn provision_worktree_skips_git_when_dir_exists() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+        ]);
+
+        let task = make_task(&repo_path);
+        let result = provision_worktree(&task, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped");
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "new-window");
+        assert_eq!(result.worktree_path, worktree_dir.to_str().unwrap());
     }
 
     #[test]
@@ -786,14 +835,13 @@ mod tests {
     }
 
     #[test]
-    fn brainstorm_creates_worktree_then_opens_tmux() {
+    fn brainstorm_reuses_existing_worktree() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo_path = dir.path().to_str().unwrap().to_string();
         let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
@@ -804,10 +852,9 @@ mod tests {
         brainstorm_agent(&task, 3142, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].0, "git", "first call should be git");
-        assert!(calls[0].1.contains(&"worktree".to_string()));
-        assert_eq!(calls[1].0, "tmux");
-        assert_eq!(calls[1].1[0], "new-window");
+        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped for existing worktree");
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "new-window");
     }
 
     #[test]
@@ -818,7 +865,6 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
@@ -836,14 +882,13 @@ mod tests {
     }
 
     #[test]
-    fn quick_dispatch_creates_worktree_then_opens_tmux() {
+    fn quick_dispatch_reuses_existing_worktree() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo_path = dir.path().to_str().unwrap().to_string();
         let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l
@@ -854,10 +899,9 @@ mod tests {
         quick_dispatch_agent(&task, 3142, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].0, "git");
-        assert!(calls[0].1.contains(&"worktree".to_string()));
-        assert_eq!(calls[1].0, "tmux");
-        assert_eq!(calls[1].1[0], "new-window");
+        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped for existing worktree");
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "new-window");
     }
 
     #[test]
@@ -868,7 +912,6 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
             MockProcessRunner::ok(), // tmux send-keys -l

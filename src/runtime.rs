@@ -1013,7 +1013,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),  // git worktree add
+            // git worktree add is skipped (dir pre-created above)
             MockProcessRunner::ok(),  // tmux new-window
             MockProcessRunner::ok(),  // tmux set-hook (after-split-window)
             MockProcessRunner::ok(),  // tmux send-keys -l
@@ -1039,7 +1039,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("fatal: worktree already exists"),  // git worktree add fails
+            MockProcessRunner::fail("fatal: not a git repository"),  // git worktree add fails
         ]));
         let rt = TuiRuntime {
             database: db.clone(),

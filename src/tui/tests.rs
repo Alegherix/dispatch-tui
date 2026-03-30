@@ -1588,6 +1588,53 @@ fn input_char_appends_to_buffer() {
 }
 
 #[test]
+fn start_repo_filter_enters_mode() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.update(Message::StartRepoFilter);
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+#[test]
+fn toggle_repo_filter_adds_and_removes() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    app.update(Message::ToggleRepoFilter("/repo-a".to_string()));
+    assert!(app.repo_filter.contains("/repo-a"));
+    assert!(!app.repo_filter.contains("/repo-b"));
+
+    app.update(Message::ToggleRepoFilter("/repo-a".to_string()));
+    assert!(!app.repo_filter.contains("/repo-a"));
+}
+
+#[test]
+fn toggle_all_repo_filter_selects_all_then_clears() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    // Toggle all on
+    app.update(Message::ToggleAllRepoFilter);
+    assert_eq!(app.repo_filter.len(), 2);
+
+    // Toggle all off
+    app.update(Message::ToggleAllRepoFilter);
+    assert!(app.repo_filter.is_empty());
+}
+
+#[test]
+fn close_repo_filter_returns_to_normal() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    let cmds = app.update(Message::CloseRepoFilter);
+    assert_eq!(app.input.mode, InputMode::Normal);
+    // Should emit PersistStringSetting
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistStringSetting { .. })));
+}
+
+#[test]
 fn input_backspace_removes_last_char() {
     let mut app = App::new(vec![], Duration::from_secs(300));
     app.input.buffer = "abc".to_string();

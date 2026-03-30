@@ -1037,6 +1037,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
+        InputMode::RepoFilter => {
+            let bar = Paragraph::new("Repo filter — Esc to close")
+                .style(Style::default().fg(Color::Cyan));
+            frame.render_widget(bar, area);
+        }
     }
 }
 

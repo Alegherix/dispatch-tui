@@ -29,6 +29,7 @@ impl App {
             InputMode::ConfirmPr(_) => self.handle_key_confirm_pr(key),
             InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
             InputMode::Help => self.handle_key_help(key),
+            InputMode::RepoFilter => self.handle_key_repo_filter(key),
         }
     }
 
@@ -497,6 +498,13 @@ impl App {
     fn handle_key_help(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('?') | KeyCode::Esc => self.update(Message::ToggleHelp),
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Esc => self.update(Message::CloseRepoFilter),
             _ => vec![],
         }
     }

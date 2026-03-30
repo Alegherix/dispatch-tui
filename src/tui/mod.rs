@@ -363,6 +363,11 @@ impl App {
             Message::PrCreated { id, pr_url, pr_number } => self.handle_pr_created(id, pr_url, pr_number),
             Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
+            // Repo filter
+            Message::StartRepoFilter => self.handle_start_repo_filter(),
+            Message::CloseRepoFilter => self.handle_close_repo_filter(),
+            Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
+            Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
         }
     }
 
@@ -1565,6 +1570,41 @@ impl App {
         };
 
         self.finish_epic_creation(repo_path)
+    }
+
+    fn handle_start_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::RepoFilter;
+        vec![]
+    }
+
+    fn handle_close_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clamp_selection();
+        let value = self.repo_filter.iter().cloned().collect::<Vec<_>>().join("\n");
+        vec![Command::PersistStringSetting {
+            key: "repo_filter".to_string(),
+            value,
+        }]
+    }
+
+    fn handle_toggle_repo_filter(&mut self, path: String) -> Vec<Command> {
+        if self.repo_filter.contains(&path) {
+            self.repo_filter.remove(&path);
+        } else {
+            self.repo_filter.insert(path);
+        }
+        self.clamp_selection();
+        vec![]
+    }
+
+    fn handle_toggle_all_repo_filter(&mut self) -> Vec<Command> {
+        if self.repo_filter.len() == self.repo_paths.len() {
+            self.repo_filter.clear();
+        } else {
+            self.repo_filter = self.repo_paths.iter().cloned().collect();
+        }
+        self.clamp_selection();
+        vec![]
     }
 
     fn finish_epic_creation(&mut self, repo_path: String) -> Vec<Command> {

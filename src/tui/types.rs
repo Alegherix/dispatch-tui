@@ -107,6 +107,11 @@ pub enum Message {
     ConfirmDone,
     CancelDone,
     ToggleNotifications,
+    // Repo filter
+    StartRepoFilter,
+    CloseRepoFilter,
+    ToggleRepoFilter(String),
+    ToggleAllRepoFilter,
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +150,7 @@ pub enum Command {
     RefreshEpicsFromDb,
     SendNotification { title: String, body: String, urgent: bool },
     PersistSetting { key: String, value: bool },
+    PersistStringSetting { key: String, value: String },
     CreatePr {
         id: TaskId,
         repo_path: String,
@@ -185,6 +191,7 @@ pub enum InputMode {
     ConfirmEpicDone(EpicId),
     // Overlay modes
     Help,
+    RepoFilter,
 }
 
 // ---------------------------------------------------------------------------

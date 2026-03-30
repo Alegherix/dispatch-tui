@@ -839,6 +839,8 @@ async fn execute_commands(
                 rt.exec_create_pr(id, repo_path, branch, title, description),
             Command::CheckPrStatus { id, pr_number, repo_path } =>
                 rt.exec_check_pr_status(id, pr_number, repo_path),
+            // String settings — handler added in a later task
+            Command::PersistStringSetting { .. } => {}
         }
     }
 

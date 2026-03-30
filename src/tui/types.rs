@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::widgets::ListState;
 
-use crate::models::{Epic, EpicId, ReviewDecision, Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, ReviewDecision, Task, TaskId, TaskStatus, TaskUsage};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -76,6 +76,7 @@ pub enum Message {
     EnterEpic(EpicId),
     ExitEpic,
     RefreshEpics(Vec<Epic>),
+    RefreshUsage(Vec<TaskUsage>),
     EpicCreated(Epic),
     EditEpic(EpicId),
     EpicEdited(Epic),

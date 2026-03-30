@@ -48,6 +48,8 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let mut app = App::new(tasks, Duration::from_secs(inactivity_timeout));
     let paths = database.list_repo_paths().unwrap_or_default();
     app.update(Message::RepoPathsUpdated(paths));
+    let usage = database.get_all_usage().unwrap_or_default();
+    app.update(Message::RefreshUsage(usage));
 
     // Load notification preference
     let notif_enabled = database.get_setting_bool("notifications_enabled")
@@ -451,6 +453,7 @@ impl TuiRuntime {
         }
         // Also refresh epics
         self.exec_refresh_epics_from_db(app);
+        self.exec_refresh_usage_from_db(app);
         cmds
     }
 
@@ -543,6 +546,17 @@ impl TuiRuntime {
             }
             Err(e) => {
                 app.update(Message::Error(Self::db_error("refreshing epics", e)));
+            }
+        }
+    }
+
+    fn exec_refresh_usage_from_db(&self, app: &mut App) {
+        match self.database.get_all_usage() {
+            Ok(usage) => {
+                app.update(Message::RefreshUsage(usage));
+            }
+            Err(e) => {
+                tracing::warn!("Failed to refresh usage from db: {e}");
             }
         }
     }

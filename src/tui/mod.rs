@@ -4,11 +4,11 @@ pub mod ui;
 
 pub use types::*;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::dispatch;
-use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus, epic_status};
+use crate::models::{Epic, EpicId, Task, TaskId, TaskStatus, TaskUsage, epic_status};
 
 // ---------------------------------------------------------------------------
 // App
@@ -35,6 +35,7 @@ pub struct App {
     pub(in crate::tui) review_prs: Vec<crate::models::ReviewPr>,
     pub(in crate::tui) review_board_loading: bool,
     pub(in crate::tui) last_review_fetch: Option<Instant>,
+    pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -70,6 +71,7 @@ impl App {
             review_prs: Vec::new(),
             review_board_loading: false,
             last_review_fetch: None,
+            usage: HashMap::new(),
         }
     }
 
@@ -366,6 +368,7 @@ impl App {
             Message::EnterEpic(epic_id) => self.handle_enter_epic(epic_id),
             Message::ExitEpic => self.handle_exit_epic(),
             Message::RefreshEpics(epics) => self.handle_refresh_epics(epics),
+            Message::RefreshUsage(usage) => self.handle_refresh_usage(usage),
             Message::EpicCreated(epic) => self.handle_epic_created(epic),
             Message::EditEpic(id) => self.handle_edit_epic(id),
             Message::EpicEdited(epic) => self.handle_epic_edited(epic),
@@ -1630,6 +1633,11 @@ impl App {
 
     fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
         self.epics = epics;
+        vec![]
+    }
+
+    fn handle_refresh_usage(&mut self, usage: Vec<TaskUsage>) -> Vec<Command> {
+        self.usage = usage.into_iter().map(|u| (u.task_id, u)).collect();
         vec![]
     }
 

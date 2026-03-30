@@ -5071,3 +5071,21 @@ fn review_board_renders_empty_state() {
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(buffer_contains(&buf, "No PRs awaiting your review"));
 }
+
+#[test]
+fn handle_refresh_usage_stores_by_task_id() {
+    use crate::models::TaskUsage;
+    let mut app = make_app();
+    let usage = vec![TaskUsage {
+        task_id: TaskId(1),
+        cost_usd: 0.42,
+        input_tokens: 10_000,
+        output_tokens: 2_000,
+        cache_read_tokens: 500,
+        cache_write_tokens: 100,
+        updated_at: chrono::Utc::now(),
+    }];
+    app.update(Message::RefreshUsage(usage));
+    assert!(app.usage.contains_key(&TaskId(1)));
+    assert!((app.usage[&TaskId(1)].cost_usd - 0.42).abs() < 1e-9);
+}

@@ -1002,7 +1002,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 8, "fresh DB should be at schema version 8");
+        assert_eq!(version, 9, "fresh DB should be at schema version 9");
     }
 
     #[test]
@@ -1053,7 +1053,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1116,7 +1116,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
     }
 
     #[test]

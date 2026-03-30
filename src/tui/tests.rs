@@ -4533,11 +4533,11 @@ fn repo_filter_applies_to_epics_in_column_items() {
     app.epics = vec![
         Epic {
             id: EpicId(1), title: "A".into(), description: "".into(),
-            repo_path: "/repo-a".into(), done: false, plan: None, created_at: now, updated_at: now,
+            repo_path: "/repo-a".into(), done: false, plan: None, sort_order: None, created_at: now, updated_at: now,
         },
         Epic {
             id: EpicId(2), title: "B".into(), description: "".into(),
-            repo_path: "/repo-b".into(), done: false, plan: None, created_at: now, updated_at: now,
+            repo_path: "/repo-b".into(), done: false, plan: None, sort_order: None, created_at: now, updated_at: now,
         },
     ];
     app.repo_filter.insert("/repo-a".to_string());
@@ -4717,4 +4717,47 @@ fn wrap_up_rebase_clears_conflict_flag() {
     app.update(Message::StartWrapUp(TaskId(1)));
     app.update(Message::WrapUpRebase);
     assert!(!app.rebase_conflict_tasks.contains(&TaskId(1)));
+}
+
+// --- sort_order ---
+
+#[test]
+fn column_items_sorted_by_sort_order() {
+    let mut app = make_app();
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.title = "First".to_string();
+    t1.sort_order = Some(200);
+    let mut t2 = make_task(2, TaskStatus::Backlog);
+    t2.title = "Second".to_string();
+    t2.sort_order = Some(100);
+    app.tasks = vec![t1, t2];
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert_eq!(items.len(), 2);
+    match &items[0] {
+        ColumnItem::Task(t) => assert_eq!(t.title, "Second"),
+        _ => panic!("expected task"),
+    }
+    match &items[1] {
+        ColumnItem::Task(t) => assert_eq!(t.title, "First"),
+        _ => panic!("expected task"),
+    }
+}
+
+#[test]
+fn column_items_null_sort_order_uses_id() {
+    let mut app = make_app();
+    let mut t1 = make_task(10, TaskStatus::Backlog);
+    t1.title = "High ID".to_string();
+    t1.sort_order = None;
+    let mut t2 = make_task(5, TaskStatus::Backlog);
+    t2.title = "Low ID".to_string();
+    t2.sort_order = None;
+    app.tasks = vec![t1, t2];
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    match &items[0] {
+        ColumnItem::Task(t) => assert_eq!(t.title, "Low ID"),
+        _ => panic!("expected task"),
+    }
 }

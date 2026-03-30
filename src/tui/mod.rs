@@ -180,9 +180,12 @@ impl App {
             }
         }
 
-        items.sort_by_key(|item| match item {
-            ColumnItem::Task(t) => t.created_at,
-            ColumnItem::Epic(e) => e.created_at,
+        items.sort_by_key(|item| {
+            let (sort_order, id) = match item {
+                ColumnItem::Task(t) => (t.sort_order, t.id.0),
+                ColumnItem::Epic(e) => (e.sort_order, e.id.0),
+            };
+            (sort_order.unwrap_or(id), id)
         });
 
         items

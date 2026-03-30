@@ -583,8 +583,9 @@ impl App {
         if self.notifications_enabled {
             for new_task in &new_tasks {
                 // Extract old state before any mutable borrows
-                let was_needs_input = self.find_task(new_task.id).is_some_and(|t| t.needs_input);
-                let was_review = self.find_task(new_task.id).is_some_and(|t| t.status == TaskStatus::Review);
+                let old_task = self.find_task(new_task.id);
+                let was_needs_input = old_task.is_some_and(|t| t.needs_input);
+                let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
 
                 // Detect needs_input transition: false → true
                 if new_task.needs_input && !was_needs_input

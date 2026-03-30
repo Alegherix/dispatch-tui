@@ -743,7 +743,8 @@ async fn execute_commands(
     rt: &TuiRuntime,
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> Result<()> {
-    for command in commands {
+    let mut queue = std::collections::VecDeque::from(commands);
+    while let Some(command) = queue.pop_front() {
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
             Command::InsertTask { draft, epic_id } =>
@@ -756,15 +757,7 @@ async fn execute_commands(
             Command::SaveRepoPath(path) => rt.exec_save_repo_path(app, path),
             Command::RefreshFromDb => {
                 let extra = rt.exec_refresh_from_db(app);
-                for cmd in extra {
-                    match cmd {
-                        Command::SendNotification { title, body, urgent } =>
-                            rt.exec_send_notification(&title, &body, urgent),
-                        Command::PersistSetting { key, value } =>
-                            rt.exec_persist_setting(&key, value),
-                        _ => {} // Only notification-related commands expected from refresh
-                    }
-                }
+                queue.extend(extra);
             }
             Command::Cleanup { id, repo_path, worktree, tmux_window } =>
                 rt.exec_cleanup(id, repo_path, worktree, tmux_window),

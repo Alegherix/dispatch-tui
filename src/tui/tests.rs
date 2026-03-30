@@ -3544,92 +3544,6 @@ fn help_overlay_hidden_in_normal_mode() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn finish_task_on_review_with_worktree_emits_command() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t.tmux_window = Some("task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2));
-
-    // FinishTask enters confirm mode
-    app.update(Message::FinishTask(TaskId(1)));
-    assert!(matches!(app.input.mode, InputMode::ConfirmFinish(TaskId(1))));
-
-    // ConfirmFinish emits Command::Finish
-    let cmds = app.update(Message::ConfirmFinish);
-    assert!(
-        cmds.iter().any(|c| matches!(c, Command::Finish { .. })),
-        "Expected Command::Finish, got: {cmds:?}"
-    );
-}
-
-#[test]
-fn finish_task_on_non_review_is_noop() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Running);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-
-    let cmds = app.update(Message::FinishTask(TaskId(1)));
-    assert!(cmds.is_empty(), "Should not produce commands for non-Review task");
-}
-
-#[test]
-fn finish_task_without_worktree_is_noop() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Review),
-    ], Duration::from_secs(300));
-
-    let cmds = app.update(Message::FinishTask(TaskId(1)));
-    assert!(cmds.is_empty(), "Should not produce commands without worktree");
-}
-
-#[test]
-fn finish_task_shows_confirmation() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-
-    app.update(Message::FinishTask(TaskId(1)));
-    assert!(matches!(app.input.mode, InputMode::ConfirmFinish(TaskId(1))));
-    assert!(app.status_message.as_ref().unwrap().contains("rebase"));
-}
-
-#[test]
-fn confirm_finish_emits_finish_command() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t.tmux_window = Some("task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-
-    app.update(Message::FinishTask(TaskId(1)));
-    let cmds = app.update(Message::ConfirmFinish);
-    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { .. })));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn cancel_finish_returns_to_normal() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-
-    app.update(Message::FinishTask(TaskId(1)));
-    app.update(Message::CancelFinish);
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(app.status_message.is_none());
-}
-
-#[test]
 fn finish_complete_moves_to_done() {
     let mut app = App::new(vec![{
         let mut t = make_task(1, TaskStatus::Review);
@@ -3715,84 +3629,6 @@ fn conflict_flag_clears_on_move_backward() {
 
     app.update(Message::MoveTask { id: TaskId(1), direction: MoveDirection::Backward });
     assert!(!app.rebase_conflict_tasks().contains(&TaskId(1)));
-}
-
-#[test]
-fn confirm_finish_clears_conflict_flag() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t.tmux_window = Some("task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-
-    app.update(Message::FinishFailed {
-        id: TaskId(1),
-        error: "conflict".to_string(),
-        is_conflict: true,
-    });
-
-    app.update(Message::FinishTask(TaskId(1)));
-    app.update(Message::ConfirmFinish);
-    assert!(!app.rebase_conflict_tasks().contains(&TaskId(1)));
-}
-
-#[test]
-#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
-fn f_key_on_review_task_starts_finish() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2));
-
-    app.handle_key(make_key(KeyCode::Char('f')));
-    assert!(matches!(app.input.mode, InputMode::ConfirmFinish(_)));
-}
-
-#[test]
-#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
-fn f_key_on_non_review_task_is_noop() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Backlog),
-    ], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(0));
-
-    app.handle_key(make_key(KeyCode::Char('f')));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
-fn confirm_finish_y_key_emits_command() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t.tmux_window = Some("task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2));
-
-    app.handle_key(make_key(KeyCode::Char('f')));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { .. })));
-}
-
-#[test]
-#[ignore = "f key now opens repo filter; finish trigger removed in Task 8"]
-fn confirm_finish_n_key_cancels() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-        t
-    }], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2));
-
-    app.handle_key(make_key(KeyCode::Char('f')));
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(app.status_message.is_none());
 }
 
 // --- truncate_title ---
@@ -4448,51 +4284,6 @@ fn summary_row_shows_muted_bell_and_hint_when_disabled() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn create_pr_task_on_review_enters_confirm_mode() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    // Navigate to Review column (index 3)
-    app.update(Message::NavigateColumn(3));
-
-    app.update(Message::CreatePrTask(TaskId(1)));
-    assert!(matches!(app.mode(), InputMode::ConfirmPr(TaskId(1))));
-}
-
-#[test]
-fn create_pr_task_on_non_review_ignored() {
-    let task = make_task(1, TaskStatus::Backlog);
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.update(Message::CreatePrTask(TaskId(1)));
-    assert!(matches!(app.mode(), InputMode::Normal));
-}
-
-#[test]
-fn confirm_pr_emits_create_pr_command() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(3));
-    app.update(Message::CreatePrTask(TaskId(1)));
-
-    let cmds = app.update(Message::ConfirmPrStart);
-    assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { .. })));
-    assert!(matches!(app.mode(), InputMode::Normal));
-}
-
-#[test]
-fn cancel_pr_returns_to_normal() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(3));
-    app.update(Message::CreatePrTask(TaskId(1)));
-
-    app.update(Message::CancelPr);
-    assert!(matches!(app.mode(), InputMode::Normal));
-}
-
-#[test]
 fn pr_created_stores_url_and_number() {
     let task = make_task(1, TaskStatus::Review);
     let mut app = App::new(vec![task], Duration::from_secs(300));
@@ -4586,7 +4377,7 @@ fn card_shows_merged_pr_badge() {
 }
 
 #[test]
-fn status_bar_shows_pr_hint_for_review_task() {
+fn status_bar_shows_wrap_up_hint_for_review_task() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
@@ -4596,7 +4387,7 @@ fn status_bar_shows_pr_hint_for_review_task() {
     }
 
     let buf = render_to_buffer(&mut app, 120, 20);
-    assert!(buffer_contains(&buf, "pr"), "Status bar should show pr hint for Review tasks");
+    assert!(buffer_contains(&buf, "wrap up"), "Status bar should show wrap up hint for Review tasks");
 }
 
 #[test]
@@ -4614,66 +4405,6 @@ fn detail_panel_shows_pr_url() {
     let buf = render_to_buffer(&mut app, 200, 20);
     assert!(buffer_contains(&buf, "PR:"), "Detail panel should show PR label");
     assert!(buffer_contains(&buf, "pull/42"), "Detail panel should show PR URL");
-}
-
-// -----------------------------------------------------------------------
-// p key binding and ConfirmPr input mode tests
-// -----------------------------------------------------------------------
-
-#[test]
-fn p_key_on_review_task_enters_confirm_pr() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2)); // Review column
-
-    app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(matches!(app.mode(), InputMode::ConfirmPr(TaskId(1))));
-}
-
-#[test]
-fn p_key_on_non_review_task_ignored() {
-    let task = make_task(1, TaskStatus::Backlog);
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-
-    app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(matches!(app.mode(), InputMode::Normal));
-}
-
-#[test]
-fn confirm_pr_y_emits_command() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2));
-    app.handle_key(make_key(KeyCode::Char('p')));
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { .. })));
-}
-
-#[test]
-fn confirm_pr_n_cancels() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2));
-    app.handle_key(make_key(KeyCode::Char('p')));
-
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(matches!(app.mode(), InputMode::Normal));
-}
-
-#[test]
-fn confirm_pr_esc_cancels() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    let mut app = App::new(vec![task], Duration::from_secs(300));
-    app.update(Message::NavigateColumn(2));
-    app.handle_key(make_key(KeyCode::Char('p')));
-
-    app.handle_key(make_key(KeyCode::Esc));
-    assert!(matches!(app.mode(), InputMode::Normal));
 }
 
 #[test]

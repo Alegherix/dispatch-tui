@@ -331,9 +331,6 @@ impl App {
             Message::StatusInfo(msg) => self.handle_status_info(msg),
             Message::ToggleHelp => self.handle_toggle_help(),
             // Finish (rebase + cleanup)
-            Message::FinishTask(id) => self.handle_finish_task(id),
-            Message::ConfirmFinish => self.handle_confirm_finish(),
-            Message::CancelFinish => self.handle_cancel_finish(),
             Message::FinishComplete(id) => self.handle_finish_complete(id),
             Message::FinishFailed { id, error, is_conflict } =>
                 self.handle_finish_failed(id, error, is_conflict),
@@ -362,9 +359,6 @@ impl App {
             Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
             Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
             // PR flow
-            Message::CreatePrTask(id) => self.handle_create_pr_task(id),
-            Message::ConfirmPrStart => self.handle_confirm_pr_start(),
-            Message::CancelPr => self.handle_cancel_pr(),
             Message::PrCreated { id, pr_url, pr_number } => self.handle_pr_created(id, pr_url, pr_number),
             Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
@@ -1178,60 +1172,6 @@ impl App {
     // Finish handlers (rebase + cleanup)
     // -----------------------------------------------------------------------
 
-    fn handle_finish_task(&mut self, id: TaskId) -> Vec<Command> {
-        let branch = match self.find_task(id) {
-            Some(t) if t.status == TaskStatus::Review => {
-                match t.worktree.as_deref().and_then(Self::branch_from_worktree) {
-                    Some(b) => b,
-                    None => return vec![],
-                }
-            }
-            _ => return vec![],
-        };
-
-        self.input.mode = InputMode::ConfirmFinish(id);
-        self.set_status(format!(
-            "Finish: rebase {} onto main? (y/n)", branch
-        ));
-        vec![]
-    }
-
-    fn handle_confirm_finish(&mut self) -> Vec<Command> {
-        let id = match self.input.mode {
-            InputMode::ConfirmFinish(id) => id,
-            _ => return vec![],
-        };
-        self.input.mode = InputMode::Normal;
-        self.set_status("Rebasing...".to_string());
-        self.rebase_conflict_tasks.remove(&id);
-
-        if let Some(task) = self.find_task(id) {
-            let worktree = match &task.worktree {
-                Some(wt) => wt.clone(),
-                None => return vec![],
-            };
-            let branch = match Self::branch_from_worktree(&worktree) {
-                Some(b) => b,
-                None => return vec![],
-            };
-            vec![Command::Finish {
-                id,
-                repo_path: task.repo_path.clone(),
-                branch,
-                worktree,
-                tmux_window: task.tmux_window.clone(),
-            }]
-        } else {
-            vec![]
-        }
-    }
-
-    fn handle_cancel_finish(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.clear_status();
-        vec![]
-    }
-
     fn handle_finish_complete(&mut self, id: TaskId) -> Vec<Command> {
         self.rebase_conflict_tasks.remove(&id);
         if let Some(task) = self.find_task_mut(id) {
@@ -1259,57 +1199,6 @@ impl App {
     // -----------------------------------------------------------------------
     // PR handlers
     // -----------------------------------------------------------------------
-
-    fn handle_create_pr_task(&mut self, id: TaskId) -> Vec<Command> {
-        let branch = match self.find_task(id) {
-            Some(t) if t.status == TaskStatus::Review => {
-                match t.worktree.as_deref().and_then(Self::branch_from_worktree) {
-                    Some(b) => b,
-                    None => return vec![],
-                }
-            }
-            _ => return vec![],
-        };
-
-        self.input.mode = InputMode::ConfirmPr(id);
-        self.set_status(format!("Create PR for {}? (y/n)", branch));
-        vec![]
-    }
-
-    fn handle_confirm_pr_start(&mut self) -> Vec<Command> {
-        let id = match self.input.mode {
-            InputMode::ConfirmPr(id) => id,
-            _ => return vec![],
-        };
-        self.input.mode = InputMode::Normal;
-        self.set_status("Creating PR...".to_string());
-
-        if let Some(task) = self.find_task(id) {
-            let worktree = match &task.worktree {
-                Some(wt) => wt.clone(),
-                None => return vec![],
-            };
-            let branch = match Self::branch_from_worktree(&worktree) {
-                Some(b) => b,
-                None => return vec![],
-            };
-            vec![Command::CreatePr {
-                id,
-                repo_path: task.repo_path.clone(),
-                branch,
-                title: task.title.clone(),
-                description: task.description.clone(),
-            }]
-        } else {
-            vec![]
-        }
-    }
-
-    fn handle_cancel_pr(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.clear_status();
-        vec![]
-    }
 
     fn handle_pr_created(&mut self, id: TaskId, pr_url: String, pr_number: i64) -> Vec<Command> {
         if let Some(task) = self.find_task_mut(id) {

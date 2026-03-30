@@ -91,15 +91,9 @@ pub enum Message {
     SubmitEpicDescription(String),
     SubmitEpicRepoPath(String),
     // Finish (rebase + cleanup)
-    FinishTask(TaskId),
-    ConfirmFinish,
-    CancelFinish,
     FinishComplete(TaskId),
     FinishFailed { id: TaskId, error: String, is_conflict: bool },
     // PR flow
-    CreatePrTask(TaskId),
-    ConfirmPrStart,
-    CancelPr,
     PrCreated { id: TaskId, pr_url: String, pr_number: i64 },
     PrFailed { id: TaskId, error: String },
     PrMerged(TaskId),
@@ -184,8 +178,6 @@ pub enum InputMode {
     QuickDispatch,
     ConfirmRetry(TaskId),
     ConfirmArchive,
-    ConfirmFinish(TaskId),
-    ConfirmPr(TaskId),
     ConfirmDone(TaskId),
     ConfirmWrapUp(TaskId),
     // Epic input modes

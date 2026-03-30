@@ -897,8 +897,9 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  Space", key), Span::styled(" select  ", desc),
-            Span::styled("f", key), Span::styled(" finish     ", desc),
-            Span::styled("(Review: merge + clean up worktree)", note),
+            Span::styled("f", key), Span::styled(" filter repos  ", desc),
+            Span::styled("W", key), Span::styled(" wrap up    ", desc),
+            Span::styled("(Review: rebase or PR)", note),
         ]),
         Line::from(""),
         Line::from(Span::styled("  * d is context-dependent:", note)),
@@ -1047,11 +1048,6 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
-        InputMode::ConfirmFinish(_) => {
-            let bar = Paragraph::new("Finish: rebase onto main and clean up? (y/n)")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
         InputMode::ConfirmDone(_) => {
             let text = app.status_message.as_deref().unwrap_or("Move to Done? (y/n)");
             let bar = Paragraph::new(text)
@@ -1087,11 +1083,6 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         InputMode::ConfirmEpicDone(_) => {
             let text = app.status_message.as_deref().unwrap_or("Move epic to Done? (y/n)");
             let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::ConfirmPr(_) => {
-            let bar = Paragraph::new("Create PR? (y/n)")
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
@@ -1149,8 +1140,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
             }
             TaskStatus::Review => {
                 if task.worktree.is_some() {
-                    push_hint("f", "finish");
-                    push_hint("p", "pr");
+                    push_hint("W", "wrap up");
                 }
                 if task.tmux_window.is_some() {
                     push_hint("g", "session");

@@ -610,6 +610,29 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
                 Style::default().fg(Color::Rgb(120, 124, 153)),
             )),
         ]
+    } else if let Some(ColumnItem::Epic(epic)) = app.selected_column_item() {
+        let line1 = Line::from(vec![
+            Span::styled(
+                epic.title.clone(),
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" \u{00b7} #{} \u{00b7} {}", epic.id, epic.repo_path),
+                Style::default().fg(Color::Rgb(86, 95, 137)),
+            ),
+        ]);
+        let line2 = Line::from(Span::styled(
+            epic.description.clone(),
+            Style::default().fg(Color::Rgb(120, 124, 153)),
+        ));
+        let mut lines = vec![line1, line2];
+        if let Some(plan) = &epic.plan {
+            lines.push(Line::from(Span::styled(
+                format!("plan: {plan}"),
+                Style::default().fg(Color::Rgb(86, 95, 137)),
+            )));
+        }
+        lines
     } else {
         vec![Line::from(Span::styled(
             "No task selected",
@@ -889,7 +912,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  n", key), Span::styled(" new task   ", desc),
             Span::styled("E", key), Span::styled(" new epic   ", desc),
-            Span::styled("e", key), Span::styled(" edit", desc),
+            Span::styled("e", key), Span::styled(" edit/detail", desc),
         ]),
         Line::from(vec![
             Span::styled("  d", key), Span::styled(" dispatch*  ", desc),
@@ -1206,6 +1229,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
         push_hint("d", "plan");
     }
     push_hint("Enter", "open");
+    push_hint("e", "detail");
     if epic.done {
         push_hint("M", "undone");
     } else {

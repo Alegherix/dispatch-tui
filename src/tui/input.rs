@@ -141,10 +141,10 @@ impl App {
                     let id = *epic_id;
                     return self.update(Message::EditEpic(id));
                 }
-                if let Some(task) = self.selected_task() {
-                    vec![Command::EditTaskInEditor(task.clone())]
-                } else {
-                    vec![]
+                match self.selected_column_item() {
+                    Some(ColumnItem::Epic(_)) => self.update(Message::ToggleDetail),
+                    Some(ColumnItem::Task(task)) => vec![Command::EditTaskInEditor(task.clone())],
+                    None => vec![],
                 }
             }
 

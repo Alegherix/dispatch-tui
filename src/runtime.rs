@@ -34,10 +34,12 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let tasks = database.list_all()?;
 
     // 2. Spawn MCP server with notification channel
+    let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
     let mcp_db = database.clone();
+    let mcp_runner = runner.clone();
     let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<()>();
     tokio::spawn(async move {
-        if let Err(e) = mcp::serve(mcp_db, port, mcp_notify_tx).await {
+        if let Err(e) = mcp::serve(mcp_db, port, mcp_notify_tx, mcp_runner).await {
             eprintln!("MCP server error: {e}");
         }
     });
@@ -111,7 +113,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         msg_tx,
         port,
         input_paused,
-        runner: Arc::new(RealProcessRunner),
+        runner,
     };
     let result = run_loop(
         &mut app,

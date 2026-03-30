@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use crate::db::{self, Database};
 use crate::models::TaskStatus;
 use crate::mcp::McpState;
+use crate::process::{ProcessRunner, MockProcessRunner};
 
 use super::dispatch::{handle_mcp, tool_definitions};
 use super::tasks::{UpdateTaskArgs, GetTaskArgs, CreateTaskWithEpicArgs, ListTasksArgs, ClaimTaskArgs};
@@ -14,7 +15,8 @@ use super::types::{JsonRpcRequest, JsonRpcResponse};
 
 fn test_state() -> Arc<McpState> {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    Arc::new(McpState { db, notify_tx: None })
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    Arc::new(McpState { db, notify_tx: None, runner })
 }
 
 async fn call(state: &Arc<McpState>, method: &str, params: Option<Value>) -> JsonRpcResponse {

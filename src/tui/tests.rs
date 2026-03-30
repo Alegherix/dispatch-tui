@@ -4829,3 +4829,90 @@ fn summary_row_shows_filter_indicator() {
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "2/3 repos"), "Expected filter indicator in summary");
 }
+
+// --- wrap up ---
+
+#[test]
+fn w_key_on_review_task_with_worktree_enters_wrap_up() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+    // Navigate to Review column (column index 2)
+    app.update(Message::NavigateColumn(2));
+
+    app.handle_key(make_key(KeyCode::Char('W')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmWrapUp(TaskId(1))));
+}
+
+#[test]
+fn w_key_on_non_review_task_is_noop() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+    ], Duration::from_secs(300));
+
+    app.handle_key(make_key(KeyCode::Char('W')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn wrap_up_r_emits_finish_command() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(2));
+
+    app.update(Message::StartWrapUp(TaskId(1)));
+    let cmds = app.update(Message::WrapUpRebase);
+    assert!(cmds.iter().any(|c| matches!(c, Command::Finish { .. })));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn wrap_up_p_emits_create_pr_command() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(2));
+
+    app.update(Message::StartWrapUp(TaskId(1)));
+    let cmds = app.update(Message::WrapUpPr);
+    assert!(cmds.iter().any(|c| matches!(c, Command::CreatePr { .. })));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn wrap_up_esc_cancels() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+    app.update(Message::NavigateColumn(2));
+
+    app.update(Message::StartWrapUp(TaskId(1)));
+    app.update(Message::CancelWrapUp);
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn wrap_up_rebase_clears_conflict_flag() {
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }], Duration::from_secs(300));
+
+    app.rebase_conflict_tasks.insert(TaskId(1));
+    app.update(Message::StartWrapUp(TaskId(1)));
+    app.update(Message::WrapUpRebase);
+    assert!(!app.rebase_conflict_tasks.contains(&TaskId(1)));
+}

@@ -28,6 +28,7 @@ impl App {
             InputMode::ConfirmFinish(_) => self.handle_key_confirm_finish(key),
             InputMode::ConfirmPr(_) => self.handle_key_confirm_pr(key),
             InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
+            InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
         }
@@ -55,6 +56,14 @@ impl App {
                 if let Some(task) = self.selected_task() {
                     let id = task.id;
                     self.update(Message::CreatePrTask(id))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('W') => {
+                if let Some(task) = self.selected_task() {
+                    let id = task.id;
+                    self.update(Message::StartWrapUp(id))
                 } else {
                     vec![]
                 }
@@ -508,6 +517,15 @@ impl App {
                     vec![]
                 }
             }
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_wrap_up(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('r') => self.update(Message::WrapUpRebase),
+            KeyCode::Char('p') => self.update(Message::WrapUpPr),
+            KeyCode::Esc => self.update(Message::CancelWrapUp),
             _ => vec![],
         }
     }

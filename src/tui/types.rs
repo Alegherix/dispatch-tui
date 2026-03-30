@@ -112,6 +112,11 @@ pub enum Message {
     CloseRepoFilter,
     ToggleRepoFilter(String),
     ToggleAllRepoFilter,
+    // Wrap up (replaces finish + PR)
+    StartWrapUp(TaskId),
+    WrapUpRebase,
+    WrapUpPr,
+    CancelWrapUp,
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +187,7 @@ pub enum InputMode {
     ConfirmFinish(TaskId),
     ConfirmPr(TaskId),
     ConfirmDone(TaskId),
+    ConfirmWrapUp(TaskId),
     // Epic input modes
     InputEpicTitle,
     InputEpicDescription,

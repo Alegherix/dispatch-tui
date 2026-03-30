@@ -373,6 +373,11 @@ impl App {
             Message::CloseRepoFilter => self.handle_close_repo_filter(),
             Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
             Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
+            // Wrap up
+            Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
+            Message::WrapUpRebase => self.handle_wrap_up_rebase(),
+            Message::WrapUpPr => self.handle_wrap_up_pr(),
+            Message::CancelWrapUp => self.handle_cancel_wrap_up(),
         }
     }
 
@@ -1353,6 +1358,93 @@ impl App {
         }
 
         cmds
+    }
+
+    // -----------------------------------------------------------------------
+    // Wrap up handlers
+    // -----------------------------------------------------------------------
+
+    fn handle_start_wrap_up(&mut self, id: TaskId) -> Vec<Command> {
+        let branch = match self.find_task(id) {
+            Some(t) if t.status == TaskStatus::Review => {
+                match t.worktree.as_deref().and_then(Self::branch_from_worktree) {
+                    Some(b) => b,
+                    None => return vec![],
+                }
+            }
+            _ => return vec![],
+        };
+
+        self.input.mode = InputMode::ConfirmWrapUp(id);
+        self.set_status(format!(
+            "Wrap up {}: (r) rebase onto main  (p) create PR  (Esc) cancel", branch
+        ));
+        vec![]
+    }
+
+    fn handle_wrap_up_rebase(&mut self) -> Vec<Command> {
+        let id = match self.input.mode {
+            InputMode::ConfirmWrapUp(id) => id,
+            _ => return vec![],
+        };
+        self.input.mode = InputMode::Normal;
+        self.set_status("Rebasing...".to_string());
+        self.rebase_conflict_tasks.remove(&id);
+
+        if let Some(task) = self.find_task(id) {
+            let worktree = match &task.worktree {
+                Some(wt) => wt.clone(),
+                None => return vec![],
+            };
+            let branch = match Self::branch_from_worktree(&worktree) {
+                Some(b) => b,
+                None => return vec![],
+            };
+            vec![Command::Finish {
+                id,
+                repo_path: task.repo_path.clone(),
+                branch,
+                worktree,
+                tmux_window: task.tmux_window.clone(),
+            }]
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_wrap_up_pr(&mut self) -> Vec<Command> {
+        let id = match self.input.mode {
+            InputMode::ConfirmWrapUp(id) => id,
+            _ => return vec![],
+        };
+        self.input.mode = InputMode::Normal;
+        self.set_status("Creating PR...".to_string());
+
+        if let Some(task) = self.find_task(id) {
+            let worktree = match &task.worktree {
+                Some(wt) => wt.clone(),
+                None => return vec![],
+            };
+            let branch = match Self::branch_from_worktree(&worktree) {
+                Some(b) => b,
+                None => return vec![],
+            };
+            vec![Command::CreatePr {
+                id,
+                repo_path: task.repo_path.clone(),
+                branch,
+                title: task.title.clone(),
+                description: task.description.clone(),
+            }]
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_cancel_wrap_up(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clear_status();
+        vec![]
     }
 
     // -----------------------------------------------------------------------

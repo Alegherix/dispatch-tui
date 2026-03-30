@@ -335,6 +335,9 @@ impl App {
             Message::DeleteEpic(id) => self.handle_delete_epic(id),
             Message::ConfirmDeleteEpic => self.handle_confirm_delete_epic(),
             Message::MarkEpicDone(id) => self.handle_mark_epic_done(id),
+            Message::MarkEpicUndone(id) => self.handle_mark_epic_undone(id),
+            Message::ConfirmEpicDone => self.handle_confirm_epic_done(),
+            Message::CancelEpicDone => self.handle_cancel_epic_done(),
             Message::ArchiveEpic(id) => self.handle_archive_epic(id),
             Message::ConfirmArchiveEpic => self.handle_confirm_archive_epic(),
             Message::StartNewEpic => self.handle_start_new_epic(),
@@ -1437,6 +1440,29 @@ impl App {
             epic.done = true;
         }
         vec![Command::PersistEpic { id, done: Some(true) }]
+    }
+
+    fn handle_mark_epic_undone(&mut self, id: EpicId) -> Vec<Command> {
+        if let Some(epic) = self.epics.iter_mut().find(|e| e.id == id) {
+            epic.done = false;
+        }
+        vec![Command::PersistEpic { id, done: Some(false) }]
+    }
+
+    fn handle_confirm_epic_done(&mut self) -> Vec<Command> {
+        let id = match self.input.mode {
+            InputMode::ConfirmEpicDone(id) => id,
+            _ => return vec![],
+        };
+        self.input.mode = InputMode::Normal;
+        self.clear_status();
+        self.handle_mark_epic_done(id)
+    }
+
+    fn handle_cancel_epic_done(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clear_status();
+        vec![]
     }
 
     fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {

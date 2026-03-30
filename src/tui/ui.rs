@@ -1019,6 +1019,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmEpicDone(_) => {
+            let text = app.status_message.as_deref().unwrap_or("Move epic to Done? (y/n)");
+            let bar = Paragraph::new(text)
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
         InputMode::ConfirmPr(_) => {
             let bar = Paragraph::new("Create PR? (y/n)")
                 .style(Style::default().fg(Color::Yellow));

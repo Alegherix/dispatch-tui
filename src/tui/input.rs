@@ -24,6 +24,7 @@ impl App {
             | InputMode::InputEpicRepoPath => self.handle_key_epic_text_input(key),
             InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
             InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
+            InputMode::ConfirmEpicDone(_) => self.handle_key_confirm_epic_done(key),
             InputMode::ConfirmFinish(_) => self.handle_key_confirm_finish(key),
             InputMode::ConfirmPr(_) => self.handle_key_confirm_pr(key),
             InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
@@ -65,14 +66,32 @@ impl App {
                 }
             }
             KeyCode::Char('m') => {
-                if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
-                    return self.update(Message::StatusInfo("Epic status is derived from subtasks".to_string()));
+                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+                    let id = epic.id;
+                    let statuses = self.subtask_statuses(id);
+                    let all_done = !statuses.is_empty()
+                        && statuses.iter().all(|s| *s == TaskStatus::Done);
+                    if all_done && !epic.done {
+                        let title = crate::tui::truncate_title(&epic.title, 30);
+                        self.input.mode = InputMode::ConfirmEpicDone(id);
+                        self.set_status(format!("Move epic {title} to Done? (y/n)"));
+                        return vec![];
+                    }
+                    return self.update(Message::StatusInfo(
+                        "Epic status is derived from subtasks".to_string(),
+                    ));
                 }
                 self.handle_key_move(MoveDirection::Forward)
             }
             KeyCode::Char('M') => {
-                if matches!(self.selected_column_item(), Some(ColumnItem::Epic(_))) {
-                    return self.update(Message::StatusInfo("Epic status is derived from subtasks".to_string()));
+                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+                    let id = epic.id;
+                    if epic.done {
+                        return self.update(Message::MarkEpicUndone(id));
+                    }
+                    return self.update(Message::StatusInfo(
+                        "Epic status is derived from subtasks".to_string(),
+                    ));
                 }
                 self.handle_key_move(MoveDirection::Backward)
             }
@@ -407,6 +426,13 @@ impl App {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmDone),
             _ => self.update(Message::CancelDone),
+        }
+    }
+
+    fn handle_key_confirm_epic_done(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmEpicDone),
+            _ => self.update(Message::CancelEpicDone),
         }
     }
 

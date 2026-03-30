@@ -81,6 +81,9 @@ pub enum Message {
     DeleteEpic(EpicId),
     ConfirmDeleteEpic,
     MarkEpicDone(EpicId),
+    MarkEpicUndone(EpicId),
+    ConfirmEpicDone,
+    CancelEpicDone,
     ArchiveEpic(EpicId),
     ConfirmArchiveEpic,
     StartNewEpic,
@@ -179,6 +182,7 @@ pub enum InputMode {
     InputEpicRepoPath,
     ConfirmDeleteEpic,
     ConfirmArchiveEpic,
+    ConfirmEpicDone(EpicId),
     // Overlay modes
     Help,
 }

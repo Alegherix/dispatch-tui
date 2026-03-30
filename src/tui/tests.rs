@@ -2560,6 +2560,131 @@ fn shift_m_key_on_epic_shows_status_info() {
     assert!(app.status_message.as_deref().unwrap().contains("derived from subtasks"));
 }
 
+/// Helper: create an app with an epic whose subtasks are all Done.
+/// The epic's derived status is Review (column 2), and the epic is the only item there.
+fn make_app_with_review_epic() -> App {
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+        {
+            let mut t = make_task(2, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    // All subtasks Done → epic derived status Review (col 2). Epic is only item → row 0.
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    app
+}
+
+#[test]
+fn m_key_on_review_epic_all_done_shows_confirm() {
+    let mut app = make_app_with_review_epic();
+    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmEpicDone(EpicId(10))));
+    assert!(app.status_message.as_deref().unwrap().contains("Done"));
+}
+
+#[test]
+fn confirm_epic_done_marks_done() {
+    let mut app = make_app_with_review_epic();
+    app.input.mode = InputMode::ConfirmEpicDone(EpicId(10));
+    let cmds = app.update(Message::ConfirmEpicDone);
+    assert!(app.epics[0].done);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(true) })));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn cancel_epic_done_returns_to_normal() {
+    let mut app = make_app_with_review_epic();
+    app.input.mode = InputMode::ConfirmEpicDone(EpicId(10));
+    let cmds = app.update(Message::CancelEpicDone);
+    assert!(!app.epics[0].done);
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn y_key_in_confirm_epic_done_marks_done() {
+    let mut app = make_app_with_review_epic();
+    app.input.mode = InputMode::ConfirmEpicDone(EpicId(10));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(app.epics[0].done);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { .. })));
+}
+
+#[test]
+fn n_key_in_confirm_epic_done_cancels() {
+    let mut app = make_app_with_review_epic();
+    app.input.mode = InputMode::ConfirmEpicDone(EpicId(10));
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(!app.epics[0].done);
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn m_key_on_epic_with_mixed_subtasks_shows_derived() {
+    // Epic has subtasks in Review (not all Done) — should still block
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+        {
+            let mut t = make_task(2, TaskStatus::Review);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ], Duration::from_secs(300));
+    app.epics = vec![make_epic(10)];
+    // Some done + some review → derived status Review (col 2)
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("derived from subtasks"));
+}
+
+#[test]
+fn shift_m_on_done_epic_undoes_done() {
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ], Duration::from_secs(300));
+    let mut epic = make_epic(10);
+    epic.done = true;
+    app.epics = vec![epic];
+    // Done epic → col 3
+    app.selection_mut().set_column(3);
+    app.selection_mut().set_row(3, 0);
+    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    assert!(!app.epics[0].done);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(false) })));
+}
+
+#[test]
+fn mark_epic_undone() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let mut epic = make_epic(10);
+    epic.done = true;
+    app.epics = vec![epic];
+    let cmds = app.update(Message::MarkEpicUndone(EpicId(10)));
+    assert!(!app.epics[0].done);
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistEpic { id: EpicId(10), done: Some(false) })));
+}
+
 #[test]
 fn shift_e_key_starts_new_epic() {
     let mut app = make_app();

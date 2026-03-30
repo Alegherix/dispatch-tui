@@ -10,6 +10,7 @@ use dispatch::db::TaskStore;
 #[derive(Parser)]
 #[command(name = "dispatch")]
 #[command(about = "A terminal kanban board for dispatching and managing AI agents")]
+#[command(version)]
 struct Cli {
     /// Path to the database file
     #[arg(long, env = "DISPATCH_DB", default_value_os_t = default_db_path())]

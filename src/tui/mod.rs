@@ -1376,7 +1376,7 @@ impl App {
     fn handle_start_wrap_up(&mut self, id: TaskId) -> Vec<Command> {
         let branch = match self.find_task(id) {
             Some(t) if t.status == TaskStatus::Review => {
-                match t.worktree.as_deref().and_then(|wt| dispatch::branch_from_worktree(wt)) {
+                match t.worktree.as_deref().and_then(dispatch::branch_from_worktree) {
                     Some(b) => b,
                     None => return vec![],
                 }

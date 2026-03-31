@@ -4472,7 +4472,7 @@ fn summary_row_shows_muted_bell_and_hint_when_disabled() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn pr_created_stores_url_and_number() {
+fn pr_created_stores_url() {
     let task = make_task(1, TaskStatus::Review);
     let mut app = App::new(vec![task], Duration::from_secs(300));
 

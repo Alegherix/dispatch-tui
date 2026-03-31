@@ -447,9 +447,9 @@ pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Strin
 // ---------------------------------------------------------------------------
 
 /// Extract the PR number from a GitHub PR URL.
-/// Handles trailing slashes and query parameters.
+/// Handles trailing slashes, query parameters, and fragment identifiers.
 pub fn pr_number_from_url(url: &str) -> Option<i64> {
-    url.split('?')
+    url.split(['?', '#'])
         .next()
         .and_then(|u| u.trim_end_matches('/').rsplit('/').next())
         .and_then(|s| s.parse::<i64>().ok())
@@ -984,6 +984,11 @@ mod tests {
     #[test]
     fn pr_number_from_empty_url() {
         assert_eq!(pr_number_from_url(""), None);
+    }
+
+    #[test]
+    fn pr_number_from_url_with_fragment() {
+        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42#issuecomment-123"), Some(42));
     }
 
 }

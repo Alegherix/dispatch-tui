@@ -414,6 +414,8 @@ impl Database {
         }
 
         if current_version < 12 {
+            // DROP COLUMN requires SQLite 3.35.0+; bundled libsqlite3-sys satisfies this.
+            // Ignore error for fresh DBs where the column was never added.
             let _ = conn.execute_batch("ALTER TABLE tasks DROP COLUMN pr_number");
             conn.pragma_update(None, "user_version", 12i64)
                 .context("Failed to update schema version to 12")?;

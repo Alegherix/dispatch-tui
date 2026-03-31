@@ -9,6 +9,7 @@ use crate::mcp::McpState;
 use crate::process::{ProcessRunner, MockProcessRunner};
 
 use super::dispatch::{handle_mcp, tool_definitions};
+use super::tasks;
 use super::tasks::{UpdateTaskArgs, GetTaskArgs, CreateTaskWithEpicArgs, ListTasksArgs, ClaimTaskArgs, WrapUpArgs, ReportUsageArgs};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
 use super::types::{JsonRpcRequest, JsonRpcResponse};
@@ -523,6 +524,28 @@ async fn update_task_without_plan_preserves_existing() {
     assert_eq!(task.plan.as_deref(), Some("/existing.md"), "plan should be preserved when not provided");
 }
 
+#[tokio::test]
+async fn update_task_sets_pr_fields() {
+    let state = test_state();
+    let task_id = state.db.create_task("PR test", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+
+    let resp = tasks::handle_update_task(
+        &state,
+        Some(json!(1)),
+        json!({
+            "task_id": task_id.0,
+            "pr_url": "https://github.com/org/repo/pull/99",
+            "pr_number": 99
+        }),
+    );
+
+    assert!(resp.error.is_none(), "Expected success, got: {:?}", resp.error);
+
+    let updated = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(updated.pr_url.as_deref(), Some("https://github.com/org/repo/pull/99"));
+    assert_eq!(updated.pr_number, Some(99));
+}
+
 // -- list_tasks tests -------------------------------------------------------
 
 #[tokio::test]
@@ -795,9 +818,9 @@ fn tool_schemas_match_arg_structs() {
     let cases: Vec<(&str, BTreeSet<&str>, BTreeSet<&str>, Value)> = vec![
         (
             "update_task",
-            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order"]),
+            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order", "pr_url", "pr_number"]),
             BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100}),
+            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "pr_number": 1}),
         ),
         (
             "get_task",

@@ -18,7 +18,7 @@ pub(super) fn tool_definitions() -> Value {
         "tools": [
             {
                 "name": "update_task",
-                "description": "Update a task's status, title, description, repo_path, and/or plan. At least one field besides task_id must be provided.",
+                "description": "Update a task's status, title, description, repo_path, plan, and/or PR fields. At least one field besides task_id must be provided.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -50,6 +50,14 @@ pub(super) fn tool_definitions() -> Value {
                         "sort_order": {
                             "type": "integer",
                             "description": "Display order within column (lower values appear first)"
+                        },
+                        "pr_url": {
+                            "type": "string",
+                            "description": "URL of the pull request associated with this task"
+                        },
+                        "pr_number": {
+                            "type": "integer",
+                            "description": "Pull request number associated with this task"
                         }
                     },
                     "required": ["task_id"]

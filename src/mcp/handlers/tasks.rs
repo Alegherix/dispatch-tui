@@ -28,6 +28,10 @@ pub(super) struct UpdateTaskArgs {
     pub(super) repo_path: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) sort_order: Option<i64>,
+    #[serde(default)]
+    pub(super) pr_url: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) pr_number: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -99,13 +103,15 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
         || parsed.title.is_some()
         || parsed.description.is_some()
         || parsed.repo_path.is_some()
-        || parsed.sort_order.is_some();
+        || parsed.sort_order.is_some()
+        || parsed.pr_url.is_some()
+        || parsed.pr_number.is_some();
 
     if !has_update {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "At least one of status, plan, title, description, repo_path, or sort_order must be provided",
+            "At least one of status, plan, title, description, repo_path, sort_order, pr_url, or pr_number must be provided",
         );
     }
 
@@ -153,6 +159,12 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if let Some(so) = parsed.sort_order {
         patch = patch.sort_order(Some(so));
     }
+    if let Some(ref url) = parsed.pr_url {
+        patch = patch.pr_url(Some(url.as_str()));
+    }
+    if let Some(pr_num) = parsed.pr_number {
+        patch = patch.pr_number(Some(pr_num));
+    }
 
     if let Err(e) = state.db.patch_task(TaskId(parsed.task_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
@@ -167,6 +179,8 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if parsed.description.is_some() { updated.push("description".to_string()); }
     if parsed.repo_path.is_some() { updated.push("repo_path".to_string()); }
     if parsed.sort_order.is_some() { updated.push("sort_order".to_string()); }
+    if parsed.pr_url.is_some() { updated.push("pr_url".to_string()); }
+    if parsed.pr_number.is_some() { updated.push("pr_number".to_string()); }
 
     JsonRpcResponse::ok(
         id,

@@ -114,6 +114,11 @@ pub enum Message {
     ReviewPrsFetchFailed(String),
     OpenInBrowser { url: String },
     RefreshReviewPrs,
+    // Review agent
+    ReviewAgentDispatched { url: String, tmux_window: String },
+    ReviewAgentResumed { url: String, tmux_window: String },
+    ShowReviewDetail,
+    CloseReviewDetail,
     // Repo filter
     StartRepoFilter,
     CloseRepoFilter,
@@ -198,6 +203,8 @@ pub enum Command {
     FetchReviewPrs,
     PersistReviewPrs(Vec<crate::models::ReviewPr>),
     OpenInBrowser { url: String },
+    DispatchReviewAgent(crate::models::ReviewPr),
+    PatchReviewPr { url: String, review_notes: Option<String>, tmux_window: Option<Option<String>> },
 }
 
 // ---------------------------------------------------------------------------

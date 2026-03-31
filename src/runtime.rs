@@ -996,6 +996,8 @@ async fn execute_commands(
                 rt.exec_persist_filter_preset(app, &name, &repo_paths),
             Command::DeleteFilterPreset(name) =>
                 rt.exec_delete_filter_preset(app, &name),
+            Command::DispatchReviewAgent(_) => {},
+            Command::PatchReviewPr { .. } => {},
         }
     }
 

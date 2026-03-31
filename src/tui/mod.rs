@@ -443,6 +443,11 @@ impl App {
             Message::DeleteFilterPreset(name) => self.handle_delete_filter_preset(name),
             Message::CancelPresetInput => self.handle_cancel_preset_input(),
             Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
+            // Review agent
+            Message::ReviewAgentDispatched { .. } => vec![],
+            Message::ReviewAgentResumed { .. } => vec![],
+            Message::ShowReviewDetail => vec![],
+            Message::CloseReviewDetail => vec![],
         }
     }
 

@@ -35,10 +35,15 @@ fn provision_worktree(
     if std::path::Path::new(&worktree_path).exists() {
         tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
     } else {
-        let mut args = vec!["-C", &repo_path, "worktree", "add", &*worktree_path, "-B", &*worktree_name];
-        if let Some(base) = base_branch {
-            args.push(base);
-        }
+        let detected;
+        let start_point = match base_branch {
+            Some(base) => base,
+            None => {
+                detected = format!("origin/{}", detect_default_branch(&repo_path, runner));
+                &detected
+            }
+        };
+        let args = vec!["-C", &repo_path, "worktree", "add", &*worktree_path, "-B", &*worktree_name, start_point];
         let output = runner
             .run("git", &args)
             .context("failed to run git worktree add")?;
@@ -58,8 +63,15 @@ fn provision_worktree(
     Ok(ProvisionResult { worktree_path, tmux_window })
 }
 
-fn rebase_preamble(base_branch: Option<&str>) -> String {
-    let target = base_branch.unwrap_or("origin/main");
+fn rebase_preamble(base_branch: Option<&str>, repo_path: &str, runner: &dyn ProcessRunner) -> String {
+    let detected;
+    let target = match base_branch {
+        Some(b) => b,
+        None => {
+            detected = format!("origin/{}", detect_default_branch(repo_path, runner));
+            &detected
+        }
+    };
     format!(
         "Before starting work, rebase your branch from {target}:\n\
          ```\n\
@@ -79,7 +91,8 @@ fn dispatch_with_prompt(
 ) -> Result<DispatchResult> {
     let provision = provision_worktree(task, runner, base_branch)?;
 
-    let full_prompt = format!("{}\n\n{prompt}", rebase_preamble(base_branch));
+    let repo_path = expand_tilde(&task.repo_path);
+    let full_prompt = format!("{}\n\n{prompt}", rebase_preamble(base_branch, &repo_path, runner));
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
@@ -709,9 +722,12 @@ mod tests {
 
     #[test]
     fn rebase_preamble_prepended_to_all_prompts() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch falls back to "main"
+        ]);
         let body = build_prompt(TaskId(1), "Task", "Desc", None);
         assert!(!body.contains("rebase")); // builder doesn't include it
-        let full = format!("{}\n\n{body}", rebase_preamble(None));
+        let full = format!("{}\n\n{body}", rebase_preamble(None, "/repo", &mock));
         assert!(full.contains("rebase your branch from origin/main"));
         assert!(full.starts_with("Before starting work"));
     }
@@ -742,6 +758,7 @@ mod tests {
             // git worktree add is skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::fail("not a git repo"), // rebase_preamble: detect_default_branch
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -750,7 +767,7 @@ mod tests {
         dispatch_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped for existing worktree");
+        assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1[0], "new-window");
         assert_eq!(calls[1].0, "tmux");
@@ -767,6 +784,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::fail("not a git repo"), // rebase_preamble: detect_default_branch
             MockProcessRunner::ok(), // tmux send-keys -l (the claude command)
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -775,9 +793,9 @@ mod tests {
         dispatch_agent(&task, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        // The literal send-keys call (index 2) carries the claude invocation
+        // The literal send-keys call (index 3) carries the claude invocation
         assert!(
-            calls[2].1.iter().any(|a| a.contains("claude")),
+            calls[3].1.iter().any(|a| a.contains("claude")),
             "send-keys should include claude"
         );
     }
@@ -789,6 +807,7 @@ mod tests {
         // Do NOT pre-create the worktree dir — test the "create" path
 
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch: symbolic-ref fails → fallback to "main"
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -798,11 +817,13 @@ mod tests {
         let result = provision_worktree(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].0, "git", "first call should be git worktree add");
-        assert!(calls[0].1.contains(&"worktree".to_string()));
-        assert!(calls[0].1.contains(&"add".to_string()));
-        assert_eq!(calls[1].0, "tmux");
-        assert_eq!(calls[1].1[0], "new-window");
+        assert_eq!(calls[0].0, "git", "first call should be detect_default_branch");
+        assert!(calls[0].1.iter().any(|a| a == "symbolic-ref"), "first call should be symbolic-ref");
+        assert_eq!(calls[1].0, "git", "second call should be git worktree add");
+        assert!(calls[1].1.contains(&"worktree".to_string()));
+        assert!(calls[1].1.contains(&"add".to_string()));
+        assert_eq!(calls[2].0, "tmux");
+        assert_eq!(calls[2].1[0], "new-window");
 
         let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
         assert_eq!(result.worktree_path, expected_path);
@@ -856,16 +877,68 @@ mod tests {
     }
 
     #[test]
+    fn provision_worktree_none_uses_default_branch() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let mock = MockProcessRunner::new(vec![
+            // detect_default_branch: symbolic-ref fails → fallback to "main"
+            MockProcessRunner::fail("not a git repo"),
+            MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook
+        ]);
+
+        let task = make_task(&repo_path);
+        provision_worktree(&task, &mock, None).unwrap();
+
+        let calls = mock.recorded_calls();
+        // First call is symbolic-ref for detect_default_branch
+        assert_eq!(calls[0].0, "git");
+        assert!(calls[0].1.iter().any(|a| a == "symbolic-ref"));
+        // Second call is git worktree add with origin/main as last arg
+        assert_eq!(calls[1].0, "git");
+        assert_eq!(calls[1].1.last().unwrap(), "origin/main",
+            "should use origin/main as start-point, got: {:?}", calls[1].1);
+    }
+
+    #[test]
+    fn provision_worktree_none_detects_master_branch() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let mock = MockProcessRunner::new(vec![
+            // detect_default_branch: symbolic-ref succeeds with "master"
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"),
+            MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook
+        ]);
+
+        let task = make_task(&repo_path);
+        provision_worktree(&task, &mock, None).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[1].1.last().unwrap(), "origin/master",
+            "should use origin/master as start-point, got: {:?}", calls[1].1);
+    }
+
+    #[test]
     fn rebase_preamble_with_base_branch() {
-        let preamble = rebase_preamble(Some("99-prev-task"));
+        let mock = MockProcessRunner::new(vec![]);
+        let preamble = rebase_preamble(Some("99-prev-task"), "/repo", &mock);
         assert!(preamble.contains("99-prev-task"), "should reference the base branch");
         assert!(!preamble.contains("origin/main"), "should not reference origin/main");
     }
 
     #[test]
-    fn rebase_preamble_without_base_branch() {
-        let preamble = rebase_preamble(None);
-        assert!(preamble.contains("origin/main"), "should default to origin/main");
+    fn rebase_preamble_detects_default_branch() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/develop\n"),
+        ]);
+        let preamble = rebase_preamble(None, "/repo", &mock);
+        assert!(preamble.contains("origin/develop"), "should use detected branch, got: {preamble}");
+        assert!(!preamble.contains("origin/main"), "should not hardcode origin/main");
     }
 
     #[test]
@@ -918,6 +991,7 @@ mod tests {
         let repo_path = dir.path().to_str().unwrap().to_string();
 
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch: symbolic-ref fails → fallback to "main"
             MockProcessRunner::fail("not a git repo"), // git worktree add fails
         ]);
 
@@ -925,7 +999,7 @@ mod tests {
         let result = dispatch_agent(&task, &mock);
         assert!(result.is_err());
         let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 1, "only the git call should have been made");
+        assert_eq!(calls.len(), 2, "detect_default_branch and git worktree add should have been called");
     }
 
     #[test]
@@ -938,6 +1012,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::fail("not a git repo"), // rebase_preamble: detect_default_branch
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -946,7 +1021,7 @@ mod tests {
         brainstorm_agent(&task, 3142, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped for existing worktree");
+        assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1[0], "new-window");
     }
@@ -961,6 +1036,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::fail("not a git repo"), // rebase_preamble: detect_default_branch
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -985,6 +1061,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::fail("not a git repo"), // rebase_preamble: detect_default_branch
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
@@ -993,7 +1070,7 @@ mod tests {
         quick_dispatch_agent(&task, 3142, &mock).unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped for existing worktree");
+        assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1[0], "new-window");
     }
@@ -1008,6 +1085,7 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::fail("not a git repo"), // rebase_preamble: detect_default_branch
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);

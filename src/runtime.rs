@@ -864,6 +864,12 @@ impl TuiRuntime {
         });
     }
 
+    fn exec_persist_review_prs(&self, prs: Vec<crate::models::ReviewPr>) {
+        if let Err(e) = self.database.save_review_prs(&prs) {
+            tracing::warn!("Failed to persist review PRs: {e}");
+        }
+    }
+
     fn exec_open_in_browser(&self, url: String) {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
@@ -978,6 +984,7 @@ async fn execute_commands(
             Command::PersistStringSetting { key, value } =>
                 rt.exec_persist_string_setting(app, &key, &value),
             Command::FetchReviewPrs => rt.exec_fetch_review_prs(),
+            Command::PersistReviewPrs(prs) => rt.exec_persist_review_prs(prs),
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
             Command::PersistFilterPreset { name, repo_paths } =>
                 rt.exec_persist_filter_preset(app, &name, &repo_paths),

@@ -192,6 +192,7 @@ pub enum Command {
         pr_url: String,
     },
     FetchReviewPrs,
+    PersistReviewPrs(Vec<crate::models::ReviewPr>),
     OpenInBrowser { url: String },
 }
 

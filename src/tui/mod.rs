@@ -1787,11 +1787,12 @@ impl App {
     }
 
     fn handle_review_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
+        let cmds = vec![Command::PersistReviewPrs(prs.clone())];
         self.review_prs = prs;
         self.review_board_loading = false;
         self.last_review_fetch = Some(Instant::now());
         self.clamp_review_selection();
-        vec![]
+        cmds
     }
 
     fn clamp_review_selection(&mut self) {

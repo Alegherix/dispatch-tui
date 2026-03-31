@@ -422,6 +422,10 @@ impl App {
             Message::EpicWrapUpPr => self.handle_epic_wrap_up(MergeAction::Pr),
             Message::CancelEpicWrapUp => self.handle_cancel_epic_wrap_up(),
             Message::CancelMergeQueue => self.handle_cancel_merge_queue(),
+            // Detach tmux panel
+            Message::DetachTmux(id) => self.handle_detach_tmux(vec![id]),
+            Message::BatchDetachTmux(ids) => self.handle_detach_tmux(ids),
+            Message::ConfirmDetachTmux => self.handle_confirm_detach_tmux(),
             // Review board
             Message::SwitchToReviewBoard => self.handle_switch_to_review_board(),
             Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
@@ -446,6 +450,52 @@ impl App {
     // -----------------------------------------------------------------------
     // Per-message handlers
     // -----------------------------------------------------------------------
+
+    fn handle_detach_tmux(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
+        let detachable: Vec<TaskId> = ids.iter()
+            .filter(|&&id| {
+                self.find_task(id)
+                    .is_some_and(|t| t.status == TaskStatus::Review && t.tmux_window.is_some())
+            })
+            .copied()
+            .collect();
+
+        if detachable.is_empty() {
+            return vec![];
+        }
+
+        let count = detachable.len();
+        let msg = if count == 1 {
+            "Detach tmux panel? (y/n)".to_string()
+        } else {
+            format!("Detach {count} tmux panels? (y/n)")
+        };
+        self.input.mode = InputMode::ConfirmDetachTmux(detachable);
+        self.set_status(msg);
+        vec![]
+    }
+
+    fn handle_confirm_detach_tmux(&mut self) -> Vec<Command> {
+        let InputMode::ConfirmDetachTmux(ref ids) = self.input.mode else {
+            return vec![];
+        };
+        let ids = ids.clone();
+        self.input.mode = InputMode::Normal;
+        self.clear_status();
+
+        let mut cmds = Vec::new();
+        for id in ids {
+            self.clear_agent_tracking(id);
+            if let Some(task) = self.find_task_mut(id) {
+                if let Some(window) = task.tmux_window.take() {
+                    cmds.push(Command::KillTmuxWindow { window });
+                }
+                let task_clone = task.clone();
+                cmds.push(Command::PersistTask(task_clone));
+            }
+        }
+        cmds
+    }
 
     fn handle_quit(&mut self) -> Vec<Command> {
         self.should_quit = true;

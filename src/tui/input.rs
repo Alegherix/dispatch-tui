@@ -29,6 +29,7 @@ impl App {
             InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
             InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
             InputMode::ConfirmEpicWrapUp(_) => self.handle_key_confirm_epic_wrap_up(key),
+            InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
@@ -611,6 +612,17 @@ impl App {
             }
             KeyCode::Esc => self.update(Message::CancelPresetInput),
             _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_detach_tmux(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmDetachTmux),
+            _ => {
+                self.input.mode = InputMode::Normal;
+                self.clear_status();
+                vec![]
+            }
         }
     }
 

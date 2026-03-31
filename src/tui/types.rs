@@ -138,6 +138,10 @@ pub enum Message {
     EpicWrapUpPr,
     CancelEpicWrapUp,
     CancelMergeQueue,
+    // Detach tmux panel (Review tasks only)
+    DetachTmux(TaskId),
+    BatchDetachTmux(Vec<TaskId>),
+    ConfirmDetachTmux,
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +217,7 @@ pub enum InputMode {
     ConfirmArchive,
     ConfirmDone(TaskId),
     ConfirmWrapUp(TaskId),
+    ConfirmDetachTmux(Vec<TaskId>),
     // Epic input modes
     InputEpicTitle,
     InputEpicDescription,

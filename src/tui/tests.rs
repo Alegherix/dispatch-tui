@@ -6453,3 +6453,78 @@ fn refresh_epics_prunes_stale_epic_selections() {
     assert!(app.selected_epics.contains(&EpicId(10)));
     assert!(!app.selected_epics.contains(&EpicId(99)));
 }
+
+#[test]
+fn detach_tmux_single_sets_confirm_mode() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], Duration::from_secs(300));
+    app.tasks[0].tmux_window = Some("task-1".to_string());
+
+    app.update(Message::DetachTmux(TaskId(1)));
+
+    assert!(
+        matches!(&app.input.mode, InputMode::ConfirmDetachTmux(ids) if ids == &[TaskId(1)]),
+        "Expected ConfirmDetachTmux([1]), got {:?}", app.input.mode
+    );
+    assert!(app.status_message.is_some());
+}
+
+#[test]
+fn confirm_detach_tmux_clears_window() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], Duration::from_secs(300));
+    app.tasks[0].tmux_window = Some("task-1".to_string());
+    app.agents.stale_tasks.insert(TaskId(1));
+    app.agents.tmux_outputs.insert(TaskId(1), "some output".to_string());
+
+    app.update(Message::DetachTmux(TaskId(1)));
+    let cmds = app.update(Message::ConfirmDetachTmux);
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.tasks[0].tmux_window.is_none(), "tmux_window should be cleared");
+    assert!(!app.agents.stale_tasks.contains(&TaskId(1)), "stale tracking should be cleared");
+    assert!(!app.agents.tmux_outputs.contains_key(&TaskId(1)), "tmux output should be cleared");
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "task-1")),
+        "should emit KillTmuxWindow for task-1"
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::PersistTask(_))),
+        "should emit PersistTask"
+    );
+}
+
+#[test]
+fn detach_tmux_noop_on_task_without_window() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)], Duration::from_secs(300));
+    // tmux_window is None by default from make_task
+
+    let cmds = app.update(Message::DetachTmux(TaskId(1)));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.is_empty(), "should produce no commands");
+}
+
+#[test]
+fn batch_detach_tmux() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Review),
+        make_task(2, TaskStatus::Review),
+    ], Duration::from_secs(300));
+    app.tasks[0].tmux_window = Some("task-1".to_string());
+    app.tasks[1].tmux_window = Some("task-2".to_string());
+
+    app.update(Message::BatchDetachTmux(vec![TaskId(1), TaskId(2)]));
+    let cmds = app.update(Message::ConfirmDetachTmux);
+
+    assert!(app.tasks[0].tmux_window.is_none(), "task 1 window should be cleared");
+    assert!(app.tasks[1].tmux_window.is_none(), "task 2 window should be cleared");
+
+    let kill_count = cmds.iter()
+        .filter(|c| matches!(c, Command::KillTmuxWindow { .. }))
+        .count();
+    assert_eq!(kill_count, 2, "should kill 2 windows");
+
+    let persist_count = cmds.iter()
+        .filter(|c| matches!(c, Command::PersistTask(_)))
+        .count();
+    assert_eq!(persist_count, 2, "should persist 2 tasks");
+}

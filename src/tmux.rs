@@ -128,6 +128,24 @@ pub fn rename_window(target: &str, new_name: &str, runner: &dyn ProcessRunner) -
     Ok(())
 }
 
+/// Bind a tmux key (with the default prefix) to a command string.
+pub fn bind_key(key: &str, command: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner.run("tmux", &["bind-key", key, command])?;
+    if !output.status.success() {
+        bail!("tmux bind-key failed with status {}", output.status);
+    }
+    Ok(())
+}
+
+/// Remove a tmux key binding (with the default prefix).
+pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner.run("tmux", &["unbind-key", key])?;
+    if !output.status.success() {
+        bail!("tmux unbind-key failed with status {}", output.status);
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers (kept for arg-shape unit tests)
 // ---------------------------------------------------------------------------
@@ -197,6 +215,16 @@ fn rename_window_args(target: &str, new_name: &str) -> Vec<String> {
         target.to_string(),
         new_name.to_string(),
     ]
+}
+
+#[cfg(test)]
+fn bind_key_args(key: &str, command: &str) -> Vec<String> {
+    vec!["bind-key".to_string(), key.to_string(), command.to_string()]
+}
+
+#[cfg(test)]
+fn unbind_key_args(key: &str) -> Vec<String> {
+    vec!["unbind-key".to_string(), key.to_string()]
 }
 
 // ---------------------------------------------------------------------------
@@ -400,5 +428,37 @@ mod tests {
     fn rename_window_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no window")]);
         assert!(rename_window("dispatch", "other", &mock).is_err());
+    }
+
+    #[test]
+    fn bind_key_args_correct() {
+        let args = bind_key_args("g", "select-window -t dispatch");
+        assert_eq!(args, vec!["bind-key", "g", "select-window -t dispatch"]);
+    }
+
+    #[test]
+    fn bind_key_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        bind_key("g", "select-window -t dispatch", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1, vec!["bind-key", "g", "select-window -t dispatch"]);
+    }
+
+    #[test]
+    fn unbind_key_args_correct() {
+        let args = unbind_key_args("g");
+        assert_eq!(args, vec!["unbind-key", "g"]);
+    }
+
+    #[test]
+    fn unbind_key_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        unbind_key("g", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
     }
 }

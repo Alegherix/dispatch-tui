@@ -96,7 +96,7 @@ fn dispatch_with_prompt(
         .with_context(|| format!("failed to write {prompt_file}"))?;
     tmux::send_keys(
         &provision.tmux_window,
-        "prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude \"$prompt\"",
+        "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude \"$prompt\"'",
         runner,
     )
     .context("failed to send keys to tmux window")?;

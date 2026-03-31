@@ -16,14 +16,18 @@ struct ProvisionResult {
 
 /// Create a git worktree and open a tmux window.
 /// Shared by both `dispatch_agent` and `brainstorm_agent`.
-fn provision_worktree(task: &Task, runner: &dyn ProcessRunner) -> Result<ProvisionResult> {
+fn provision_worktree(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    base_branch: Option<&str>,
+) -> Result<ProvisionResult> {
     let repo_path = expand_tilde(&task.repo_path);
     let slug = slugify(&task.title);
     let worktree_name = format!("{}-{slug}", task.id);
     let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
     let tmux_window = build_tmux_window_name(task.id);
 
-    tracing::info!(task_id = task.id.0, %worktree_path, "provisioning worktree");
+    tracing::info!(task_id = task.id.0, %worktree_path, ?base_branch, "provisioning worktree");
 
     fs::create_dir_all(format!("{repo_path}/.worktrees"))
         .context("failed to create .worktrees directory")?;
@@ -31,11 +35,12 @@ fn provision_worktree(task: &Task, runner: &dyn ProcessRunner) -> Result<Provisi
     if std::path::Path::new(&worktree_path).exists() {
         tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
     } else {
+        let mut args = vec!["-C", &repo_path, "worktree", "add", &*worktree_path, "-B", &*worktree_name];
+        if let Some(base) = base_branch {
+            args.push(base);
+        }
         let output = runner
-            .run(
-                "git",
-                &["-C", &repo_path, "worktree", "add", &worktree_path, "-B", &worktree_name],
-            )
+            .run("git", &args)
             .context("failed to run git worktree add")?;
         anyhow::ensure!(
             output.status.success(),
@@ -53,11 +58,14 @@ fn provision_worktree(task: &Task, runner: &dyn ProcessRunner) -> Result<Provisi
     Ok(ProvisionResult { worktree_path, tmux_window })
 }
 
-fn rebase_preamble() -> &'static str {
-    "Before starting work, rebase your branch from main:\n\
-     ```\n\
-     git fetch origin && git rebase origin/main\n\
-     ```"
+fn rebase_preamble(base_branch: Option<&str>) -> String {
+    let target = base_branch.unwrap_or("origin/main");
+    format!(
+        "Before starting work, rebase your branch from {target}:\n\
+         ```\n\
+         git fetch origin && git rebase {target}\n\
+         ```"
+    )
 }
 
 /// Provision worktree, write prompt file, launch Claude via tmux.
@@ -66,10 +74,11 @@ fn dispatch_with_prompt(
     task: &Task,
     prompt: &str,
     runner: &dyn ProcessRunner,
+    base_branch: Option<&str>,
 ) -> Result<DispatchResult> {
-    let provision = provision_worktree(task, runner)?;
+    let provision = provision_worktree(task, runner, base_branch)?;
 
-    let full_prompt = format!("{}\n\n{prompt}", rebase_preamble());
+    let full_prompt = format!("{}\n\n{prompt}", rebase_preamble(base_branch));
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
@@ -90,22 +99,34 @@ fn dispatch_with_prompt(
 
 pub fn dispatch_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
-    dispatch_with_prompt(task, &prompt, runner)
+    dispatch_with_prompt(task, &prompt, runner, None)
 }
 
 pub fn brainstorm_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner)
+    dispatch_with_prompt(task, &prompt, runner, None)
 }
 
 pub fn quick_dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner)
+    dispatch_with_prompt(task, &prompt, runner, None)
 }
 
 pub fn epic_planning_agent(task: &Task, epic_id: EpicId, epic_title: &str, epic_description: &str, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner)
+    dispatch_with_prompt(task, &prompt, runner, None)
+}
+
+/// Dispatch a task that chains off a previous task's branch (epic auto-dispatch).
+pub fn dispatch_chained_agent(task: &Task, base_branch: &str, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+    let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
+    dispatch_with_prompt(task, &prompt, runner, Some(base_branch))
+}
+
+/// Brainstorm a task that chains off a previous task's branch (epic auto-dispatch).
+pub fn brainstorm_chained_agent(task: &Task, base_branch: &str, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
+    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, mcp_port);
+    dispatch_with_prompt(task, &prompt, runner, Some(base_branch))
 }
 
 // ---------------------------------------------------------------------------
@@ -682,8 +703,8 @@ mod tests {
     fn rebase_preamble_prepended_to_all_prompts() {
         let body = build_prompt(TaskId(1), "Task", "Desc", None);
         assert!(!body.contains("rebase")); // builder doesn't include it
-        let full = format!("{}\n\n{body}", rebase_preamble());
-        assert!(full.contains("rebase your branch from main"));
+        let full = format!("{}\n\n{body}", rebase_preamble(None));
+        assert!(full.contains("rebase your branch from origin/main"));
         assert!(full.starts_with("Before starting work"));
     }
 
@@ -766,7 +787,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        let result = provision_worktree(&task, &mock).unwrap();
+        let result = provision_worktree(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         assert_eq!(calls[0].0, "git", "first call should be git worktree add");
@@ -792,13 +813,51 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        let result = provision_worktree(&task, &mock).unwrap();
+        let result = provision_worktree(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped");
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1[0], "new-window");
         assert_eq!(result.worktree_path, worktree_dir.to_str().unwrap());
+    }
+
+    #[test]
+    fn provision_worktree_with_base_branch_passes_start_point() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git worktree add (with base branch)
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-hook
+        ]);
+
+        let task = make_task(&repo_path);
+        let result = provision_worktree(&task, &mock, Some("99-prev-task")).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[0].0, "git");
+        // The base branch should be the last arg to git worktree add
+        let git_args = &calls[0].1;
+        assert_eq!(git_args.last().unwrap(), "99-prev-task",
+            "base branch should be last git arg, got: {git_args:?}");
+
+        let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
+        assert_eq!(result.worktree_path, expected_path);
+    }
+
+    #[test]
+    fn rebase_preamble_with_base_branch() {
+        let preamble = rebase_preamble(Some("99-prev-task"));
+        assert!(preamble.contains("99-prev-task"), "should reference the base branch");
+        assert!(!preamble.contains("origin/main"), "should not reference origin/main");
+    }
+
+    #[test]
+    fn rebase_preamble_without_base_branch() {
+        let preamble = rebase_preamble(None);
+        assert!(preamble.contains("origin/main"), "should default to origin/main");
     }
 
     #[test]

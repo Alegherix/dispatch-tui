@@ -47,6 +47,8 @@ Wait for the user's response. If they cancel or say no, exit without calling any
 
 The task is automatically moved to "done" on success. Do not update the task status yourself.
 
+**Epic auto-dispatch:** If this task belongs to an epic, the next backlog subtask will be automatically dispatched after wrap-up (both rebase and PR). The next task's worktree branches from this task's branch. No extra action is needed.
+
 ### If rebase:
 
 Call the `dispatch` MCP tool `wrap_up` with:

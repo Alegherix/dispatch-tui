@@ -16,7 +16,7 @@ use super::types::{JsonRpcRequest, JsonRpcResponse};
 fn test_state() -> Arc<McpState> {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    Arc::new(McpState { db, notify_tx: None, runner })
+    Arc::new(McpState { db, notify_tx: None, runner, mcp_port: 3142 })
 }
 
 async fn call(state: &Arc<McpState>, method: &str, params: Option<Value>) -> JsonRpcResponse {
@@ -1455,7 +1455,7 @@ async fn wrap_up_accepts_running_task() {
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: 3142 });
 
     let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Running).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1517,7 +1517,7 @@ async fn wrap_up_rebase_returns_started() {
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: 3142 });
 
     let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1545,7 +1545,7 @@ async fn wrap_up_pr_returns_started() {
         MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
         MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/7\n"), // gh pr create
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: 3142 });
 
     let task_id = db.create_task("My Feature", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1563,4 +1563,127 @@ async fn wrap_up_pr_returns_started() {
 
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up started"), "Expected 'wrap_up started', got: {text}");
+}
+
+// ---------------------------------------------------------------------------
+// wrap_up auto-dispatch tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn wrap_up_rebase_no_epic_skips_auto_dispatch() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // git remote get-url (no remote)
+        MockProcessRunner::ok(),                       // git rebase main
+        MockProcessRunner::ok(),                       // git merge --ff-only
+        // No auto-dispatch calls expected
+    ]));
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: 3142 });
+
+    let task_id = db.create_task("Solo Task", "desc", "/repo", None, TaskStatus::Review).unwrap();
+    db.patch_task(task_id, &db::TaskPatch::new()
+        .worktree(Some("/repo/.worktrees/1-solo-task"))
+    ).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    ).await;
+
+    let text = extract_response_text(&resp);
+    assert!(!text.contains("next epic task"), "Non-epic task should not mention auto-dispatch");
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_auto_dispatches_next_epic_task() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    // Create .worktrees directory for the auto-dispatched task
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        // Rebase calls for current task
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // git remote get-url (no remote)
+        MockProcessRunner::ok(),                       // git rebase main
+        MockProcessRunner::ok(),                       // git merge --ff-only
+        // Auto-dispatch calls for next task (worktree dir pre-created, so git add is skipped)
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: 3142 });
+
+    // Create epic and two subtasks
+    let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
+    let task1_id = db.create_task("Task 1", "first", &repo_path, Some("docs/plan.md"), TaskStatus::Review).unwrap();
+    let task2_id = db.create_task("Task 2", "second", &repo_path, Some("docs/plan2.md"), TaskStatus::Backlog).unwrap();
+    db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task2_id, Some(epic.id)).unwrap();
+    db.patch_task(task1_id, &db::TaskPatch::new()
+        .worktree(Some(&format!("{repo_path}/.worktrees/{}-task-1", task1_id.0)))
+    ).unwrap();
+    // Pre-create the worktree directory for the next task (mocked git won't create it)
+    std::fs::create_dir_all(dir.path().join(".worktrees").join(format!("{}-task-2", task2_id.0))).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task1_id.0, "action": "rebase" }
+        })),
+    ).await;
+
+    let text = extract_response_text(&resp);
+    assert!(text.contains("next epic task"), "Expected auto-dispatch mention, got: {text}");
+    assert!(text.contains(&format!("#{}", task2_id.0)), "Expected next task ID in message, got: {text}");
+
+    // Wait for spawn_blocking to complete
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Verify the next task was dispatched
+    let task2 = db.get_task(task2_id).unwrap().unwrap();
+    assert_eq!(task2.status, TaskStatus::Running, "Next task should be Running after auto-dispatch");
+    assert!(task2.worktree.is_some(), "Next task should have a worktree");
+    assert!(task2.tmux_window.is_some(), "Next task should have a tmux_window");
+}
+
+#[tokio::test]
+async fn wrap_up_rebase_no_backlog_tasks_skips_dispatch() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // git remote get-url (no remote)
+        MockProcessRunner::ok(),                       // git rebase main
+        MockProcessRunner::ok(),                       // git merge --ff-only
+    ]));
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: 3142 });
+
+    // Create epic with only one task (already in review — no backlog subtasks)
+    let epic = db.create_epic("Test Epic", "desc", "/repo").unwrap();
+    let task1_id = db.create_task("Task 1", "first", "/repo", None, TaskStatus::Review).unwrap();
+    db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
+    db.patch_task(task1_id, &db::TaskPatch::new()
+        .worktree(Some("/repo/.worktrees/1-task-1"))
+    ).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task1_id.0, "action": "rebase" }
+        })),
+    ).await;
+
+    let text = extract_response_text(&resp);
+    assert!(!text.contains("next epic task"), "No backlog tasks — should not mention auto-dispatch");
 }

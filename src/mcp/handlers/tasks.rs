@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::db;
 use crate::dispatch;
-use crate::models::{EpicId, TaskId, TaskStatus, UsageReport};
+use crate::models::{EpicId, Task, TaskId, TaskStatus, UsageReport};
 use crate::mcp::McpState;
 
 use super::types::{JsonRpcResponse, deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args};
@@ -455,6 +455,24 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
     let notify_tx = state.notify_tx.clone();
     let task_id = task.id;
 
+    // Gather auto-dispatch context for epic subtasks.
+    // If this task belongs to an epic, find the next backlog subtask to chain-dispatch.
+    let next_epic_task = task.epic_id.and_then(|epic_id| {
+        match state.db.list_tasks_for_epic(epic_id) {
+            Ok(tasks) => tasks.into_iter().find(|t| t.status == TaskStatus::Backlog),
+            Err(e) => {
+                tracing::warn!(epic_id = epic_id.0, "auto-dispatch: failed to list epic tasks: {e}");
+                None
+            }
+        }
+    });
+
+    let auto_dispatch_msg = next_epic_task.as_ref().map(|t| {
+        format!("; next epic task #{} '{}' will be dispatched", t.id, t.title)
+    }).unwrap_or_default();
+
+    let mcp_port = state.mcp_port;
+
     match parsed.action.as_str() {
         "rebase" => {
             let db = state.db.clone();
@@ -481,6 +499,7 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
                         tracing::warn!(task_id = task_id.0, "MCP wrap_up rebase failed: {e}");
                     }
                 }
+                auto_dispatch_next(next_epic_task, &branch, mcp_port, &*db, &*runner);
                 if let Some(tx) = notify_tx {
                     let _ = tx.send(());
                 }
@@ -522,6 +541,7 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
                         tracing::warn!(task_id = task_id.0, "MCP wrap_up pr failed: {e}");
                     }
                 }
+                auto_dispatch_next(next_epic_task, &branch, mcp_port, &*db, &*runner);
                 if let Some(tx) = notify_tx {
                     let _ = tx.send(());
                 }
@@ -532,8 +552,55 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
 
     JsonRpcResponse::ok(
         id,
-        json!({"content": [{"type": "text", "text": format!("wrap_up started (task {}, action: {})", parsed.task_id, parsed.action)}]}),
+        json!({"content": [{"type": "text", "text": format!("wrap_up started (task {}, action: {}){auto_dispatch_msg}", parsed.task_id, parsed.action)}]}),
     )
+}
+
+/// Auto-dispatch the next epic subtask, chaining off the given branch.
+/// Called inside `spawn_blocking` after the rebase/PR work completes.
+fn auto_dispatch_next(
+    next_task: Option<Task>,
+    base_branch: &str,
+    mcp_port: u16,
+    db: &dyn db::TaskStore,
+    runner: &dyn crate::process::ProcessRunner,
+) {
+    let Some(next_task) = next_task else { return };
+    let next_id = next_task.id;
+
+    tracing::info!(
+        next_task_id = next_id.0,
+        %base_branch,
+        has_plan = next_task.plan.is_some(),
+        "auto-dispatching next epic subtask"
+    );
+
+    let result = if next_task.plan.is_some() {
+        dispatch::dispatch_chained_agent(&next_task, base_branch, runner)
+    } else {
+        dispatch::brainstorm_chained_agent(&next_task, base_branch, mcp_port, runner)
+    };
+
+    match result {
+        Ok(dispatch_result) => {
+            let patch = db::TaskPatch::new()
+                .status(TaskStatus::Running)
+                .worktree(Some(&dispatch_result.worktree_path))
+                .tmux_window(Some(&dispatch_result.tmux_window));
+            if let Err(e) = db.patch_task(next_id, &patch) {
+                tracing::warn!(
+                    task_id = next_id.0,
+                    "auto-dispatch: failed to update task: {e}"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                task_id = next_id.0,
+                "auto-dispatch: dispatch failed: {e:#}"
+            );
+        }
+    }
 }
 
 pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {

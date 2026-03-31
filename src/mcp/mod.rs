@@ -14,6 +14,8 @@ pub struct McpState {
     pub notify_tx: Option<mpsc::UnboundedSender<()>>,
     /// Process runner shared with TuiRuntime for executing git/tmux operations.
     pub runner: Arc<dyn ProcessRunner>,
+    /// Port the MCP server listens on (needed for brainstorm prompts in chained dispatch).
+    pub mcp_port: u16,
 }
 
 impl McpState {
@@ -28,8 +30,9 @@ pub fn router(
     db: Arc<dyn db::TaskStore>,
     notify_tx: Option<mpsc::UnboundedSender<()>>,
     runner: Arc<dyn ProcessRunner>,
+    mcp_port: u16,
 ) -> Router {
-    let state = Arc::new(McpState { db, notify_tx, runner });
+    let state = Arc::new(McpState { db, notify_tx, runner, mcp_port });
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
         .with_state(state)
@@ -41,7 +44,7 @@ pub async fn serve(
     notify_tx: mpsc::UnboundedSender<()>,
     runner: Arc<dyn ProcessRunner>,
 ) -> anyhow::Result<()> {
-    let app = router(db, Some(notify_tx), runner);
+    let app = router(db, Some(notify_tx), runner, port);
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     axum::serve(listener, app).await?;
     Ok(())

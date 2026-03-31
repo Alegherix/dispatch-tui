@@ -314,19 +314,23 @@ fn build_task_list_item<'a>(
                 Style::default().fg(Color::Yellow),
             ),
         ])
-    } else if let (TaskStatus::Review, Some(pr_num)) = (status, task.pr_number) {
+    } else if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
+        let pr_label = crate::models::pr_number_from_url(pr_url)
+            .map_or("PR".to_string(), |n| format!("PR #{n}"));
         Line::from(vec![
             Span::raw("   "),
             Span::styled(
-                format!("PR #{pr_num}"),
+                pr_label,
                 Style::default().fg(Color::Cyan),
             ),
         ])
-    } else if let (TaskStatus::Done, Some(pr_num)) = (status, task.pr_number) {
+    } else if let (TaskStatus::Done, Some(pr_url)) = (status, task.pr_url.as_deref()) {
+        let pr_label = crate::models::pr_number_from_url(pr_url)
+            .map_or("PR".to_string(), |n| format!("PR #{n}"));
         Line::from(vec![
             Span::raw("   "),
             Span::styled(
-                format!("\u{2714} PR #{pr_num} merged"),
+                format!("\u{2714} {pr_label} merged"),
                 Style::default().fg(Color::Green),
             ),
         ])

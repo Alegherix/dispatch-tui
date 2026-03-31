@@ -25,7 +25,6 @@ pub struct TaskPatch<'a> {
     pub tmux_window: Option<Option<&'a str>>,
     pub needs_input: Option<bool>,
     pub pr_url: Option<Option<&'a str>>,
-    pub pr_number: Option<Option<i64>>,
     pub sort_order: Option<Option<i64>>,
 }
 
@@ -79,11 +78,6 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
-    pub fn pr_number(mut self, pr_number: Option<i64>) -> Self {
-        self.pr_number = Some(pr_number);
-        self
-    }
-
     pub fn sort_order(mut self, sort_order: Option<i64>) -> Self {
         self.sort_order = Some(sort_order);
         self
@@ -99,7 +93,6 @@ impl<'a> TaskPatch<'a> {
             || self.tmux_window.is_some()
             || self.needs_input.is_some()
             || self.pr_url.is_some()
-            || self.pr_number.is_some()
             || self.sort_order.is_some()
     }
 }
@@ -420,6 +413,12 @@ impl Database {
                 .context("Failed to update schema version to 11")?;
         }
 
+        if current_version < 12 {
+            let _ = conn.execute_batch("ALTER TABLE tasks DROP COLUMN pr_number");
+            conn.pragma_update(None, "user_version", 12i64)
+                .context("Failed to update schema version to 12")?;
+        }
+
         Ok(())
     }
 
@@ -433,7 +432,7 @@ impl Database {
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, \
-     plan, epic_id, needs_input, pr_url, pr_number, sort_order, created_at, updated_at";
+     plan, epic_id, needs_input, pr_url, sort_order, created_at, updated_at";
 
 impl TaskStore for Database {
     fn create_task(
@@ -607,10 +606,6 @@ impl TaskStore for Database {
         if let Some(url) = &patch.pr_url {
             sets.push("pr_url = ?");
             values.push(Box::new(url.map(|s| s.to_string())));
-        }
-        if let Some(num) = patch.pr_number {
-            sets.push("pr_number = ?");
-            values.push(Box::new(num));
         }
         if let Some(so) = patch.sort_order {
             sets.push("sort_order = ?");
@@ -937,7 +932,6 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .map(EpicId),
         needs_input: row.get::<_, i64>("needs_input").unwrap_or(0) != 0,
         pr_url: row.get::<_, Option<String>>("pr_url").unwrap_or(None),
-        pr_number: row.get::<_, Option<i64>>("pr_number").unwrap_or(None),
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
@@ -1123,7 +1117,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 11, "fresh DB should be at schema version 11");
+        assert_eq!(version, 12, "fresh DB should be at schema version 12");
     }
 
     #[test]
@@ -1174,7 +1168,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1237,7 +1231,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
     }
 
     #[test]
@@ -1575,12 +1569,10 @@ mod tests {
 
         db.patch_task(id, &TaskPatch::new()
             .pr_url(Some("https://github.com/org/repo/pull/42"))
-            .pr_number(Some(42))
         ).unwrap();
 
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.pr_url.as_deref(), Some("https://github.com/org/repo/pull/42"));
-        assert_eq!(task.pr_number, Some(42));
     }
 
     #[test]
@@ -1589,7 +1581,6 @@ mod tests {
         let id = db.create_task("No PR", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert!(task.pr_url.is_none());
-        assert!(task.pr_number.is_none());
     }
 
     #[test]

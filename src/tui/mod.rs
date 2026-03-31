@@ -391,7 +391,7 @@ impl App {
             Message::SubmitEpicDescription(v) => self.handle_submit_epic_description(v),
             Message::SubmitEpicRepoPath(v) => self.handle_submit_epic_repo_path(v),
             // PR flow
-            Message::PrCreated { id, pr_url, pr_number } => self.handle_pr_created(id, pr_url, pr_number),
+            Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
             Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
             // Repo filter
@@ -835,22 +835,22 @@ impl App {
 
         // Poll PR status for review tasks with open PRs
         let pr_poll_interval = Duration::from_secs(30);
-        let pr_tasks: Vec<(TaskId, i64, String)> = self
+        let pr_tasks: Vec<(TaskId, String)> = self
             .tasks
             .iter()
-            .filter(|t| t.status == TaskStatus::Review && t.pr_number.is_some())
+            .filter(|t| t.status == TaskStatus::Review && t.pr_url.is_some())
             .filter(|t| {
                 self.agents
                     .last_pr_poll
                     .get(&t.id)
                     .is_none_or(|last| last.elapsed() > pr_poll_interval)
             })
-            .map(|t| (t.id, t.pr_number.unwrap(), t.repo_path.clone()))
+            .map(|t| (t.id, t.pr_url.clone().unwrap()))
             .collect();
 
-        for (id, pr_number, repo_path) in pr_tasks {
+        for (id, pr_url) in pr_tasks {
             self.agents.last_pr_poll.insert(id, Instant::now());
-            cmds.push(Command::CheckPrStatus { id, pr_number, repo_path });
+            cmds.push(Command::CheckPrStatus { id, pr_url });
         }
 
         // Refresh review board data if in review mode and stale (> 60s)
@@ -1368,15 +1368,16 @@ impl App {
     // PR handlers
     // -----------------------------------------------------------------------
 
-    fn handle_pr_created(&mut self, id: TaskId, pr_url: String, pr_number: i64) -> Vec<Command> {
+    fn handle_pr_created(&mut self, id: TaskId, pr_url: String) -> Vec<Command> {
         let in_queue = self.merge_queue.as_ref().is_some_and(|q| q.current == Some(id));
 
         let mut cmds = if let Some(task) = self.find_task_mut(id) {
             task.pr_url = Some(pr_url.clone());
-            task.pr_number = Some(pr_number);
             let task_clone = task.clone();
             if !in_queue {
-                self.set_status(format!("PR #{pr_number} created: {pr_url}"));
+                let pr_num = crate::models::pr_number_from_url(&pr_url);
+                let label = pr_num.map_or("PR".to_string(), |n| format!("PR #{n}"));
+                self.set_status(format!("{label} created: {pr_url}"));
             }
             vec![Command::PersistTask(task_clone)]
         } else {
@@ -1420,7 +1421,9 @@ impl App {
                 return cmds;
             }
 
-            let pr_number = task.pr_number.unwrap_or(0);
+            let pr_label = task.pr_url.as_deref()
+                .and_then(crate::models::pr_number_from_url)
+                .map_or("PR".to_string(), |n| format!("PR #{n}"));
             let title = task.title.clone();
 
             // Detach: kill tmux window but preserve worktree
@@ -1432,14 +1435,14 @@ impl App {
 
             self.clear_agent_tracking(id);
             self.clamp_selection();
-            self.set_status(format!("PR #{pr_number} merged — task #{id} moved to Done"));
+            self.set_status(format!("{pr_label} merged \u{2014} task #{id} moved to Done"));
 
             cmds.push(Command::PersistTask(task_clone));
 
             if self.notifications_enabled {
                 cmds.push(Command::SendNotification {
                     title: "PR merged".to_string(),
-                    body: format!("PR #{pr_number} merged: {title}"),
+                    body: format!("{pr_label} merged: {title}"),
                     urgent: false,
                 });
             }

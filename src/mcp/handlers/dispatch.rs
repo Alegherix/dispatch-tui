@@ -54,10 +54,6 @@ pub(super) fn tool_definitions() -> Value {
                         "pr_url": {
                             "type": "string",
                             "description": "URL of the pull request associated with this task"
-                        },
-                        "pr_number": {
-                            "type": "integer",
-                            "description": "Pull request number associated with this task"
                         }
                     },
                     "required": ["task_id"]

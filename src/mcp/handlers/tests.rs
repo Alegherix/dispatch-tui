@@ -535,8 +535,7 @@ async fn update_task_sets_pr_fields() {
             "name": "update_task",
             "arguments": {
                 "task_id": task_id.0,
-                "pr_url": "https://github.com/org/repo/pull/99",
-                "pr_number": 99
+                "pr_url": "https://github.com/org/repo/pull/99"
             }
         })),
     ).await;
@@ -544,7 +543,6 @@ async fn update_task_sets_pr_fields() {
 
     let updated = state.db.get_task(task_id).unwrap().unwrap();
     assert_eq!(updated.pr_url.as_deref(), Some("https://github.com/org/repo/pull/99"));
-    assert_eq!(updated.pr_number, Some(99));
 }
 
 // -- list_tasks tests -------------------------------------------------------
@@ -819,9 +817,9 @@ fn tool_schemas_match_arg_structs() {
     let cases: Vec<(&str, BTreeSet<&str>, BTreeSet<&str>, Value)> = vec![
         (
             "update_task",
-            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order", "pr_url", "pr_number"]),
+            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order", "pr_url"]),
             BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "pr_number": 1}),
+            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1"}),
         ),
         (
             "get_task",

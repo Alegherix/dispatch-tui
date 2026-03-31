@@ -46,7 +46,6 @@ fn make_task(id: i64, status: TaskStatus) -> Task {
         epic_id: None,
         needs_input: false,
         pr_url: None,
-        pr_number: None,
         sort_order: None,
         created_at: now,
         updated_at: now,
@@ -194,7 +193,6 @@ fn task_created_adds_to_list() {
         epic_id: None,
         needs_input: false,
         pr_url: None,
-        pr_number: None,
         sort_order: None,
         created_at: now,
         updated_at: now,
@@ -4481,12 +4479,10 @@ fn pr_created_stores_url_and_number() {
     let cmds = app.update(Message::PrCreated {
         id: TaskId(1),
         pr_url: "https://github.com/org/repo/pull/42".to_string(),
-        pr_number: 42,
     });
 
     let task = app.find_task(TaskId(1)).unwrap();
     assert_eq!(task.pr_url.as_deref(), Some("https://github.com/org/repo/pull/42"));
-    assert_eq!(task.pr_number, Some(42));
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
 }
 
@@ -4509,7 +4505,6 @@ fn pr_merged_moves_to_done_and_detaches() {
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    task.pr_number = Some(42);
     let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
@@ -4527,7 +4522,7 @@ fn pr_merged_moves_to_done_and_detaches() {
 fn pr_merged_preserves_worktree() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    task.pr_number = Some(42);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
@@ -4540,7 +4535,6 @@ fn pr_merged_preserves_worktree() {
 fn card_shows_pr_badge() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    task.pr_number = Some(42);
     let mut app = App::new(vec![task], Duration::from_secs(300));
     // Navigate to Review column (index 2)
     for _ in 0..2 {
@@ -4555,7 +4549,6 @@ fn card_shows_pr_badge() {
 fn card_shows_merged_pr_badge() {
     let mut task = make_task(1, TaskStatus::Done);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    task.pr_number = Some(42);
     let mut app = App::new(vec![task], Duration::from_secs(300));
     // Navigate to Done column (index 3)
     for _ in 0..3 {
@@ -4584,7 +4577,6 @@ fn status_bar_shows_wrap_up_hint_for_review_task() {
 fn detail_panel_shows_pr_url() {
     let mut task = make_task(1, TaskStatus::Review);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    task.pr_number = Some(42);
     let mut app = App::new(vec![task], Duration::from_secs(300));
     // Navigate to Review column (index 2) and open detail panel
     for _ in 0..2 {
@@ -4600,7 +4592,6 @@ fn detail_panel_shows_pr_url() {
 #[test]
 fn pr_polling_skips_done_tasks() {
     let mut task = make_task(1, TaskStatus::Done);
-    task.pr_number = Some(42);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
 
@@ -4612,12 +4603,11 @@ fn pr_polling_skips_done_tasks() {
 #[test]
 fn pr_polling_emits_check_for_review_tasks() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.pr_number = Some(42);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], Duration::from_secs(300));
 
     let cmds = app.update(Message::Tick);
-    assert!(cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { pr_number: 42, .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::CheckPrStatus { ref pr_url, .. } if pr_url == "https://github.com/org/repo/pull/42")));
 }
 
 // --- repo_filter ---
@@ -5593,7 +5583,6 @@ fn epic_wrap_up_pr_mode_advances_on_pr_created() {
     let cmds = app.update(Message::PrCreated {
         id: TaskId(2),
         pr_url: "https://github.com/org/repo/pull/1".to_string(),
-        pr_number: 1,
     });
 
     let queue = app.merge_queue.as_ref().expect("queue should still exist");

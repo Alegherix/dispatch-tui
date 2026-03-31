@@ -298,7 +298,6 @@ impl TuiRuntime {
                 .worktree(task.worktree.as_deref())
                 .tmux_window(task.tmux_window.as_deref())
                 .pr_url(task.pr_url.as_deref())
-                .pr_number(task.pr_number)
                 .sort_order(task.sort_order),
         ) {
             app.update(Message::Error(Self::db_error("persisting task", e)));
@@ -787,7 +786,6 @@ impl TuiRuntime {
                     let _ = tx.send(Message::PrCreated {
                         id,
                         pr_url: result.pr_url,
-                        pr_number: result.pr_number,
                     });
                 }
                 Err(e) => {
@@ -803,14 +801,13 @@ impl TuiRuntime {
     fn exec_check_pr_status(
         &self,
         id: TaskId,
-        pr_number: i64,
-        repo_path: String,
+        pr_url: String,
     ) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
-            match dispatch::check_pr_status(pr_number, &repo_path, &*runner) {
+            match dispatch::check_pr_status(&pr_url, &*runner) {
                 Ok(dispatch::PrState::Merged) => {
                     let _ = tx.send(Message::PrMerged(id));
                 }
@@ -947,8 +944,8 @@ async fn execute_commands(
                 rt.exec_persist_setting(app, &key, value),
             Command::CreatePr { id, repo_path, branch, title, description } =>
                 rt.exec_create_pr(id, repo_path, branch, title, description),
-            Command::CheckPrStatus { id, pr_number, repo_path } =>
-                rt.exec_check_pr_status(id, pr_number, repo_path),
+            Command::CheckPrStatus { id, pr_url } =>
+                rt.exec_check_pr_status(id, pr_url),
             Command::PersistStringSetting { key, value } =>
                 rt.exec_persist_string_setting(app, &key, &value),
             Command::FetchReviewPrs => rt.exec_fetch_review_prs(),
@@ -1524,7 +1521,7 @@ mod tests {
         );
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(msg, Message::PrCreated { id: TaskId(1), pr_number: 42, .. }));
+        assert!(matches!(msg, Message::PrCreated { id: TaskId(1), .. }));
     }
 
     #[tokio::test]
@@ -1560,7 +1557,6 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
             MockProcessRunner::ok_with_stdout(b"MERGED\n"),  // gh pr view
         ]));
         let rt = TuiRuntime {
@@ -1571,7 +1567,7 @@ mod tests {
             runner: mock,
         };
 
-        rt.exec_check_pr_status(TaskId(1), 42, "/repo".to_string());
+        rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
         assert!(matches!(msg, Message::PrMerged(TaskId(1))));
@@ -1582,7 +1578,6 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
             MockProcessRunner::ok_with_stdout(b"OPEN\n"),  // gh pr view
         ]));
         let rt = TuiRuntime {
@@ -1593,7 +1588,7 @@ mod tests {
             runner: mock,
         };
 
-        rt.exec_check_pr_status(TaskId(1), 42, "/repo".to_string());
+        rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
         // Should not send any message for open PRs
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;

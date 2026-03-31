@@ -96,7 +96,7 @@ pub enum Message {
     FinishComplete(TaskId),
     FinishFailed { id: TaskId, error: String, is_conflict: bool },
     // PR flow
-    PrCreated { id: TaskId, pr_url: String, pr_number: i64 },
+    PrCreated { id: TaskId, pr_url: String },
     PrFailed { id: TaskId, error: String },
     PrMerged(TaskId),
     // Done confirmation (no cleanup, just status change)
@@ -184,8 +184,7 @@ pub enum Command {
     },
     CheckPrStatus {
         id: TaskId,
-        pr_number: i64,
-        repo_path: String,
+        pr_url: String,
     },
     FetchReviewPrs,
     OpenInBrowser { url: String },

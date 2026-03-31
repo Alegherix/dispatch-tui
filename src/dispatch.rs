@@ -457,7 +457,6 @@ IMPORTANT: Do NOT start implementing. Your job ends after planning.",
 #[derive(Debug, Clone)]
 pub struct PrResult {
     pub pr_url: String,
-    pub pr_number: i64,
 }
 
 #[derive(Debug)]
@@ -550,36 +549,17 @@ pub fn create_pr(
 
     // 4. Parse the PR URL from stdout
     let pr_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let pr_number = pr_url
-        .rsplit('/')
-        .next()
-        .and_then(|s| s.parse::<i64>().ok())
-        .ok_or_else(|| PrError::Other(format!("Could not parse PR number from: {pr_url}")))?;
-
-    Ok(PrResult { pr_url, pr_number })
+    Ok(PrResult { pr_url })
 }
 
 /// Check the current status of a PR using `gh pr view`.
 pub fn check_pr_status(
-    pr_number: i64,
-    repo_path: &str,
+    pr_url: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<PrState> {
-    let repo_path = &expand_tilde(repo_path);
-
-    // Get repo slug from git remote
-    let remote_output = runner
-        .run("git", &["-C", repo_path, "remote", "get-url", "origin"])
-        .context("Failed to get remote URL")?;
-    let remote_url = String::from_utf8_lossy(&remote_output.stdout).trim().to_string();
-    let repo_slug = parse_repo_slug(&remote_url)
-        .ok_or_else(|| anyhow::anyhow!("Could not parse repo slug from: {remote_url}"))?;
-
-    let pr_num_str = pr_number.to_string();
     let output = runner
         .run("gh", &[
-            "pr", "view", &pr_num_str,
-            "--repo", &repo_slug,
+            "pr", "view", pr_url,
             "--json", "state",
             "-q", ".state",
         ])
@@ -644,7 +624,6 @@ mod tests {
             epic_id: None,
             needs_input: false,
             pr_url: None,
-            pr_number: None,
             sort_order: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1159,7 +1138,6 @@ mod tests {
 
         let result = create_pr("/repo", "42-fix-bug", "Fix bug", "A nasty crash", &mock).unwrap();
         assert_eq!(result.pr_url, "https://github.com/org/repo/pull/42");
-        assert_eq!(result.pr_number, 42);
 
         let calls = mock.recorded_calls();
         assert_eq!(calls[1].0, "git");
@@ -1218,30 +1196,27 @@ mod tests {
     #[test]
     fn check_pr_status_open() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
             MockProcessRunner::ok_with_stdout(b"OPEN\n"),  // gh pr view
         ]);
-        let result = check_pr_status(42, "/repo", &mock).unwrap();
+        let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result, PrState::Open);
     }
 
     #[test]
     fn check_pr_status_merged() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),
             MockProcessRunner::ok_with_stdout(b"MERGED\n"),
         ]);
-        let result = check_pr_status(42, "/repo", &mock).unwrap();
+        let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result, PrState::Merged);
     }
 
     #[test]
     fn check_pr_status_closed() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),
             MockProcessRunner::ok_with_stdout(b"CLOSED\n"),
         ]);
-        let result = check_pr_status(42, "/repo", &mock).unwrap();
+        let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result, PrState::Closed);
     }
 

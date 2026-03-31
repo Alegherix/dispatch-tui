@@ -30,8 +30,6 @@ pub(super) struct UpdateTaskArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
     pub(super) pr_url: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) pr_number: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -104,14 +102,13 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
         || parsed.description.is_some()
         || parsed.repo_path.is_some()
         || parsed.sort_order.is_some()
-        || parsed.pr_url.is_some()
-        || parsed.pr_number.is_some();
+        || parsed.pr_url.is_some();
 
     if !has_update {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "At least one of status, plan, title, description, repo_path, sort_order, pr_url, or pr_number must be provided",
+            "At least one of status, plan, title, description, repo_path, sort_order, or pr_url must be provided",
         );
     }
 
@@ -162,9 +159,6 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if let Some(ref url) = parsed.pr_url {
         patch = patch.pr_url(Some(url.as_str()));
     }
-    if let Some(pr_num) = parsed.pr_number {
-        patch = patch.pr_number(Some(pr_num));
-    }
 
     if let Err(e) = state.db.patch_task(TaskId(parsed.task_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
@@ -180,7 +174,6 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if parsed.repo_path.is_some() { updated.push("repo_path".to_string()); }
     if parsed.sort_order.is_some() { updated.push("sort_order".to_string()); }
     if parsed.pr_url.is_some() { updated.push("pr_url".to_string()); }
-    if parsed.pr_number.is_some() { updated.push("pr_number".to_string()); }
 
     JsonRpcResponse::ok(
         id,
@@ -250,6 +243,9 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
             }
             if let Some(ref plan) = task.plan {
                 text.push_str(&format!("\nPlan: {plan}"));
+            }
+            if let Some(ref pr_url) = task.pr_url {
+                text.push_str(&format!("\nPR: {pr_url}"));
             }
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
@@ -530,8 +526,7 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
                     Ok(result) => {
                         let patch = db::TaskPatch::new()
                             .status(TaskStatus::Review)
-                            .pr_url(Some(result.pr_url.as_str()))
-                            .pr_number(Some(result.pr_number));
+                            .pr_url(Some(result.pr_url.as_str()));
                         if let Err(e) = db.patch_task(task_id, &patch) {
                             tracing::warn!(
                                 task_id = task_id.0,

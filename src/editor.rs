@@ -181,7 +181,6 @@ mod tests {
             epic_id: None,
             needs_input: false,
             pr_url: None,
-            pr_number: None,
             sort_order: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),

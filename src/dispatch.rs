@@ -397,7 +397,10 @@ Your task is:\n\
 {plan_section}\n\
 \n\
 Task status transitions (running/review) are managed automatically via hooks. \
-Do not call update_task for status changes."
+Do not call update_task for status changes.\n\
+\n\
+When implementation is complete, use the /wrap-up skill to commit remaining \
+changes and ask the user whether to rebase onto main or create a PR."
     )
 }
 
@@ -698,6 +701,13 @@ mod tests {
     }
 
     #[test]
+    fn build_prompt_mentions_wrap_up_skill() {
+        let prompt = build_prompt(TaskId(7), "Title", "Desc", None);
+        assert!(prompt.contains("/wrap-up"), "prompt should tell agent to use /wrap-up skill");
+        assert!(prompt.contains("rebase") || prompt.contains("PR"), "prompt should mention rebase/PR choice");
+    }
+
+    #[test]
     fn expand_tilde_with_path() {
         let home = std::env::var("HOME").unwrap();
         assert_eq!(expand_tilde("~/projects/foo"), format!("{home}/projects/foo"));
@@ -761,7 +771,6 @@ mod tests {
     #[test]
     fn rebase_preamble_prepended_to_all_prompts() {
         let body = build_prompt(TaskId(1), "Task", "Desc", None);
-        assert!(!body.contains("rebase")); // builder doesn't include it
         let full = format!("{}\n\n{body}", rebase_preamble("origin/main"));
         assert!(full.contains("rebase your branch from origin/main"));
         assert!(full.starts_with("Before starting work"));

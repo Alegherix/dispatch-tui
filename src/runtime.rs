@@ -1657,6 +1657,8 @@ mod tests {
             deletions: 5,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec![],
+            tmux_window: None,
+            review_notes: None,
         };
         rt.database.save_review_prs(&[pr]).unwrap();
 

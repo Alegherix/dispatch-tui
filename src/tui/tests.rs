@@ -5163,6 +5163,8 @@ fn make_review_pr(number: i64, author: &str, decision: ReviewDecision) -> crate:
         deletions: 5,
         review_decision: decision,
         labels: vec![],
+        tmux_window: None,
+        review_notes: None,
     }
 }
 

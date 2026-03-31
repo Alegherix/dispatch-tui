@@ -128,6 +128,8 @@ fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
             deletions: node["deletions"].as_i64().unwrap_or(0),
             review_decision,
             labels,
+            tmux_window: None,
+            review_notes: None,
         });
     }
 

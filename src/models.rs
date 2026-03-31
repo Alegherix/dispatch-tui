@@ -333,6 +333,8 @@ pub struct ReviewPr {
     pub deletions: i64,
     pub review_decision: ReviewDecision,
     pub labels: Vec<String>,
+    pub tmux_window: Option<String>,
+    pub review_notes: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1082,6 +1084,29 @@ mod tests {
                 .unwrap_or_else(|| panic!("failed to parse db str: {s}"));
             assert_eq!(parsed, decision);
         }
+    }
+
+    #[test]
+    fn review_pr_has_agent_fields() {
+        use chrono::Utc;
+        let pr = ReviewPr {
+            number: 1,
+            title: "T".to_string(),
+            author: "a".to_string(),
+            repo: "o/r".to_string(),
+            url: "https://github.com/o/r/pull/1".to_string(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 0,
+            deletions: 0,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            tmux_window: Some("review-r-1".to_string()),
+            review_notes: Some("LGTM".to_string()),
+        };
+        assert_eq!(pr.tmux_window.as_deref(), Some("review-r-1"));
+        assert_eq!(pr.review_notes.as_deref(), Some("LGTM"));
     }
 
 }

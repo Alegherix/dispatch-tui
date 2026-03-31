@@ -1061,6 +1061,8 @@ impl TaskStore for Database {
                 deletions,
                 review_decision,
                 labels,
+                tmux_window: None,
+                review_notes: None,
             });
         }
         Ok(prs)
@@ -1907,6 +1909,8 @@ mod tests {
             deletions: 5,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec!["bug".to_string()],
+            tmux_window: None,
+            review_notes: None,
         };
         let pr2 = ReviewPr {
             number: 99,
@@ -1921,6 +1925,8 @@ mod tests {
             deletions: 80,
             review_decision: ReviewDecision::Approved,
             labels: vec![],
+            tmux_window: None,
+            review_notes: None,
         };
 
         db.save_review_prs(&[pr1, pr2]).unwrap();
@@ -1963,6 +1969,8 @@ mod tests {
             deletions: 0,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec![],
+            tmux_window: None,
+            review_notes: None,
         };
         db.save_review_prs(&[pr1]).unwrap();
         assert_eq!(db.load_review_prs().unwrap().len(), 1);
@@ -1981,6 +1989,8 @@ mod tests {
             deletions: 3,
             review_decision: ReviewDecision::ChangesRequested,
             labels: vec!["urgent".to_string()],
+            tmux_window: None,
+            review_notes: None,
         };
         db.save_review_prs(&[pr2]).unwrap();
 

@@ -34,12 +34,17 @@ Tick timer ───────┘                                             
 ```
 src/
 ├── main.rs          # Entry point, CLI argument parsing
-├── models.rs        # Task, TaskStatus, slugify, COLUMN_COUNT
+├── lib.rs           # Public module declarations, DEFAULT_PORT constant
+├── models.rs        # Task, TaskStatus, Epic, slugify, COLUMN_COUNT
 ├── db.rs            # TaskStore trait + SQLite Database impl (Mutex<Connection>)
 ├── dispatch.rs      # Agent dispatch: worktree creation, tmux window, MCP config, prompt
 ├── tmux.rs          # tmux subprocess wrappers (new-window, send-keys, capture-pane, has-window)
 ├── runtime.rs       # TUI main loop, TuiRuntime with exec_* command handlers
 ├── editor.rs        # External editor integration (format/parse task content)
+├── github.rs        # GitHub PR review fetching via `gh api graphql`
+├── plan.rs          # Plan file parser (extract title/description from markdown)
+├── process.rs       # ProcessRunner trait, RealProcessRunner, MockProcessRunner for tests
+├── setup.rs         # `dispatch setup` command: MCP config + permissions merging
 ├── tui/
 │   ├── mod.rs       # App state, handle_* message handlers, update() routing
 │   ├── types.rs     # Message, Command, InputMode, TaskDraft enums
@@ -48,7 +53,13 @@ src/
 │   └── tests.rs     # Unit tests for App state machine
 └── mcp/
     ├── mod.rs       # Axum router + server setup
-    └── handlers.rs  # JSON-RPC MCP handlers (update_task, get_task, create_task)
+    └── handlers/
+        ├── mod.rs       # Handler routing
+        ├── dispatch.rs  # Tool definitions and JSON-RPC dispatch
+        ├── tasks.rs     # Task CRUD handlers
+        ├── epics.rs     # Epic CRUD handlers
+        ├── types.rs     # Shared argument/response types
+        └── tests.rs     # MCP handler integration tests
 ```
 
 ## Kanban Columns

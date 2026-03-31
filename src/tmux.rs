@@ -109,6 +109,16 @@ pub fn set_after_split_hook(window: &str, working_dir: &str, runner: &dyn Proces
     Ok(())
 }
 
+/// Return the name of the currently active tmux window.
+pub fn current_window_name(runner: &dyn ProcessRunner) -> Result<String> {
+    let output = runner.run("tmux", &["display-message", "-p", "#W"])?;
+    if !output.status.success() {
+        bail!("tmux display-message failed with status {}", output.status);
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(text)
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers (kept for arg-shape unit tests)
 // ---------------------------------------------------------------------------
@@ -163,6 +173,11 @@ fn set_after_split_hook_args(window: &str, working_dir: &str) -> Vec<String> {
         "after-split-window".to_string(),
         format!("send-keys 'cd {}' Enter", working_dir),
     ]
+}
+
+#[cfg(test)]
+fn current_window_name_args() -> Vec<String> {
+    vec!["display-message".to_string(), "-p".to_string(), "#W".to_string()]
 }
 
 // ---------------------------------------------------------------------------
@@ -313,5 +328,26 @@ mod tests {
                 "after-split-window", "send-keys 'cd /some/path' Enter",
             ]
         );
+    }
+
+    #[test]
+    fn current_window_name_args_correct() {
+        let args = current_window_name_args();
+        assert_eq!(args, vec!["display-message", "-p", "#W"]);
+    }
+
+    #[test]
+    fn current_window_name_returns_trimmed_stdout() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"dispatch\n"),
+        ]);
+        let result = current_window_name(&mock).unwrap();
+        assert_eq!(result, "dispatch");
+    }
+
+    #[test]
+    fn current_window_name_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no session")]);
+        assert!(current_window_name(&mock).is_err());
     }
 }

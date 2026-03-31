@@ -493,7 +493,7 @@ Steps:\n\
    - Tasks in the same repository must have different sort_order values\n\
    - Set repo_path to the absolute path of the repository each task targets\n\
 \n\
-After creating the subtasks, ask whether to continue implementing or stop.\n\
+After creating the subtasks, confirm with the user before doing anything further.\n\
 \n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
 query tasks and epics (tool: dispatch). Relevant tools: create_task, update_epic, list_tasks.\n\
@@ -1165,6 +1165,7 @@ mod tests {
         assert!(prompt.contains("sort_order"), "prompt should explain sort_order for ordering");
         assert!(prompt.contains("update_epic"), "prompt should instruct attaching plan to epic");
         assert!(prompt.contains("repo_path"), "prompt should explain repo_path for parallelization");
+        assert!(prompt.contains("epic_id=42"), "update_epic call should include the resolved epic id");
     }
 
     #[test]

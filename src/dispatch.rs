@@ -480,25 +480,26 @@ Epic:\n\
   Description: {description}\n\
 \n\
 Your goal is to explore the codebase, write an implementation plan, and break \
-it into work packages (subtasks) on the kanban board.\n\
+it into work packages on the kanban board.\n\
 \n\
 Steps:\n\
 1. Explore the codebase to understand what needs to change.\n\
-2. Write the plan to docs/plans/ and attach it to the epic:\n\
+2. Use the /brainstorm skill to write the plan. When done, attach it to the epic:\n\
    Call update_epic with epic_id={epic_id} and plan=<absolute path to plan file>\n\
-3. Create subtasks from the plan using create_task. Group them as work packages:\n\
-   - Set epic_id={epic_id} on every task\n\
+3. Create work packages from the plan using create_task. Work packages are kanban \
+tasks — do not confuse them with subtasks inside the plan document itself:\n\
+   - Set epic_id={epic_id} on every work package\n\
    - Use sort_order to control execution order (1, 2, 3, \u{2026})\n\
-   - Tasks at the same sort_order in different repositories run in parallel\n\
-   - Tasks in the same repository must have different sort_order values\n\
-   - Set repo_path to the absolute path of the repository each task targets\n\
+   - Work packages at the same sort_order in different repositories run in parallel\n\
+   - Work packages in the same repository must have different sort_order values\n\
+   - Set repo_path to the absolute path of the repository each work package targets\n\
 \n\
-After creating the subtasks, confirm with the user before doing anything further.\n\
+After creating the work packages, confirm with the user before doing anything further.\n\
 \n\
 An MCP server is available at http://localhost:{mcp_port}/mcp — use it to \
 query tasks and epics (tool: dispatch). Relevant tools: create_task, update_epic, list_tasks.\n\
 \n\
-IMPORTANT: Do NOT start implementing. Your job ends after creating the subtasks.",
+IMPORTANT: Do NOT start implementing. Your job ends after creating the work packages.",
         epic_id = epic_id,
         title = title,
         description = description,
@@ -1160,12 +1161,14 @@ mod tests {
         assert!(prompt.contains("Rework the login flow"));
         assert!(prompt.contains("Do NOT start implementing"));
         assert!(prompt.contains(&DEFAULT_PORT.to_string()));
-        // New: work package instructions
+        // Work package instructions
         assert!(prompt.contains("create_task"), "prompt should instruct using create_task");
         assert!(prompt.contains("sort_order"), "prompt should explain sort_order for ordering");
         assert!(prompt.contains("update_epic"), "prompt should instruct attaching plan to epic");
         assert!(prompt.contains("repo_path"), "prompt should explain repo_path for parallelization");
         assert!(prompt.contains("epic_id=42"), "update_epic call should include the resolved epic id");
+        assert!(prompt.contains("/brainstorm"), "prompt should direct agent to use the brainstorm skill");
+        assert!(prompt.contains("work package"), "prompt should use 'work package' terminology");
     }
 
     #[test]

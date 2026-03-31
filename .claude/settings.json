@@ -17,50 +17,6 @@
       "mcp__dispatch__wrap_up"
     ]
   },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "task-status-hook"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "task-status-hook"
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "task-usage-hook"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "task-status-hook"
-          }
-        ]
-      }
-    ]
-  },
   "enabledMcpjsonServers": [
     "dispatch"
   ],

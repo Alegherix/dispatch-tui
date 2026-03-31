@@ -119,6 +119,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints(if has_banner {
             vec![
+                Constraint::Length(1),   // tab bar
                 Constraint::Length(1),   // summary row
                 Constraint::Length(4),   // epic banner
                 Constraint::Min(6),      // kanban board
@@ -127,6 +128,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             ]
         } else {
             vec![
+                Constraint::Length(1),   // tab bar
                 Constraint::Length(1),   // summary row
                 Constraint::Min(6),      // kanban board
                 Constraint::Length(8),   // detail panel
@@ -136,23 +138,112 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .split(area);
 
     if has_banner {
-        render_summary(frame, app, vertical[0]);
-        render_epic_banner(frame, app, vertical[1]);
+        render_tab_bar(frame, app, vertical[0]);
+        render_summary(frame, app, vertical[1]);
+        render_epic_banner(frame, app, vertical[2]);
+        render_columns(frame, app, vertical[3], now);
+        render_archive_overlay(frame, app, vertical[3], now);
+        render_detail(frame, app, vertical[4], now);
+        render_status_bar(frame, app, vertical[5]);
+    } else {
+        render_tab_bar(frame, app, vertical[0]);
+        render_summary(frame, app, vertical[1]);
         render_columns(frame, app, vertical[2], now);
         render_archive_overlay(frame, app, vertical[2], now);
         render_detail(frame, app, vertical[3], now);
         render_status_bar(frame, app, vertical[4]);
-    } else {
-        render_summary(frame, app, vertical[0]);
-        render_columns(frame, app, vertical[1], now);
-        render_archive_overlay(frame, app, vertical[1], now);
-        render_detail(frame, app, vertical[2], now);
-        render_status_bar(frame, app, vertical[3]);
     }
 
     render_error_popup(frame, app, area);
     render_help_overlay(frame, app, area);
     render_repo_filter_overlay(frame, app, area);
+}
+
+fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
+    let inactive_style = Style::default().fg(MUTED);
+    let hint_style = Style::default().fg(MUTED);
+
+    let mut spans: Vec<Span> = Vec::new();
+
+    match app.view_mode() {
+        ViewMode::Epic { epic_id, .. } => {
+            let epic_title = app.epics().iter()
+                .find(|e| e.id == *epic_id)
+                .map(|e| truncate(&e.title, 30))
+                .unwrap_or_else(|| "Epic".to_string());
+            spans.push(Span::styled(
+                format!(" \u{25b8} Epic: {epic_title} "),
+                active_style.fg(PURPLE),
+            ));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(" Tasks ", inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            let review_count = app.review_prs().len();
+            if review_count > 0 {
+                spans.push(Span::styled(
+                    format!(" Reviews ({review_count}) "),
+                    inactive_style,
+                ));
+            } else {
+                spans.push(Span::styled(" Reviews ", inactive_style));
+            }
+        }
+        ViewMode::Board(_) => {
+            spans.push(Span::styled(" \u{25b8} Tasks ", active_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            let review_count = app.review_prs().len();
+            if review_count > 0 {
+                spans.push(Span::styled(
+                    format!(" Reviews ({review_count}) ", ),
+                    inactive_style,
+                ));
+            } else {
+                spans.push(Span::styled(" Reviews ", inactive_style));
+            }
+        }
+        ViewMode::ReviewBoard { .. } => {
+            spans.push(Span::styled(" Tasks ", inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            let review_count = app.review_prs().len();
+            if review_count > 0 {
+                spans.push(Span::styled(
+                    format!(" \u{25b8} Reviews ({review_count}) "),
+                    active_style,
+                ));
+            } else {
+                spans.push(Span::styled(" \u{25b8} Reviews ", active_style));
+            }
+        }
+    }
+
+    spans.push(Span::styled("  Tab", hint_style.add_modifier(Modifier::BOLD)));
+    spans.push(Span::styled(" switch", hint_style));
+
+    let line = Line::from(spans);
+    let paragraph = Paragraph::new(line);
+    frame.render_widget(paragraph, area);
+
+    // Right-aligned indicators (filter, notifications)
+    let mut right_parts: Vec<Span> = Vec::new();
+    if !app.repo_filter().is_empty() {
+        let active = app.repo_filter().len();
+        let total = app.repo_paths().len();
+        right_parts.push(Span::styled(
+            format!("[{active}/{total} repos]  "),
+            Style::default().fg(MUTED),
+        ));
+    }
+    if app.notifications_enabled() {
+        right_parts.push(Span::styled("\u{1F514}", Style::default().fg(Color::Yellow)));
+    } else {
+        right_parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(MUTED)));
+    }
+    if !right_parts.is_empty() {
+        let right_line = Line::from(right_parts);
+        let p = Paragraph::new(right_line).alignment(Alignment::Right);
+        frame.render_widget(p, area);
+    }
 }
 
 fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
@@ -207,31 +298,6 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(paragraph, col_segments[col_idx]);
     }
 
-    // Right-aligned overlay: filter indicator + review badge + notification indicator
-    let mut right_parts: Vec<Span> = Vec::new();
-    if !app.repo_filter().is_empty() {
-        let active = app.repo_filter().len();
-        let total = app.repo_paths().len();
-        right_parts.push(Span::styled(
-            format!("[{active}/{total} repos]  "),
-            Style::default().fg(MUTED),
-        ));
-    }
-    let review_count = app.review_prs().len();
-    if review_count > 0 {
-        right_parts.push(Span::styled(
-            format!("\u{21e5}{review_count} "),
-            Style::default().fg(CYAN),
-        ));
-    }
-    if app.notifications_enabled() {
-        right_parts.push(Span::styled("\u{1F514}", Style::default().fg(Color::Yellow)));
-    } else {
-        right_parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(MUTED)));
-    }
-    let right_line = Line::from(right_parts);
-    let p = Paragraph::new(right_line).alignment(Alignment::Right);
-    frame.render_widget(p, area);
 }
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).
@@ -1528,28 +1594,30 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(1), // tab bar
             Constraint::Length(1), // summary row
             Constraint::Min(1),    // board
             Constraint::Length(1), // status bar
         ])
         .split(area);
 
-    render_review_summary_row(frame, app, chunks[0]);
+    render_tab_bar(frame, app, chunks[0]);
+    render_review_summary_row(frame, app, chunks[1]);
 
     if app.review_prs().is_empty() {
         let p = Paragraph::new("No PRs awaiting your review")
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[1]);
+        frame.render_widget(p, chunks[2]);
     } else {
-        render_review_columns(frame, app, chunks[1]);
+        render_review_columns(frame, app, chunks[2]);
     }
 
     // Status bar
     if let Some(msg) = app.status_message() {
         let status = Paragraph::new(msg.to_string())
             .style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[2]);
+        frame.render_widget(status, chunks[3]);
     }
 }
 
@@ -1559,14 +1627,9 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
     let segments = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints({
-            let mut c = vec![
-                Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32);
-                ReviewDecision::COLUMN_COUNT
-            ];
-            c.push(Constraint::Length(12)); // Tab hint
-            c
-        })
+        .constraints(
+            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32); ReviewDecision::COLUMN_COUNT]
+        )
         .split(area);
 
     for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
@@ -1587,12 +1650,6 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
         let p = Paragraph::new(label).style(style);
         frame.render_widget(p, segments[i]);
     }
-
-    // Tab hint
-    let hint = Paragraph::new("\u{21e5} Tasks")
-        .alignment(Alignment::Right)
-        .style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(hint, segments[ReviewDecision::COLUMN_COUNT]);
 }
 
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {

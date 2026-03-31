@@ -515,7 +515,7 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
                 match dispatch::create_pr(&repo_path, &branch, &title, &description, &*runner) {
                     Ok(result) => {
                         let patch = db::TaskPatch::new()
-                            .status(TaskStatus::Done)
+                            .status(TaskStatus::Review)
                             .pr_url(Some(result.pr_url.as_str()))
                             .pr_number(Some(result.pr_number));
                         if let Err(e) = db.patch_task(task_id, &patch) {

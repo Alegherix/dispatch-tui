@@ -67,12 +67,28 @@ fn rebase_preamble(target: &str) -> String {
     )
 }
 
+#[derive(Clone, Copy)]
+enum ClaudeMode {
+    AcceptEdits,
+    Plan,
+}
+
+impl ClaudeMode {
+    fn as_flag(self) -> &'static str {
+        match self {
+            ClaudeMode::AcceptEdits => "acceptEdits",
+            ClaudeMode::Plan => "plan",
+        }
+    }
+}
+
 /// Provision worktree, write prompt file, launch Claude via tmux.
 /// The prompt file is deleted after Claude reads it.
 /// Shared by all dispatch variants.
 fn dispatch_with_prompt(
     task: &Task,
     prompt: &str,
+    mode: ClaudeMode,
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
 ) -> Result<DispatchResult> {
@@ -94,12 +110,13 @@ fn dispatch_with_prompt(
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
-    tmux::send_keys(
-        &provision.tmux_window,
-        "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude \"$prompt\"'",
-        runner,
-    )
-    .context("failed to send keys to tmux window")?;
+    let claude_cmd = format!(
+        "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt \
+         && claude --permission-mode {} \"$prompt\"'",
+        mode.as_flag()
+    );
+    tmux::send_keys(&provision.tmux_window, &claude_cmd, runner)
+        .context("failed to send keys to tmux window")?;
 
     tracing::info!(task_id = task.id.0, worktree = %provision.worktree_path, "agent dispatched");
 
@@ -111,45 +128,45 @@ fn dispatch_with_prompt(
 
 pub fn dispatch_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
-    dispatch_with_prompt(task, &prompt, runner, None)
+    dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
 pub fn brainstorm_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner, None)
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
 pub fn plan_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_plan_prompt(task.id, &task.title, &task.description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner, None)
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
 pub fn quick_dispatch_agent(task: &Task, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner, None)
+    dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
 pub fn epic_planning_agent(task: &Task, epic_id: EpicId, epic_title: &str, epic_description: &str, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner, None)
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
 /// Dispatch a task that chains off a previous task's branch (epic auto-dispatch).
 pub fn dispatch_chained_agent(task: &Task, base_branch: &str, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
-    dispatch_with_prompt(task, &prompt, runner, Some(base_branch))
+    dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, Some(base_branch))
 }
 
 /// Plan a task that chains off a previous task's branch (epic auto-dispatch).
 pub fn plan_chained_agent(task: &Task, base_branch: &str, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_plan_prompt(task.id, &task.title, &task.description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner, Some(base_branch))
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, Some(base_branch))
 }
 
 /// Brainstorm a task that chains off a previous task's branch (epic auto-dispatch).
 pub fn brainstorm_chained_agent(task: &Task, base_branch: &str, mcp_port: u16, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
     let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, mcp_port);
-    dispatch_with_prompt(task, &prompt, runner, Some(base_branch))
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, Some(base_branch))
 }
 
 // ---------------------------------------------------------------------------
@@ -873,6 +890,62 @@ mod tests {
         assert!(
             calls[3].1.iter().any(|a| a.contains("claude")),
             "send-keys should include claude"
+        );
+        assert!(
+            calls[3].1.iter().any(|a| a.contains("--permission-mode acceptEdits")),
+            "dispatch_agent send-keys should use acceptEdits mode"
+        );
+    }
+
+    #[test]
+    fn dispatch_agent_uses_accept_edits_mode() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux set-hook
+            MockProcessRunner::ok(),                   // tmux send-keys -l
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]);
+
+        let task = make_task(&repo_path);
+        dispatch_agent(&task, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        assert!(
+            send_keys_arg.contains("--permission-mode acceptEdits"),
+            "dispatch_agent should use acceptEdits mode, got: {send_keys_arg}"
+        );
+    }
+
+    #[test]
+    fn plan_agent_uses_plan_mode() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux set-hook
+            MockProcessRunner::ok(),                   // tmux send-keys -l
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]);
+
+        let task = make_task(&repo_path);
+        plan_agent(&task, DEFAULT_PORT, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        assert!(
+            send_keys_arg.contains("--permission-mode plan"),
+            "plan_agent should use plan mode, got: {send_keys_arg}"
         );
     }
 

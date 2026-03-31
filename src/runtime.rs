@@ -1262,6 +1262,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail(""),                   // symbolic-ref (no remote → fallback to "main")
             MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
             MockProcessRunner::fail(""),                   // remote get-url (no remote)
             MockProcessRunner::ok(),                       // git rebase main (from worktree)
@@ -1309,6 +1310,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail(""),                   // symbolic-ref (no remote → fallback to "main")
             MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
             MockProcessRunner::fail(""),                   // remote get-url (no remote)
             Ok(Output {
@@ -1388,6 +1390,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
             MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD (not main)
         ]));
         let rt = TuiRuntime {
@@ -1502,6 +1505,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
             MockProcessRunner::ok(),  // git push
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
             MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"),  // gh pr create
@@ -1531,6 +1535,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
             MockProcessRunner::fail("fatal: no remote"),
         ]));
         let rt = TuiRuntime {

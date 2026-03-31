@@ -185,10 +185,30 @@ pub fn cleanup_task(
 // finish_task
 // ---------------------------------------------------------------------------
 
+/// Detect the default branch for a repo by inspecting `origin/HEAD`.
+/// Falls back to `"main"` when there is no remote or the ref is missing.
+fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> String {
+    if let Ok(output) = runner.run(
+        "git",
+        &["-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
+    ) {
+        if output.status.success() {
+            let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // e.g. "refs/remotes/origin/master" → "master"
+            if let Some(branch) = refname.rsplit('/').next() {
+                if !branch.is_empty() {
+                    return branch.to_string();
+                }
+            }
+        }
+    }
+    "main".to_string()
+}
+
 /// Errors from the finish (rebase + cleanup) operation.
 #[derive(Debug)]
 pub enum FinishError {
-    NotOnMain(String),
+    NotOnDefaultBranch { current: String, expected: String },
     RebaseConflict(String),
     Other(String),
 }
@@ -196,9 +216,9 @@ pub enum FinishError {
 impl std::fmt::Display for FinishError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FinishError::NotOnMain(branch) => write!(
+            FinishError::NotOnDefaultBranch { current, expected } => write!(
                 f,
-                "Repo root is not on main (currently on {branch}) — checkout main first"
+                "Repo root is not on {expected} (currently on {current}) — checkout {expected} first"
             ),
             FinishError::RebaseConflict(branch) => {
                 write!(f, "Rebase conflict on {branch} — resolve and try again")
@@ -219,17 +239,21 @@ pub fn finish_task(
 ) -> std::result::Result<(), FinishError> {
     let repo_path = &expand_tilde(repo_path);
     let worktree = &expand_tilde(worktree);
+    let default_branch = detect_default_branch(repo_path, runner);
 
-    // 1. Verify we're on main
+    // 1. Verify we're on the default branch
     let output = runner
         .run("git", &["-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"])
         .map_err(|e| FinishError::Other(format!("Failed to check current branch: {e}")))?;
     let current_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if current_branch != "main" {
-        return Err(FinishError::NotOnMain(current_branch));
+    if current_branch != default_branch {
+        return Err(FinishError::NotOnDefaultBranch {
+            current: current_branch,
+            expected: default_branch,
+        });
     }
 
-    // 2. Pull latest main (skip if no remote configured)
+    // 2. Pull latest default branch (skip if no remote configured)
     let has_remote = runner
         .run("git", &["-C", repo_path, "remote", "get-url", "origin"])
         .map(|o| o.status.success())
@@ -237,20 +261,23 @@ pub fn finish_task(
 
     if has_remote {
         let output = runner
-            .run("git", &["-C", repo_path, "pull", "origin", "main"])
+            .run(
+                "git",
+                &["-C", repo_path, "pull", "origin", &default_branch],
+            )
             .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(FinishError::Other(format!(
-                "Failed to pull main: {}",
+                "Failed to pull {default_branch}: {}",
                 stderr.trim()
             )));
         }
     }
 
-    // 3. Rebase branch onto main (from worktree, where branch is checked out)
+    // 3. Rebase branch onto default branch (from worktree, where branch is checked out)
     let output = runner
-        .run("git", &["-C", worktree, "rebase", "main"])
+        .run("git", &["-C", worktree, "rebase", &default_branch])
         .map_err(|e| FinishError::Other(format!("Failed to run git rebase: {e}")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -271,10 +298,10 @@ pub fn finish_task(
         )));
     }
 
-    // 4. Fast-forward main to the rebased branch
+    // 4. Fast-forward default branch to the rebased branch
     let output = runner
         .run("git", &["-C", repo_path, "merge", "--ff-only", branch])
-        .map_err(|e| FinishError::Other(format!("Failed to fast-forward main: {e}")))?;
+        .map_err(|e| FinishError::Other(format!("Failed to fast-forward {default_branch}: {e}")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(FinishError::Other(format!(
@@ -485,6 +512,7 @@ pub fn create_pr(
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<PrResult, PrError> {
     let repo_path = &expand_tilde(repo_path);
+    let default_branch = detect_default_branch(repo_path, runner);
 
     // 1. Push the branch
     let output = runner
@@ -511,7 +539,7 @@ pub fn create_pr(
             "--title", title,
             "--body", description,
             "--head", branch,
-            "--base", "main",
+            "--base", &default_branch,
             "--repo", &repo_slug,
         ])
         .map_err(|e| PrError::Other(format!("Failed to run gh: {e}")))?;
@@ -1029,6 +1057,7 @@ mod tests {
     #[test]
     fn finish_task_happy_path() {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
             MockProcessRunner::ok_with_stdout(b"main\n"),       // rev-parse HEAD
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
             MockProcessRunner::ok(),                             // git pull origin main
@@ -1049,22 +1078,45 @@ mod tests {
     }
 
     #[test]
-    fn finish_task_not_on_main() {
+    fn finish_task_with_master_default_branch() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"feature-branch\n"),
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"), // symbolic-ref → master
+            MockProcessRunner::ok_with_stdout(b"master\n"),      // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
+            MockProcessRunner::ok(),                              // git pull origin master
+            MockProcessRunner::ok(),                              // git rebase master (from worktree)
+            MockProcessRunner::ok(),                              // git merge --ff-only
+        ]);
+
+        finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        // pull should reference "master" not "main"
+        let pull_call = calls.iter().find(|c| c.1.contains(&"pull".to_string())).unwrap();
+        assert!(pull_call.1.contains(&"master".to_string()));
+        // rebase should reference "master"
+        let rebase_call = calls.iter().find(|c| c.1.contains(&"rebase".to_string())).unwrap();
+        assert!(rebase_call.1.contains(&"master".to_string()));
+    }
+
+    #[test]
+    fn finish_task_not_on_default_branch() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
+            MockProcessRunner::ok_with_stdout(b"feature-branch\n"),            // rev-parse HEAD
         ]);
 
         let result = finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, FinishError::NotOnMain(_)));
+        assert!(matches!(err, FinishError::NotOnDefaultBranch { .. }));
         assert!(err.to_string().contains("feature-branch"));
-        assert_eq!(mock.recorded_calls().len(), 1);
     }
 
     #[test]
     fn finish_task_rebase_conflict() {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::fail(""),                         // remote get-url (no remote)
             Ok(Output {
@@ -1084,6 +1136,7 @@ mod tests {
     #[test]
     fn finish_task_pull_fails() {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
             MockProcessRunner::fail("fatal: unable to access remote"),            // git pull fails
@@ -1098,6 +1151,7 @@ mod tests {
     #[test]
     fn create_pr_happy_path() {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::ok(),  // git push
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url origin
             MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"),  // gh pr create
@@ -1108,20 +1162,37 @@ mod tests {
         assert_eq!(result.pr_number, 42);
 
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].0, "git");
-        assert!(calls[0].1.contains(&"push".to_string()));
-        assert!(calls[0].1.contains(&"-u".to_string()));
         assert_eq!(calls[1].0, "git");
-        assert!(calls[1].1.contains(&"get-url".to_string()));
-        assert_eq!(calls[2].0, "gh");
-        assert!(calls[2].1.contains(&"create".to_string()));
-        assert!(calls[2].1.contains(&"--draft".to_string()));
-        assert!(calls[2].1.contains(&"org/repo".to_string()));
+        assert!(calls[1].1.contains(&"push".to_string()));
+        assert!(calls[1].1.contains(&"-u".to_string()));
+        assert_eq!(calls[2].0, "git");
+        assert!(calls[2].1.contains(&"get-url".to_string()));
+        assert_eq!(calls[3].0, "gh");
+        assert!(calls[3].1.contains(&"create".to_string()));
+        assert!(calls[3].1.contains(&"--draft".to_string()));
+        assert!(calls[3].1.contains(&"org/repo".to_string()));
+    }
+
+    #[test]
+    fn create_pr_with_master_base() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"), // symbolic-ref → master
+            MockProcessRunner::ok(),  // git push
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url origin
+            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"),  // gh pr create
+        ]);
+
+        create_pr("/repo", "42-fix-bug", "Fix bug", "desc", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        let gh_call = calls.iter().find(|c| c.0 == "gh").unwrap();
+        assert!(gh_call.1.contains(&"master".to_string()));
     }
 
     #[test]
     fn create_pr_push_fails() {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::fail("fatal: no remote"),
         ]);
 
@@ -1132,6 +1203,7 @@ mod tests {
     #[test]
     fn create_pr_gh_create_fails() {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::ok(),  // git push succeeds
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
             MockProcessRunner::fail("error: pull request already exists"),  // gh pr create
@@ -1202,6 +1274,7 @@ mod tests {
     #[test]
     fn finish_task_no_remote_skips_pull() {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail(""),                         // symbolic-ref (no remote → fallback to "main")
             MockProcessRunner::ok_with_stdout(b"main\n"),       // rev-parse HEAD
             MockProcessRunner::fail(""),                         // remote get-url (no remote)
             MockProcessRunner::ok(),                             // git rebase main (from worktree)

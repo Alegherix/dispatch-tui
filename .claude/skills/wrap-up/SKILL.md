@@ -55,10 +55,9 @@ Call the `dispatch` MCP tool `wrap_up` with:
 - `task_id`: the integer from Step 1
 - `action`: `"rebase"`
 
-Inform the user:
-> "Rebase started. The tmux window will be killed when the rebase completes, ending this session."
+The tool blocks until the rebase completes. On success, the task is moved to "done" and the tmux window is killed, ending this session. Do not attempt any further actions after a successful rebase.
 
-Do not attempt any further actions after this call. The MCP tool returns immediately, and the tmux window will be killed asynchronously.
+If the tool returns an error (e.g. rebase conflict, repo not on main), show the user the exact error message from the response and suggest resolution steps. The task remains in its current status.
 
 ### If PR:
 
@@ -66,5 +65,6 @@ Call the `dispatch` MCP tool `wrap_up` with:
 - `task_id`: the integer from Step 1
 - `action`: `"pr"`
 
-Inform the user:
-> "PR creation started in the background. A `/code-review` command will be injected into this session once the PR is ready."
+The tool blocks until the PR is created. On success, it returns the PR URL and number. A `/code-review` command will be injected into this session once the PR is ready.
+
+If the tool returns an error (e.g. push failed, PR creation failed), show the user the exact error message from the response. The task remains in its current status.

@@ -402,7 +402,7 @@ pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value
     )
 }
 
-pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
     let parsed = match parse_args::<WrapUpArgs>(id.clone(), args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -486,58 +486,89 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
     match parsed.action.as_str() {
         "rebase" => {
             let db = state.db.clone();
-            tokio::task::spawn_blocking(move || {
+            let branch_clone = branch.clone();
+            let rebase_runner = runner.clone();
+            let rebase_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
-                let result = dispatch::finish_task(
+                dispatch::finish_task(
                     &repo_path,
                     &worktree,
                     &branch,
-                    tmux_window.as_deref(),
-                    &*runner,
-                );
-                match result {
-                    Ok(()) => {
-                        let patch = db::TaskPatch::new().status(TaskStatus::Done);
-                        if let Err(e) = db.patch_task(task_id, &patch) {
-                            tracing::warn!(
-                                task_id = task_id.0,
-                                "MCP wrap_up: failed to set task to done: {e}"
-                            );
+                    None, // Don't kill tmux yet -- need to return response first
+                    &*rebase_runner,
+                )
+            }).await {
+                Ok(r) => r,
+                Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
+            };
+
+            match rebase_result {
+                Ok(()) => {
+                    let patch = db::TaskPatch::new().status(TaskStatus::Done);
+                    if let Err(e) = db.patch_task(task_id, &patch) {
+                        tracing::warn!(
+                            task_id = task_id.0,
+                            "MCP wrap_up: failed to set task to done: {e}"
+                        );
+                    }
+                    // Fire-and-forget: kill tmux, auto-dispatch, notify
+                    let ad_runner = state.runner.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Some(window) = &tmux_window {
+                            let _ = crate::tmux::kill_window(window, &*ad_runner);
                         }
-                    }
-                    Err(e) => {
-                        tracing::warn!(task_id = task_id.0, "MCP wrap_up rebase failed: {e}");
-                    }
+                        auto_dispatch_next(next_epic_task, &branch_clone, mcp_port, &*db, &*ad_runner);
+                        if let Some(tx) = notify_tx {
+                            let _ = tx.send(());
+                        }
+                    });
+                    JsonRpcResponse::ok(
+                        id,
+                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase){auto_dispatch_msg}", parsed.task_id)}]}),
+                    )
                 }
-                auto_dispatch_next(next_epic_task, &branch, mcp_port, &*db, &*runner);
-                if let Some(tx) = notify_tx {
-                    let _ = tx.send(());
+                Err(e) => {
+                    if let Some(tx) = notify_tx {
+                        let _ = tx.send(());
+                    }
+                    JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
                 }
-            });
+            }
         }
         "pr" => {
             let db = state.db.clone();
+            let pr_runner = runner.clone();
+            let branch_clone = branch.clone();
             let title = task.title.clone();
             let description = task.description.clone();
-            let tmux_window = tmux_window.clone();
-            tokio::task::spawn_blocking(move || {
+            let pr_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up pr starting");
-                match dispatch::create_pr(&repo_path, &branch, &title, &description, &*runner) {
-                    Ok(result) => {
-                        let patch = db::TaskPatch::new()
-                            .status(TaskStatus::Review)
-                            .pr_url(Some(result.pr_url.as_str()));
-                        if let Err(e) = db.patch_task(task_id, &patch) {
-                            tracing::warn!(
-                                task_id = task_id.0,
-                                "MCP wrap_up: failed to save PR fields: {e}"
-                            );
-                        }
-                        // Inject code review command into the agent's Claude session
+                dispatch::create_pr(&repo_path, &branch, &title, &description, &*pr_runner)
+            }).await {
+                Ok(r) => r,
+                Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
+            };
+
+            match pr_result {
+                Ok(result) => {
+                    let patch = db::TaskPatch::new()
+                        .status(TaskStatus::Review)
+                        .pr_url(Some(result.pr_url.as_str()));
+                    if let Err(e) = db.patch_task(task_id, &patch) {
+                        tracing::warn!(
+                            task_id = task_id.0,
+                            "MCP wrap_up: failed to save PR fields: {e}"
+                        );
+                    }
+                    // Save before closure moves result
+                    let pr_url = result.pr_url.clone();
+                    // Fire-and-forget: inject code review, auto-dispatch, notify
+                    let ad_runner = state.runner.clone();
+                    tokio::task::spawn_blocking(move || {
                         if let Some(window) = &tmux_window {
                             let review_cmd = format!("/code-review {}", result.pr_url);
                             if let Err(e) =
-                                crate::tmux::send_keys(window, &review_cmd, &*runner)
+                                crate::tmux::send_keys(window, &review_cmd, &*ad_runner)
                             {
                                 tracing::warn!(
                                     task_id = task_id.0,
@@ -545,24 +576,26 @@ pub(super) fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -
                                 );
                             }
                         }
-                    }
-                    Err(e) => {
-                        tracing::warn!(task_id = task_id.0, "MCP wrap_up pr failed: {e}");
-                    }
+                        auto_dispatch_next(next_epic_task, &branch_clone, mcp_port, &*db, &*ad_runner);
+                        if let Some(tx) = notify_tx {
+                            let _ = tx.send(());
+                        }
+                    });
+                    JsonRpcResponse::ok(
+                        id,
+                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: pr, pr_url: {}){auto_dispatch_msg}", parsed.task_id, pr_url)}]}),
+                    )
                 }
-                auto_dispatch_next(next_epic_task, &branch, mcp_port, &*db, &*runner);
-                if let Some(tx) = notify_tx {
-                    let _ = tx.send(());
+                Err(e) => {
+                    if let Some(tx) = notify_tx {
+                        let _ = tx.send(());
+                    }
+                    JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
                 }
-            });
+            }
         }
         _ => unreachable!(),
     }
-
-    JsonRpcResponse::ok(
-        id,
-        json!({"content": [{"type": "text", "text": format!("wrap_up started (task {}, action: {}){auto_dispatch_msg}", parsed.task_id, parsed.action)}]}),
-    )
 }
 
 /// Auto-dispatch the next epic subtask, chaining off the given branch.

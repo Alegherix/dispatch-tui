@@ -271,7 +271,7 @@ pub async fn handle_mcp(
                 "get_epic" => epics::handle_get_epic(&state, id, args),
                 "list_epics" => epics::handle_list_epics(&state, id, args),
                 "update_epic" => epics::handle_update_epic(&state, id, args),
-                "wrap_up" => tasks::handle_wrap_up(&state, id, args),
+                "wrap_up" => tasks::handle_wrap_up(&state, id, args).await,
                 other => JsonRpcResponse::err(id, -32602, format!("Unknown tool: {other}")),
             }
         }

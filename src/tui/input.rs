@@ -441,16 +441,18 @@ impl App {
         }
     }
 
-    fn handle_key_confirm_delete(&mut self, key: KeyEvent) -> Vec<Command> {
+    /// Generic y/n confirm dialog: on y/Y resets mode, clears status, and runs `on_confirm`;
+    /// on any other key just resets mode and clears status.
+    fn confirm_dialog(
+        &mut self,
+        key: KeyEvent,
+        on_confirm: impl FnOnce(&mut Self) -> Vec<Command>,
+    ) -> Vec<Command> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 self.input.mode = InputMode::Normal;
                 self.clear_status();
-                if self.archive.visible {
-                    self.confirm_delete_archived()
-                } else {
-                    self.confirm_delete_selected()
-                }
+                on_confirm(self)
             }
             _ => {
                 self.input.mode = InputMode::Normal;
@@ -458,6 +460,16 @@ impl App {
                 vec![]
             }
         }
+    }
+
+    fn handle_key_confirm_delete(&mut self, key: KeyEvent) -> Vec<Command> {
+        self.confirm_dialog(key, |s| {
+            if s.archive.visible {
+                s.confirm_delete_archived()
+            } else {
+                s.confirm_delete_selected()
+            }
+        })
     }
 
     fn confirm_delete_archived(&mut self) -> Vec<Command> {
@@ -502,34 +514,25 @@ impl App {
     }
 
     fn handle_key_confirm_archive(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
-                if self.has_selection() {
-                    let mut cmds = Vec::new();
-                    if !self.selected_tasks.is_empty() {
-                        let ids: Vec<_> = self.selected_tasks.iter().copied().collect();
-                        cmds.extend(self.update(Message::BatchArchiveTasks(ids)));
-                    }
-                    if !self.selected_epics.is_empty() {
-                        let ids: Vec<_> = self.selected_epics.iter().copied().collect();
-                        cmds.extend(self.update(Message::BatchArchiveEpics(ids)));
-                    }
-                    cmds
-                } else if let Some(task) = self.selected_task() {
-                    let id = task.id;
-                    self.update(Message::ArchiveTask(id))
-                } else {
-                    vec![]
+        self.confirm_dialog(key, |s| {
+            if s.has_selection() {
+                let mut cmds = Vec::new();
+                if !s.selected_tasks.is_empty() {
+                    let ids: Vec<_> = s.selected_tasks.iter().copied().collect();
+                    cmds.extend(s.update(Message::BatchArchiveTasks(ids)));
                 }
-            }
-            _ => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
+                if !s.selected_epics.is_empty() {
+                    let ids: Vec<_> = s.selected_epics.iter().copied().collect();
+                    cmds.extend(s.update(Message::BatchArchiveEpics(ids)));
+                }
+                cmds
+            } else if let Some(task) = s.selected_task() {
+                let id = task.id;
+                s.update(Message::ArchiveTask(id))
+            } else {
                 vec![]
             }
-        }
+        })
     }
 
     fn handle_key_confirm_done(&mut self, key: KeyEvent) -> Vec<Command> {
@@ -540,43 +543,25 @@ impl App {
     }
 
     fn handle_key_confirm_delete_epic(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
-                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-                    let id = epic.id;
-                    self.update(Message::DeleteEpic(id))
-                } else {
-                    vec![]
-                }
-            }
-            _ => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
+        self.confirm_dialog(key, |s| {
+            if let Some(ColumnItem::Epic(epic)) = s.selected_column_item() {
+                let id = epic.id;
+                s.update(Message::DeleteEpic(id))
+            } else {
                 vec![]
             }
-        }
+        })
     }
 
     fn handle_key_confirm_archive_epic(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
-                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-                    let id = epic.id;
-                    self.update(Message::ArchiveEpic(id))
-                } else {
-                    vec![]
-                }
-            }
-            _ => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
+        self.confirm_dialog(key, |s| {
+            if let Some(ColumnItem::Epic(epic)) = s.selected_column_item() {
+                let id = epic.id;
+                s.update(Message::ArchiveEpic(id))
+            } else {
                 vec![]
             }
-        }
+        })
     }
 
     fn handle_key_help(&mut self, key: KeyEvent) -> Vec<Command> {
@@ -678,14 +663,11 @@ impl App {
     }
 
     fn handle_key_confirm_detach_tmux(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmDetachTmux),
-            _ => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
-                vec![]
-            }
-        }
+        let ids = match &self.input.mode {
+            InputMode::ConfirmDetachTmux(ids) => ids.clone(),
+            _ => return vec![],
+        };
+        self.confirm_dialog(key, |s| s.detach_tmux_panels(ids))
     }
 
     fn handle_key_confirm_wrap_up(&mut self, key: KeyEvent) -> Vec<Command> {

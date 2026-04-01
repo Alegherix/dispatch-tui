@@ -622,7 +622,10 @@ impl App {
         let ids = ids.clone();
         self.input.mode = InputMode::Normal;
         self.clear_status();
+        self.detach_tmux_panels(ids)
+    }
 
+    fn detach_tmux_panels(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
         let mut cmds = Vec::new();
         for id in ids {
             self.clear_agent_tracking(id);

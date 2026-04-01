@@ -24,6 +24,6 @@ case "$EVENT" in
         dispatch update "$ID" running
         ;;
     Stop)         dispatch update "$ID" review  --only-if running ;;
-    Notification) dispatch update "$ID" review  --only-if running --needs-input ;;
+    Notification) dispatch update "$ID" running --only-if running --sub-status needs_input ;;
     *)            exit 0 ;;
 esac

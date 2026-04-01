@@ -33,6 +33,45 @@ external entity TmuxWindow {
 
 enum TaskStatus { backlog | running | review | done | archived }
 
+-- SubStatus refines the parent status into a more precise state.
+-- Valid combinations are constrained by SubStatus.is_valid_for(status).
+-- When status changes, sub_status resets to SubStatus.default_for(new_status).
+enum SubStatus {
+    -- backlog / done / archived
+    none
+
+    -- running
+    active          -- agent is running normally
+    needs_input     -- agent is blocked waiting for human interaction (Blocked visual column)
+    stale           -- no output change detected beyond inactivity_timeout
+    crashed         -- tmux window disappeared unexpectedly
+
+    -- review
+    awaiting_review   -- PR created, no review decision yet
+    changes_requested -- reviewer requested changes
+    approved          -- PR approved, ready to merge
+}
+
+-- Valid SubStatus values per parent status (enforced by MCP; bypassed by CLI hooks):
+--   backlog   : none
+--   running   : active | needs_input | stale | crashed
+--   review    : awaiting_review | changes_requested | approved
+--   done      : none
+--   archived  : none
+--
+-- Note: HookNotification sets status=review with sub_status=needs_input via the CLI
+-- update path, which bypasses is_valid_for() validation. The UI renders
+-- (review, needs_input) as the "Blocked" state. The Blocked visual column is
+-- defined as (running, needs_input) in models.rs, but tasks produced by
+-- HookNotification appear as (review, needs_input) in practice.
+
+-- Default sub_status when transitioning to a new status:
+--   backlog   -> none
+--   running   -> active
+--   review    -> awaiting_review
+--   done      -> none
+--   archived  -> none
+
 ------------------------------------------------------------
 -- Entities and Variants
 ------------------------------------------------------------
@@ -42,13 +81,13 @@ entity Task {
     description: String
     repo_path: String
     status: TaskStatus
+    sub_status: SubStatus
     worktree: Worktree?
     tmux_window: TmuxWindow?
     plan: String?
     epic: Epic?
     pr_url: String?
     tag: String?
-    needs_input: Boolean
     sort_order: Integer?
     created_at: Timestamp
     updated_at: Timestamp
@@ -70,10 +109,10 @@ entity Task {
 
     -- Derived
     has_plan: plan != null
+    is_stale: sub_status == stale
+    is_crashed: sub_status == crashed
     is_epic: tag = "epic"
-    pr_number: derived from pr_url     -- extracted at runtime from the URL, not persisted
-    is_stale: Boolean                  -- computed from agent output monitoring
-    is_crashed: Boolean                -- computed from tmux window liveness
+    pr_number: derived from pr_url  -- extracted at runtime, not persisted
 }
 
 entity Epic {
@@ -128,6 +167,46 @@ config {
 }
 
 ------------------------------------------------------------
+-- VisualColumn
+------------------------------------------------------------
+
+-- The kanban board renders 8 visual columns, grouped under the 4 parent
+-- statuses. Each visual column corresponds to a (parent_status, sub_status)
+-- pair or set. Columns within the same parent group share a header.
+--
+-- Column layout (left to right):
+--
+--   # | Label            | parent_status | sub_statuses
+--   --+------------------+---------------+------------------------------
+--   0 | Backlog          | backlog       | none
+--   1 | Active           | running       | active
+--   2 | Blocked          | running       | needs_input
+--   3 | Stale            | running       | stale, crashed
+--   4 | PR Created       | review        | awaiting_review
+--   5 | Revise           | review        | changes_requested
+--   6 | Approved         | review        | approved
+--   7 | Done             | done          | none
+--
+-- Navigation (h/l) moves between visual columns.
+-- Parent group boundaries are annotated in the column header.
+-- A task's visual column is determined by (task.status, task.sub_status).
+--
+-- Note: HookNotification produces (review, needs_input) in practice,
+-- which the UI renders as the Blocked state. The VisualColumn model
+-- defines Blocked as (running, needs_input), which is the target model
+-- for future alignment.
+
+concept VisualColumn {
+    label: String
+    parent_status: TaskStatus
+    sub_statuses: SubStatus[]
+
+    -- A task belongs to this column when:
+    --   task.status = parent_status and task.sub_status in sub_statuses
+    contains(task): task.status = parent_status and task.sub_status in sub_statuses
+}
+
+------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -141,16 +220,16 @@ rule CreateTask {
         description: description,
         repo_path: repo_path,
         status: backlog,
+        sub_status: SubStatus.default_for(backlog),
         plan: plan,
         epic: epic,
-        needs_input: false,
         created_at: now,
         updated_at: now
     )
 }
 
 rule CreateQuickTask {
-    when: QuickDispatch(repo_path, epic?)
+    when: QuickDispatch(repo_path)
 
     ensures:
         let task = Task.created(
@@ -158,8 +237,7 @@ rule CreateQuickTask {
             description: "",
             repo_path: repo_path,
             status: backlog,
-            epic: epic,
-            needs_input: false,
+            sub_status: SubStatus.default_for(backlog),
             created_at: now,
             updated_at: now
         )
@@ -172,10 +250,10 @@ rule DispatchTask {
     when: DispatchTask(task)
 
     requires: task.status = backlog
+    requires: task.has_plan = true
 
-    -- Dispatches in standard mode. Used when the task has a plan,
-    -- or when the task has no plan and tag is not "epic" or "feature".
     ensures: task.status = running
+    ensures: task.sub_status = SubStatus.default_for(running)
     ensures: task.worktree = Worktree.created(
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
@@ -189,31 +267,15 @@ rule BrainstormTask {
 
     requires: task.status = backlog
     requires: task.has_plan = false
-    requires: task.tag = "epic"
 
     ensures: task.status = running
+    ensures: task.sub_status = SubStatus.default_for(running)
     ensures: task.worktree = Worktree.created(
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
     )
     ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: brainstorm)
-}
-
-rule PlanTask {
-    when: PlanTask(task)
-
-    requires: task.status = backlog
-    requires: task.has_plan = false
-    requires: task.tag = "feature"
-
-    ensures: task.status = running
-    ensures: task.worktree = Worktree.created(
-        path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
-        branch: task.id + "-" + slugify(task.title)
-    )
-    ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
-    ensures: AgentLaunched(task: task, mode: plan)
 }
 
 rule ResumeTask {
@@ -225,6 +287,7 @@ rule ResumeTask {
 
     ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
     ensures: task.status = running
+    ensures: task.sub_status = SubStatus.default_for(running)
     ensures: AgentLaunched(task: task, mode: resume)
 }
 
@@ -242,12 +305,14 @@ rule MoveTaskForward {
     requires: next != done
 
     ensures: task.status = next
+    ensures: task.sub_status = SubStatus.default_for(next)
     ensures: task.updated_at = now
 
     @guidance
         -- Manual movement (forward or backward) clears agent health
         -- tracking state (tmux output, staleness timer, crash detection,
         -- notification flags) for the task.
+        -- sub_status is always reset to the default for the new status.
 }
 
 rule MoveTaskBackward {
@@ -260,6 +325,7 @@ rule MoveTaskBackward {
 
     -- Kill tmux window when moving backward, but preserve worktree for resume
     ensures: task.status = prev
+    ensures: task.sub_status = SubStatus.default_for(prev)
     ensures: task.tmux_window = null
     ensures: task.updated_at = now
 
@@ -267,6 +333,7 @@ rule MoveTaskBackward {
         -- Manual movement (forward or backward) clears agent health
         -- tracking state (tmux output, staleness timer, crash detection,
         -- notification flags) for the task.
+        -- sub_status is always reset to the default for the new status.
 }
 
 rule ConfirmDone {
@@ -275,6 +342,7 @@ rule ConfirmDone {
     requires: task.status = review
 
     ensures: task.status = done
+    ensures: task.sub_status = SubStatus.default_for(done)
     ensures: task.tmux_window = null
     ensures: task.updated_at = now
 
@@ -299,8 +367,7 @@ rule CreatePr {
 
     @guidance
         -- Pushes the branch to origin and creates a GitHub PR using
-        -- `gh pr create`. The task remains in review. pr_number is
-        -- derived from pr_url at runtime.
+        -- `gh pr create`. The task remains in review.
 }
 
 rule PollPrStatus {
@@ -309,11 +376,23 @@ rule PollPrStatus {
     for task in Tasks where status = review and pr_url != null:
 
         ensures: PrMerged(task: task)
+        ensures:
+            let decision = PrReviewDecision(task)
+            let new_sub = match decision {
+                approved          => SubStatus.approved
+                changes_requested => SubStatus.changes_requested
+                _                 => SubStatus.awaiting_review
+            }
+            if task.sub_status != new_sub:
+                task.sub_status = new_sub
 
     @guidance
         -- Runs during each tick for review tasks with a pr_url.
         -- Polls GitHub every pr_poll_interval (30s) via `gh pr view`
-        -- to check merge status. Fires PrMerged when the PR is merged.
+        -- to check merge status and review decision.
+        -- Fires PrMerged when the PR is merged.
+        -- Updates sub_status to reflect the current review decision:
+        --   approved | changes_requested | awaiting_review.
 }
 
 rule PrMerged {
@@ -322,6 +401,7 @@ rule PrMerged {
     requires: task.status = review
 
     ensures: task.status = done
+    ensures: task.sub_status = SubStatus.default_for(done)
     ensures: task.tmux_window = null
     ensures: task.updated_at = now
     ensures:
@@ -339,7 +419,14 @@ rule PrMerged {
 rule WrapUpRebase {
     when: WrapUp(task, rebase)
 
-    requires: task.status in [review, running]
+    -- Available from any wrappable task:
+    --   review (any sub_status), or
+    --   running with sub_status = needs_input (Blocked visual column).
+    -- The running/needs_input case arises when HookPreToolUse fires
+    -- during the same agent session as the wrap_up MCP call, temporarily
+    -- moving the task to running before the handler checks.
+    requires: task.status = review
+              or (task.status = running and task.sub_status = needs_input)
     requires: task.worktree != null
 
     let branch = task.worktree.branch
@@ -347,6 +434,7 @@ rule WrapUpRebase {
     ensures: BranchRebased(branch: branch, onto: "main")
     ensures: task.tmux_window = null
     ensures: task.status = done
+    ensures: task.sub_status = SubStatus.default_for(done)
     ensures: task.updated_at = now
 
     @guidance
@@ -357,14 +445,16 @@ rule WrapUpRebase {
         -- ProcessRunner; the tmux window is killed on completion.
         -- Available from both the TUI (W then r) and MCP (wrap_up
         -- tool with action "rebase").
-        -- When the task belongs to an epic, the next backlog subtask
-        -- is automatically dispatched after wrap-up completes.
 }
 
 rule WrapUpPr {
     when: WrapUp(task, pr)
 
-    requires: task.status in [review, running]
+    -- Available from any wrappable task:
+    --   review (any sub_status), or
+    --   running with sub_status = needs_input (Blocked visual column).
+    requires: task.status = review
+              or (task.status = running and task.sub_status = needs_input)
     requires: task.worktree != null
 
     ensures: task.pr_url != null
@@ -372,13 +462,11 @@ rule WrapUpPr {
 
     @guidance
         -- Pushes the branch to origin and creates a GitHub PR using
-        -- `gh pr create`. The task remains in review status and PR
+        -- `gh pr create`. The task transitions to review and PR
         -- status polling (PollPrStatus) takes over from there.
-        -- pr_number is derived from pr_url at runtime. The operation
-        -- runs in background via ProcessRunner. Available from both
-        -- the TUI (W then p) and MCP (wrap_up tool with action "pr").
-        -- When the task belongs to an epic, the next backlog subtask
-        -- is automatically dispatched after wrap-up completes.
+        -- The operation runs in background via ProcessRunner.
+        -- Available from both the TUI (W then p) and MCP (wrap_up
+        -- tool with action "pr").
 }
 
 -- == Finish (Merge) ==
@@ -450,50 +538,71 @@ rule ArchiveTask {
 rule DeleteTask {
     when: DeleteTask(task)
 
+    requires: task.status = archived
+
     ensures:
         if task.worktree != null:
             not exists task.worktree
     ensures: not exists task
 
     @guidance
-        -- Permanent removal. The handler accepts any task regardless
-        -- of status. In the interactive TUI, the archive view restricts
-        -- visibility to archived tasks, but handle_delete_epic calls
-        -- this unconditionally for subtask cleanup. Worktree and branch
-        -- are cleaned up best-effort.
+        -- Permanent removal. Only accessible from the archive view.
+        -- Worktree and branch are cleaned up best-effort.
+        -- The archived-status precondition is enforced by the TUI input
+        -- layer (archive view only shows archived tasks), not by the
+        -- handler itself.
 }
 
 -- == Agent Health ==
 
 rule DetectStaleAgent {
-    when: task: Task.is_stale becomes true
+    -- Fires when a running task's tmux output stops changing beyond
+    -- inactivity_timeout and the task is not already stale or crashed.
+    when: task.status = running
+          and task.tmux_window != null
+          and time_since_last_output(task) > inactivity_timeout
+          and task.sub_status not in {stale, crashed}
 
-    requires: task.status = running
-    requires: task.tmux_window != null
-
+    ensures: task.sub_status = stale
     ensures: UserInformed(
         about: agent_stale,
         task: task
     )
+
+    @guidance
+        -- Evaluated on each tick for all running tasks with a tmux window.
+        -- Escalation only: Crashed is not downgraded to Stale.
+        -- When activity resumes (new tmux output arrives), sub_status
+        -- is reset to active by the TmuxOutput handler.
 }
 
 rule DetectCrashedAgent {
-    when: task: Task.is_crashed becomes true
+    -- Fires when the tmux window disappears for a running task.
+    when: WindowGone(task)
 
     requires: task.status = running
 
+    ensures: task.sub_status = crashed
     ensures: UserInformed(
         about: agent_crashed,
         task: task
     )
+
+    @guidance
+        -- Triggered by the WindowGone message, which is sent when the
+        -- runtime detects that the task's tmux window no longer exists.
+        -- The tmux_window field is NOT cleared for crashed tasks, so that
+        -- the window name remains available for the ConfirmRetry prompt.
+        -- When activity resumes (TmuxOutput or RetryResume), sub_status
+        -- is reset to active.
 }
 
 -- == Notifications ==
 
 rule NotifyNeedsInput {
-    when: task: Task.needs_input becomes true
+    when: task: Task.sub_status transitions_to needs_input
 
-    requires: task.status = running
+    requires: task.status = review
 
     ensures: DesktopNotification(
         task: task,
@@ -503,9 +612,11 @@ rule NotifyNeedsInput {
 
     @guidance
         -- Notifications are deduplicated: each notification fires at most
-        -- once per state transition. The notified state is cleared when
-        -- needs_input becomes false, allowing re-notification on a
-        -- subsequent re-entry.
+        -- once per transition to needs_input. The notified state is
+        -- cleared when sub_status leaves needs_input, allowing
+        -- re-notification on a subsequent re-entry.
+        -- The task is in review/needs_input (Blocked visual column),
+        -- set by HookNotification when the agent raises a notification.
 }
 
 rule NotifyReview {
@@ -526,16 +637,21 @@ rule NotifyReview {
 }
 
 rule ClearNeedsInput {
-    when: task: Task.status transitions_to running
+    -- When HookPreToolUse fires, update_status_if(running, running) resets
+    -- sub_status to active via the auto-reset behavior.
+    when: HookFired(hook: pre_tool_use, task: task)
 
-    requires: task.needs_input = true
+    requires: task.sub_status = needs_input
 
-    ensures: task.needs_input = false
+    ensures: task.sub_status = SubStatus.default_for(running)  -- i.e. active
 
     @guidance
-        -- The needs_input flag is set by CLI hooks when an agent
-        -- requests human interaction. It is cleared automatically
-        -- via notification hook when the agent resumes running.
+        -- sub_status = needs_input is set by HookNotification when the agent
+        -- raises a notification. It is cleared when the agent resumes and
+        -- HookPreToolUse fires, which calls:
+        --   dispatch update <id> running
+        -- The update_status_if auto-reset sets sub_status = active.
+        -- This allows re-notification if the agent raises another notification.
 }
 
 rule RetryResume {
@@ -544,6 +660,7 @@ rule RetryResume {
     requires: task.status = running
     requires: task.worktree != null
 
+    ensures: task.sub_status = active
     ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: resume)
 }
@@ -560,6 +677,7 @@ rule RetryFresh {
     ensures: task.worktree = null
     ensures: task.tmux_window = null
     ensures: task.status = backlog
+    ensures: task.sub_status = SubStatus.default_for(backlog)
     ensures: AgentLaunched(task: task, mode: standard)
 
     @guidance
@@ -572,19 +690,28 @@ rule RetryFresh {
 -- == MCP Constraints ==
 
 rule UpdateTaskViaMcp {
-    when: McpUpdateTask(task, status?, plan?, title?, description?, repo_path?, sort_order?, pr_url?, tag?)
+    when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
+                        repo_path?, sort_order?, pr_url?, tag?)
 
-    requires: status != null or plan != null or title != null
+    requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
-              or sort_order != null or pr_url != null
-              or tag != null
+              or sort_order != null
 
     -- Cannot set status to done or archived via MCP
     requires: status != done
     requires: status != archived
 
+    -- sub_status must be valid for the task's current (or new) status
+    requires:
+        if sub_status != null:
+            let effective_status = if status != null then status else task.status
+            sub_status.is_valid_for(effective_status)
+
     ensures:
         if status != null: task.status = status
+    ensures:
+        if sub_status != null: task.sub_status = sub_status
+        else if status != null: task.sub_status = SubStatus.default_for(status)
     ensures:
         if plan != null: task.plan = plan
     ensures:
@@ -609,6 +736,7 @@ rule ClaimTaskViaMcp {
     requires: worktree.path starts_with task.repo_path
 
     ensures: task.status = running
+    ensures: task.sub_status = SubStatus.default_for(running)
     ensures: task.worktree = worktree
     ensures: task.tmux_window = tmux_window
     ensures: task.updated_at = now
@@ -674,6 +802,7 @@ rule HookPreToolUse {
     requires: not tool_name starts_with "mcp__dispatch__"
 
     ensures: task.status = running
+    ensures: task.sub_status = SubStatus.default_for(running)
 
     @guidance
         -- Fires on every non-dispatch tool use. The unconditional
@@ -681,6 +810,8 @@ rule HookPreToolUse {
         -- review -> running on session resume, running -> running is
         -- a no-op. Only done/archived tasks should not be modified,
         -- but agents are never dispatched into done/archived worktrees.
+        -- The sub_status reset to active (default for running) also
+        -- clears needs_input when the agent resumes after a notification.
 }
 
 rule HookStop {
@@ -689,15 +820,23 @@ rule HookStop {
     requires: task.status = running
 
     ensures: task.status = review
+    ensures: task.sub_status = SubStatus.default_for(review)
 }
 
 rule HookNotification {
-    when: Notification(task)
-
+    when: HookFired(hook: notification, task: task)
     requires: task.status = running
 
-    ensures: task.status = review
-    ensures: task.needs_input = true
+    ensures: task.sub_status = needs_input
+
+    @guidance
+        -- HookNotification fires when the agent raises a notification
+        -- (e.g. a permission prompt). The hook calls:
+        --   dispatch update <id> running --only-if running --sub-status needs_input
+        -- This sets sub_status=needs_input while keeping status=running.
+        -- The task appears in the Blocked visual column (running, needs_input).
+        -- When the agent resumes, HookPreToolUse fires and update_status_if
+        -- resets sub_status back to active (default for running).
 }
 
 -- == Epics ==
@@ -731,8 +870,8 @@ rule DispatchEpicPlanning {
             description: "Planning subtask for epic: " + epic.title + "\n\n" + epic.description,
             repo_path: epic.repo_path,
             status: backlog,
+            sub_status: SubStatus.default_for(backlog),
             epic: epic,
-            needs_input: false,
             created_at: now,
             updated_at: now
         )
@@ -754,11 +893,8 @@ rule DispatchEpicSubtask {
 
     -- Dispatches the next backlog subtask of this epic, ordered by
     -- sort_order ascending (nulls last, tie-broken by id ascending).
-    -- Routing is based on the subtask's plan and tag:
-    --   has_plan        → implementation mode
-    --   tag = "epic"    → brainstorm mode
-    --   tag = "feature" → plan mode
-    --   other           → standard mode (dispatch without plan)
+    -- If the subtask has a plan, it is dispatched for implementation.
+    -- If not, it is dispatched for brainstorming.
     ensures:
         let candidates = epic.active_subtasks where status = backlog
         let next = sort_by_order(candidates).first
@@ -773,6 +909,11 @@ rule DispatchEpicSubtask {
                 AgentLaunched(task: next, mode: standard)
 
     @guidance
+        -- Routing is based on the subtask's plan and tag:
+        --   has_plan        → implementation mode
+        --   tag = "epic"    → brainstorm mode
+        --   tag = "feature" → plan mode
+        --   other           → standard mode (dispatch without plan)
         -- When no backlog subtasks remain, the TUI shows a status
         -- message instead of dispatching. This rule only fires when
         -- there is at least one backlog subtask.
@@ -867,6 +1008,24 @@ rule DeleteEpic {
     --   otherwise                     => backlog
     -- The done flag on Epic is the only persisted status.
     -- Everything else is computed at render time from subtask statuses.
+
+@invariant SubStatusConsistency
+    -- A task's sub_status must always be valid for its parent status:
+    --   sub_status.is_valid_for(status) = true
+    -- This is enforced at every status transition: when status changes,
+    -- sub_status is reset to SubStatus.default_for(new_status) before
+    -- being persisted. Individual handlers may then set a more specific
+    -- sub_status (e.g., DetectStaleAgent sets stale, HookNotification
+    -- sets needs_input) only after the reset.
+
+@invariant SubStatusAutoreset
+    -- Whenever task.status changes, task.sub_status is reset to
+    -- SubStatus.default_for(new_status). This ensures that no invalid
+    -- (status, sub_status) combinations are ever persisted.
+    -- Every rule that changes status must also reset sub_status.
+    -- Exception: rules that set status and then immediately set a
+    -- specific sub_status override the default (e.g., HookNotification
+    -- sets status=review then sub_status=needs_input).
 
 ------------------------------------------------------------
 -- Open Questions

@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use crate::dispatch;
-use crate::models::{Epic, ReviewDecision, ReviewPr, Task, TaskStatus, TaskUsage, Staleness, format_age};
+use crate::models::{Epic, ReviewDecision, ReviewPr, SubStatus, Task, TaskStatus, TaskUsage, VisualColumn, Staleness, format_age};
 use super::{App, ColumnItem, InputMode, ViewMode};
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
@@ -56,6 +56,27 @@ fn column_bg_color(status: TaskStatus) -> Color {
         TaskStatus::Done => Color::Rgb(27, 36, 30),
         TaskStatus::Archived => Color::Rgb(28, 30, 44),
     }
+}
+
+/// Color for a visual sub-column (8 columns).
+fn visual_column_color(vcol_idx: usize) -> Color {
+    match vcol_idx {
+        0 => MUTED,                          // Backlog
+        1 => YELLOW,                         // Active: standard Running yellow
+        2 => Color::Rgb(224, 160, 120),      // Blocked: yellow-red
+        3 => Color::Rgb(224, 180, 100),      // Stale: yellow-orange
+        4 => PURPLE,                         // PR Created: standard Review purple
+        5 => Color::Rgb(200, 130, 150),      // Revise: purple-red
+        6 => Color::Rgb(140, 190, 160),      // Approved: purple-green
+        7 => GREEN,                          // Done
+        _ => MUTED,
+    }
+}
+
+/// Tinted background for a visual sub-column, inherited from its parent status.
+fn visual_column_bg_color(vcol_idx: usize) -> Color {
+    let parent = VisualColumn::ALL[vcol_idx].parent_status;
+    column_bg_color(parent)
 }
 
 /// Unicode status icon for the metadata line of each card.
@@ -256,7 +277,8 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
 
     for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let count = app.column_items_for_status(status).len();
-        let is_focused = app.selected_column() == col_idx;
+        let vcol = &VisualColumn::ALL[app.selected_column()];
+        let is_focused = vcol.parent_status == status;
         let color = column_color(status);
 
         let (prefix, label_style) = if is_focused {
@@ -343,8 +365,8 @@ fn build_task_list_item<'a>(
 
     // Line 2: metadata
     let is_conflict = app.rebase_conflict_tasks().contains(&task.id);
-    let is_crashed = app.crashed_tasks().contains(&task.id);
-    let is_stale = app.stale_tasks().contains(&task.id);
+    let is_crashed = app.is_crashed(task.id);
+    let is_stale = app.is_stale(task.id);
 
     let line2 = if is_conflict {
         Line::from(vec![
@@ -375,7 +397,7 @@ fn build_task_list_item<'a>(
                 Style::default().fg(MUTED),
             ),
         ])
-    } else if status == TaskStatus::Review && task.needs_input {
+    } else if status == TaskStatus::Review && task.sub_status == SubStatus::NeedsInput {
         Line::from(vec![
             Span::raw("   "),
             Span::styled(
@@ -444,20 +466,104 @@ fn build_task_list_item<'a>(
 }
 
 fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Utc>) {
-    let column_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(
-            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
-        )
+    // Split vertically: parent header (1), sub-column label (1), card area (remaining)
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // parent status header
+            Constraint::Length(1),  // sub-column label
+            Constraint::Min(1),    // task cards
+        ])
         .split(area);
 
-    for (col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
-        let col_area = column_areas[col_idx];
-        let is_focused = app.selected_column() == col_idx;
-        let color = column_color(status);
+    let header_row = rows[0];
+    let label_row = rows[1];
+    let cards_row = rows[2];
 
-        let column_items = app.column_items_for_status(status);
-        let selected_row = app.selected_row()[col_idx];
+    // 8 visual columns: Backlog=3/18, Active=2/18, Blocked=2/18, Stale=2/18,
+    // PR Created=2/18, Revise=2/18, Approved=2/18, Done=3/18
+    let col_constraints = [
+        Constraint::Ratio(3, 18),  // Backlog
+        Constraint::Ratio(2, 18),  // Active
+        Constraint::Ratio(2, 18),  // Blocked
+        Constraint::Ratio(2, 18),  // Stale
+        Constraint::Ratio(2, 18),  // PR Created
+        Constraint::Ratio(2, 18),  // Revise
+        Constraint::Ratio(2, 18),  // Approved
+        Constraint::Ratio(3, 18),  // Done
+    ];
+
+    let header_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(col_constraints)
+        .split(header_row);
+
+    let label_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(col_constraints)
+        .split(label_row);
+
+    let card_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(col_constraints)
+        .split(cards_row);
+
+    // ── Parent header row ──
+    // For each parent status, span across its sub-columns and render centered name.
+    for &status in TaskStatus::ALL {
+        let start = VisualColumn::parent_group_start(status);
+        let span_count = VisualColumn::parent_group_span(status);
+        if span_count == 0 { continue; }
+        let end = start + span_count - 1;
+
+        // Compute the combined area from first to last column
+        let x0 = header_areas[start].x;
+        let x1 = header_areas[end].x + header_areas[end].width;
+        let combined = Rect::new(x0, header_row.y, x1.saturating_sub(x0), header_row.height);
+
+        let selected_vcol = &VisualColumn::ALL[app.selected_column()];
+        let is_focused = selected_vcol.parent_status == status;
+        let style = if is_focused {
+            Style::default().fg(column_color(status)).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        };
+
+        let text = Paragraph::new(Line::from(Span::styled(status.as_str(), style)))
+            .alignment(Alignment::Center);
+        frame.render_widget(text, combined);
+    }
+
+    // ── Sub-column label row ──
+    // Only render labels for columns that have sub-grouping (Running and Review sub-columns).
+    // Backlog and Done are single-column groups, so leave them blank.
+    for (vcol_idx, vcol) in VisualColumn::ALL.iter().enumerate() {
+        let span_count = VisualColumn::parent_group_span(vcol.parent_status);
+        if span_count <= 1 {
+            continue; // Backlog and Done — no sub-label needed
+        }
+
+        let is_focused = app.selected_column() == vcol_idx;
+        let style = if is_focused {
+            Style::default().fg(visual_column_color(vcol_idx)).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        };
+
+        let text = Paragraph::new(Line::from(Span::styled(vcol.label, style)))
+            .alignment(Alignment::Center);
+        frame.render_widget(text, label_areas[vcol_idx]);
+    }
+
+    // ── Task card area ──
+    for vcol_idx in 0..VisualColumn::COUNT {
+        let vcol = &VisualColumn::ALL[vcol_idx];
+        let col_area = card_areas[vcol_idx];
+        let is_focused = app.selected_column() == vcol_idx;
+        let color = visual_column_color(vcol_idx);
+
+        let column_items = app.column_items_for_visual_column(vcol_idx);
+        let selected_row = app.selected_row()[vcol_idx];
 
         let items: Vec<ListItem> = column_items
             .iter()
@@ -465,8 +571,8 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
             .map(|(row_idx, item)| {
                 let is_cursor = is_focused && !app.on_select_all() && row_idx == selected_row;
                 match item {
-                    ColumnItem::Task(task) => build_task_list_item(task, status, app, now, is_cursor, color),
-                    ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, status),
+                    ColumnItem::Task(task) => build_task_list_item(task, vcol.parent_status, app, now, is_cursor, color),
+                    ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, vcol.parent_status),
                 }
             })
             .collect();
@@ -475,19 +581,19 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
         // auto-scrolls to keep the cursor visible.
         let sel = app.selection_mut();
         if is_focused {
-            *sel.list_states[col_idx].selected_mut() = sel.list_state_index(col_idx);
+            *sel.list_states[vcol_idx].selected_mut() = sel.list_state_index(vcol_idx);
         }
 
         if is_focused {
             let block = Block::default()
-                .style(Style::default().bg(column_bg_color(status)));
+                .style(Style::default().bg(visual_column_bg_color(vcol_idx)));
             let inner = block.inner(col_area);
             frame.render_widget(block, col_area);
             let list = List::new(items);
-            frame.render_stateful_widget(list, inner, &mut sel.list_states[col_idx]);
+            frame.render_stateful_widget(list, inner, &mut sel.list_states[vcol_idx]);
         } else {
             let list = List::new(items);
-            frame.render_stateful_widget(list, col_area, &mut sel.list_states[col_idx]);
+            frame.render_stateful_widget(list, col_area, &mut sel.list_states[vcol_idx]);
         }
     }
 }
@@ -709,18 +815,22 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
                 Style::default().fg(status_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!(" \u{00b7} #{} \u{00b7} {} \u{00b7} {}", task.id, task.status.as_str(), task.repo_path),
+                if task.sub_status != SubStatus::None {
+                    format!(" \u{00b7} #{} \u{00b7} {} ({}) \u{00b7} {}", task.id, task.status.as_str(), task.sub_status.as_str(), task.repo_path)
+                } else {
+                    format!(" \u{00b7} #{} \u{00b7} {} \u{00b7} {}", task.id, task.status.as_str(), task.repo_path)
+                },
                 Style::default().fg(MUTED),
             ),
         ];
 
         // Add crash/stale suffix
-        if app.crashed_tasks().contains(&task.id) {
+        if app.is_crashed(task.id) {
             line1_spans.push(Span::styled(
                 " (crashed)",
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
-        } else if app.stale_tasks().contains(&task.id) {
+        } else if app.is_stale(task.id) {
             let mins = app.agents.last_output_change.get(&task.id)
                 .map(|t| t.elapsed().as_secs() / 60)
                 .unwrap_or(0);
@@ -920,7 +1030,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             lines
         }
         InputMode::ConfirmRetry(id) => {
-            let label = if app.crashed_tasks().contains(id) {
+            let label = if app.is_crashed(*id) {
                 "crashed"
             } else {
                 "stale"
@@ -1168,13 +1278,6 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("  Enter", key), Span::styled(" open PR in browser  ", desc),
             Span::styled("Esc", key), Span::styled(" back to task board", desc),
         ]),
-        Line::from(vec![
-            Span::styled("  d", key), Span::styled(" dispatch review agent  ", desc),
-            Span::styled("g", key), Span::styled(" jump to session", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  e", key), Span::styled(" view review notes  ", desc),
-        ]),
         Line::from(""),
         Line::from(Span::styled("  Press ? or Esc to close", note)),
     ];
@@ -1321,7 +1424,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     match &app.input.mode {
         InputMode::Normal => {
-            let key_color = column_color(TaskStatus::ALL[app.selected_column()]);
+            let key_color = column_color(VisualColumn::ALL[app.selected_column()].parent_status);
             let spans = if app.has_selection() {
                 let count = app.selected_tasks().len() + app.selected_epics().len();
                 let has_tasks = !app.selected_tasks().is_empty();
@@ -1635,12 +1738,7 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_tab_bar(frame, app, chunks[0]);
     render_review_summary_row(frame, app, chunks[1]);
 
-    if app.review_board_loading() && app.review_prs().is_empty() {
-        let p = Paragraph::new("Loading...")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[1]);
-    } else if app.review_prs().is_empty() {
+    if app.review_prs().is_empty() {
         let p = Paragraph::new("No PRs awaiting your review")
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
@@ -1654,12 +1752,6 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let status = Paragraph::new(msg.to_string())
             .style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[3]);
-    }
-
-    if app.review_detail_visible() {
-        if let Some(pr) = app.selected_review_pr() {
-            render_review_detail_overlay(frame, pr, area);
-        }
     }
 }
 
@@ -1747,16 +1839,7 @@ fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
     let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
     let header = format!("{repo_short}#{} {}", pr.number, pr.title);
-    let header_truncated = truncate(&header, 56); // slightly shorter to fit badge
-
-    // Badge: ⟳ running, ✓ reviewed
-    let badge = if pr.tmux_window.is_some() {
-        " \u{27f3}" // ⟳
-    } else if pr.review_notes.is_some() {
-        " \u{2713}" // ✓
-    } else {
-        ""
-    };
+    let header_truncated = truncate(&header, 60);
 
     let line1_style = if is_cursor {
         Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
@@ -1767,7 +1850,6 @@ fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool
     let line1 = Line::from(vec![
         Span::styled(stripe, Style::default().fg(color)),
         Span::styled(header_truncated, line1_style),
-        Span::styled(badge.to_string(), Style::default().fg(CYAN)),
     ]);
 
     // Line 2: author · age · +/-lines
@@ -1793,39 +1875,6 @@ fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool
     };
 
     ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
-}
-
-fn render_review_detail_overlay(frame: &mut Frame, pr: &ReviewPr, area: Rect) {
-    // Centered box: 80% width, 70% height
-    let width = (area.width * 4 / 5).max(40);
-    let height = (area.height * 7 / 10).max(10);
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    let popup_area = Rect::new(x, y, width, height);
-
-    let notes = pr.review_notes.as_deref().unwrap_or("No review notes.");
-    let title = format!(" {} #{} — Review Notes ", pr.repo, pr.number);
-
-    let paragraph = Paragraph::new(notes)
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .style(Style::default().fg(FG).bg(Color::Rgb(26, 27, 38))),
-        )
-        .wrap(Wrap { trim: false })
-        .style(Style::default().fg(FG));
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(paragraph, popup_area);
-
-    // Hint bar at bottom
-    let hint_area = Rect::new(popup_area.x, popup_area.y + popup_area.height.saturating_sub(1), popup_area.width, 1);
-    let hint = Paragraph::new(" any key to close ")
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(MUTED));
-    frame.render_widget(hint, hint_area);
 }
 
 #[cfg(test)]

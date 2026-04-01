@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::widgets::ListState;
 
-use crate::models::{Epic, EpicId, ReviewDecision, RepoPath, Task, TaskId, TaskStatus, TaskUsage, TmuxWindow, WorktreePath};
+use crate::models::{Epic, EpicId, ReviewDecision, Task, TaskId, TaskStatus, TaskUsage, VisualColumn};
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -30,7 +30,7 @@ pub enum Message {
     DispatchTask(TaskId),
     BrainstormTask(TaskId),
     PlanTask(TaskId),
-    Dispatched { id: TaskId, worktree: WorktreePath, tmux_window: TmuxWindow, switch_focus: bool },
+    Dispatched { id: TaskId, worktree: String, tmux_window: String, switch_focus: bool },
     TaskCreated { task: Task },
     DeleteTask(TaskId),
     ToggleDetail,
@@ -38,11 +38,11 @@ pub enum Message {
     WindowGone(TaskId),
     RefreshTasks(Vec<Task>),
     ResumeTask(TaskId),
-    Resumed { id: TaskId, tmux_window: TmuxWindow },
+    Resumed { id: TaskId, tmux_window: String },
     Error(String),
     TaskEdited(TaskEdit),
     RepoPathsUpdated(Vec<String>),
-    QuickDispatch { repo_path: RepoPath, epic_id: Option<EpicId> },
+    QuickDispatch { repo_path: String, epic_id: Option<EpicId> },
     StaleAgent(TaskId),
     AgentCrashed(TaskId),
     KillAndRetry(TaskId),
@@ -103,6 +103,7 @@ pub enum Message {
     PrCreated { id: TaskId, pr_url: String },
     PrFailed { id: TaskId, error: String },
     PrMerged(TaskId),
+    PrReviewState { id: TaskId, review_decision: Option<crate::dispatch::PrReviewDecision> },
     // Done confirmation (no cleanup, just status change)
     ConfirmDone,
     CancelDone,
@@ -114,11 +115,6 @@ pub enum Message {
     ReviewPrsFetchFailed(String),
     OpenInBrowser { url: String },
     RefreshReviewPrs,
-    // Review agent
-    ReviewAgentDispatched { url: String, tmux_window: String },
-    ReviewAgentResumed { url: String, tmux_window: String },
-    ShowReviewDetail,
-    CloseReviewDetail,
     // Repo filter
     StartRepoFilter,
     CloseRepoFilter,
@@ -161,18 +157,18 @@ pub enum Command {
     Dispatch { task: Task },
     Brainstorm { task: Task },
     Plan { task: Task },
-    Cleanup { id: TaskId, repo_path: RepoPath, worktree: WorktreePath, tmux_window: Option<TmuxWindow> },
+    Cleanup { id: TaskId, repo_path: String, worktree: String, tmux_window: Option<String> },
     Finish {
         id: TaskId,
-        repo_path: RepoPath,
+        repo_path: String,
         branch: String,
-        worktree: WorktreePath,
-        tmux_window: Option<TmuxWindow>,
+        worktree: String,
+        tmux_window: Option<String>,
     },
-    CaptureTmux { id: TaskId, window: TmuxWindow },
+    CaptureTmux { id: TaskId, window: String },
     Resume { task: Task },
-    JumpToTmux { window: TmuxWindow },
-    KillTmuxWindow { window: TmuxWindow },
+    JumpToTmux { window: String },
+    KillTmuxWindow { window: String },
     EditTaskInEditor(Task),
     SaveRepoPath(String),
     RefreshFromDb,
@@ -191,7 +187,7 @@ pub enum Command {
     DeleteFilterPreset(String),
     CreatePr {
         id: TaskId,
-        repo_path: RepoPath,
+        repo_path: String,
         branch: String,
         title: String,
         description: String,
@@ -203,8 +199,6 @@ pub enum Command {
     FetchReviewPrs,
     PersistReviewPrs(Vec<crate::models::ReviewPr>),
     OpenInBrowser { url: String },
-    DispatchReviewAgent(crate::models::ReviewPr),
-    PatchReviewPr { url: String, review_notes: Option<String>, tmux_window: Option<Option<String>> },
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +242,7 @@ pub enum InputMode {
 pub struct TaskDraft {
     pub title: String,
     pub description: String,
-    pub repo_path: RepoPath,
+    pub repo_path: String,
     pub tag: Option<String>,
 }
 
@@ -261,11 +255,8 @@ pub struct AgentTracking {
     pub tmux_outputs: HashMap<TaskId, String>,
     pub last_output_change: HashMap<TaskId, Instant>,
     pub last_activity: HashMap<TaskId, u64>,
-    pub stale_tasks: HashSet<TaskId>,
-    pub crashed_tasks: HashSet<TaskId>,
     pub inactivity_timeout: Duration,
     pub notified_review: HashSet<TaskId>,
-    pub notified_needs_input: HashSet<TaskId>,
     pub last_pr_poll: HashMap<TaskId, Instant>,
 }
 
@@ -275,11 +266,8 @@ impl AgentTracking {
             tmux_outputs: HashMap::new(),
             last_output_change: HashMap::new(),
             last_activity: HashMap::new(),
-            stale_tasks: HashSet::new(),
-            crashed_tasks: HashSet::new(),
             inactivity_timeout,
             notified_review: HashSet::new(),
-            notified_needs_input: HashSet::new(),
             last_pr_poll: HashMap::new(),
         }
     }
@@ -288,11 +276,8 @@ impl AgentTracking {
     pub fn clear(&mut self, id: TaskId) {
         self.last_output_change.remove(&id);
         self.last_activity.remove(&id);
-        self.stale_tasks.remove(&id);
-        self.crashed_tasks.remove(&id);
         self.tmux_outputs.remove(&id);
         self.notified_review.remove(&id);
-        self.notified_needs_input.remove(&id);
         self.last_pr_poll.remove(&id);
     }
 }
@@ -340,7 +325,7 @@ pub struct TaskEdit {
     pub id: TaskId,
     pub title: String,
     pub description: String,
-    pub repo_path: RepoPath,
+    pub repo_path: String,
     pub status: TaskStatus,
     pub plan: Option<String>,
     pub tag: Option<String>,
@@ -353,16 +338,16 @@ pub struct TaskEdit {
 #[derive(Debug, Clone)]
 pub struct BoardSelection {
     pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
+    pub(in crate::tui) selected_row: [usize; VisualColumn::COUNT],
     pub(in crate::tui) on_select_all: bool,
-    pub(in crate::tui) list_states: [ListState; TaskStatus::COLUMN_COUNT],
+    pub(in crate::tui) list_states: [ListState; VisualColumn::COUNT],
 }
 
 impl BoardSelection {
     pub fn new() -> Self {
         Self {
             selected_column: 0,
-            selected_row: [0; TaskStatus::COLUMN_COUNT],
+            selected_row: [0; VisualColumn::COUNT],
             on_select_all: false,
             list_states: std::array::from_fn(|_| ListState::default()),
         }
@@ -487,7 +472,7 @@ pub enum ColumnItem<'a> {
 pub struct EpicDraft {
     pub title: String,
     pub description: String,
-    pub repo_path: RepoPath,
+    pub repo_path: String,
 }
 
 // ---------------------------------------------------------------------------

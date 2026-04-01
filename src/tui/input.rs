@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
-use crate::models::{ReviewDecision, TaskId, TaskStatus, TmuxWindow};
+use crate::models::{ReviewDecision, SubStatus, TaskId, TaskStatus};
 
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
@@ -219,7 +219,7 @@ impl App {
                         "No saved repo paths — create a task first".to_string(),
                     )),
                     1 => {
-                        let repo_path = crate::models::RepoPath(self.repo_paths[0].clone());
+                        let repo_path = self.repo_paths[0].clone();
                         self.update(Message::QuickDispatch { repo_path, epic_id: None })
                     }
                     _ => self.update(Message::StartQuickDispatchSelection),
@@ -313,8 +313,8 @@ impl App {
                 let has_worktree = task.worktree.is_some();
                 let has_plan = task.plan.is_some();
                 let tag = task.tag.as_deref();
-                let is_problematic = self.agents.stale_tasks.contains(&id)
-                    || self.agents.crashed_tasks.contains(&id);
+                let is_problematic = self.find_task(id)
+                    .is_some_and(|t| t.sub_status == SubStatus::Stale || t.sub_status == SubStatus::Crashed);
 
                 match status {
                     TaskStatus::Backlog => {
@@ -661,12 +661,6 @@ impl App {
     }
 
     fn handle_key_review_board(&mut self, key: KeyEvent) -> Vec<Command> {
-        // Close detail overlay on any key if visible
-        if self.review_detail_visible {
-            self.review_detail_visible = false;
-            return vec![];
-        }
-
         match key.code {
             KeyCode::Char('q') => self.update(Message::Quit),
             KeyCode::Tab | KeyCode::Esc => self.update(Message::SwitchToTaskBoard),
@@ -698,48 +692,6 @@ impl App {
                 if let Some(pr) = self.selected_review_pr() {
                     let url = pr.url.clone();
                     vec![Command::OpenInBrowser { url }]
-                } else {
-                    vec![]
-                }
-            }
-
-            KeyCode::Char('d') => {
-                if let Some(pr) = self.selected_review_pr().cloned() {
-                    if pr.tmux_window.is_some() {
-                        return self.update(Message::StatusInfo(
-                            "Agent running, press g to jump".to_string(),
-                        ));
-                    }
-                    if pr.review_notes.is_some() {
-                        return self.update(Message::StatusInfo(
-                            "Review complete — press e to view notes, or any other key to dismiss".to_string(),
-                        ));
-                    }
-                    vec![Command::DispatchReviewAgent(pr)]
-                } else {
-                    vec![]
-                }
-            }
-
-            KeyCode::Char('g') => {
-                if let Some(pr) = self.selected_review_pr() {
-                    if let Some(window) = pr.tmux_window.clone() {
-                        vec![Command::JumpToTmux { window: TmuxWindow(window) }]
-                    } else {
-                        self.update(Message::StatusInfo("No active session".to_string()))
-                    }
-                } else {
-                    vec![]
-                }
-            }
-
-            KeyCode::Char('e') => {
-                if let Some(pr) = self.selected_review_pr() {
-                    if pr.review_notes.is_some() {
-                        self.update(Message::ShowReviewDetail)
-                    } else {
-                        self.update(Message::StatusInfo("No review notes yet".to_string()))
-                    }
                 } else {
                     vec![]
                 }

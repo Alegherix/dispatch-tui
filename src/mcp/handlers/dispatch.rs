@@ -18,7 +18,7 @@ pub(super) fn tool_definitions() -> Value {
         "tools": [
             {
                 "name": "update_task",
-                "description": "Update a task's status, title, description, repo_path, plan, and/or PR fields. At least one field besides task_id must be provided.",
+                "description": "Update a task's status, sub_status, title, description, repo_path, plan, and/or PR fields. At least one field besides task_id must be provided.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -59,6 +59,11 @@ pub(super) fn tool_definitions() -> Value {
                             "type": "string",
                             "description": "Task tag: bug, feature, chore, or epic. Controls dispatch behavior.",
                             "enum": ["bug", "feature", "chore", "epic"]
+                        },
+                        "sub_status": {
+                            "type": "string",
+                            "description": "Sub-status within the current status column. Running: active, needs_input, stale, crashed. Review: awaiting_review, changes_requested, approved. Must be valid for the task's current (or new) status.",
+                            "enum": ["none", "active", "needs_input", "stale", "crashed", "awaiting_review", "changes_requested", "approved"]
                         }
                     },
                     "required": ["task_id"]
@@ -221,24 +226,6 @@ pub(super) fn tool_definitions() -> Value {
                 }
             },
             {
-                "name": "complete_review",
-                "description": "Save review notes for a GitHub PR and end the review session. Call this when you have finished reviewing a PR.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The GitHub PR URL (e.g. https://github.com/owner/repo/pull/42)"
-                        },
-                        "notes": {
-                            "type": "string",
-                            "description": "Your review summary and findings"
-                        }
-                    },
-                    "required": ["url", "notes"]
-                }
-            },
-            {
                 "name": "report_usage",
                 "description": "Report token usage and cost for a task session. Accumulates across sessions.",
                 "inputSchema": {
@@ -300,7 +287,6 @@ pub async fn handle_mcp(
                 "list_epics" => epics::handle_list_epics(&state, id, args),
                 "update_epic" => epics::handle_update_epic(&state, id, args),
                 "wrap_up" => tasks::handle_wrap_up(&state, id, args).await,
-                "complete_review" => tasks::handle_complete_review(&state, id, args).await,
                 other => JsonRpcResponse::err(id, -32602, format!("Unknown tool: {other}")),
             }
         }

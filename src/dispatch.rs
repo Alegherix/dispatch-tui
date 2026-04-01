@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 
-use crate::models::{DispatchResult, EpicId, ResumeResult, Task, TaskId, TmuxWindow, WorktreePath, slugify};
+use crate::models::{DispatchResult, EpicId, ResumeResult, SubStatus, Task, TaskId, TaskStatus, slugify};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -10,8 +10,8 @@ use crate::tmux;
 // ---------------------------------------------------------------------------
 
 struct ProvisionResult {
-    worktree_path: WorktreePath,
-    tmux_window: TmuxWindow,
+    worktree_path: String,
+    tmux_window: String,
 }
 
 /// Create a git worktree and open a tmux window.
@@ -21,10 +21,10 @@ fn provision_worktree(
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
 ) -> Result<ProvisionResult> {
-    let repo_path = expand_tilde(task.repo_path.as_ref());
+    let repo_path = expand_tilde(&task.repo_path);
     let slug = slugify(&task.title);
     let worktree_name = format!("{}-{slug}", task.id);
-    let worktree_path = WorktreePath(format!("{repo_path}/.worktrees/{worktree_name}"));
+    let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
     let tmux_window = build_tmux_window_name(task.id);
 
     tracing::info!(task_id = task.id.0, %worktree_path, ?base_branch, "provisioning worktree");
@@ -32,10 +32,10 @@ fn provision_worktree(
     fs::create_dir_all(format!("{repo_path}/.worktrees"))
         .context("failed to create .worktrees directory")?;
 
-    if std::path::Path::new(worktree_path.as_ref()).exists() {
+    if std::path::Path::new(&worktree_path).exists() {
         tracing::info!(task_id = task.id.0, %worktree_path, "worktree already exists, reusing");
     } else {
-        let mut args = vec!["-C", &repo_path, "worktree", "add", worktree_path.as_ref(), "-B", &*worktree_name];
+        let mut args = vec!["-C", &repo_path, "worktree", "add", &*worktree_path, "-B", &*worktree_name];
         if let Some(base) = base_branch {
             args.push(base);
         }
@@ -49,10 +49,10 @@ fn provision_worktree(
         );
     }
 
-    tmux::new_window(&tmux_window, worktree_path.as_ref(), runner)
+    tmux::new_window(&tmux_window, &worktree_path, runner)
         .context("failed to create tmux window")?;
 
-    tmux::set_after_split_hook(&tmux_window, worktree_path.as_ref(), runner)
+    tmux::set_after_split_hook(&tmux_window, &worktree_path, runner)
         .context("failed to set tmux split hook")?;
 
     Ok(ProvisionResult { worktree_path, tmux_window })
@@ -92,7 +92,7 @@ fn dispatch_with_prompt(
     runner: &dyn ProcessRunner,
     base_branch: Option<&str>,
 ) -> Result<DispatchResult> {
-    let repo_path = expand_tilde(task.repo_path.as_ref());
+    let repo_path = expand_tilde(&task.repo_path);
 
     // Resolve the start-point once; reuse in both provision_worktree and rebase_preamble.
     let detected;
@@ -107,7 +107,7 @@ fn dispatch_with_prompt(
     let provision = provision_worktree(task, runner, Some(resolved))?;
 
     let full_prompt = format!("{}\n\n{prompt}", rebase_preamble(resolved));
-    let prompt_file = format!("{}/.claude-prompt", provision.worktree_path.as_ref());
+    let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
     let claude_cmd = format!(
@@ -179,12 +179,11 @@ pub fn brainstorm_chained_agent(task: &Task, base_branch: &str, mcp_port: u16, r
 /// worktree removal is always attempted.
 pub fn cleanup_task(
     repo_path: &str,
-    worktree_path: &WorktreePath,
-    tmux_window: Option<&TmuxWindow>,
+    worktree_path: &str,
+    tmux_window: Option<&str>,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    let worktree_str = worktree_path.as_ref();
-    tracing::info!(worktree_path = worktree_str, "cleaning up task");
+    tracing::info!(worktree_path, "cleaning up task");
 
     if let Some(window) = tmux_window {
         match tmux::has_window(window, runner) {
@@ -200,16 +199,16 @@ pub fn cleanup_task(
     }
 
     let output = runner
-        .run("git", &["worktree", "remove", "--force", worktree_str])
+        .run("git", &["worktree", "remove", "--force", worktree_path])
         .context("failed to run git worktree remove")?;
     if !output.status.success() {
         anyhow::bail!(
-            "git worktree remove failed for path {worktree_str}: {}",
+            "git worktree remove failed for path {worktree_path}: {}",
             stderr_str(&output)
         );
     }
 
-    if let Some(branch) = std::path::Path::new(worktree_str)
+    if let Some(branch) = std::path::Path::new(worktree_path)
         .file_name()
         .and_then(|n| n.to_str())
     {
@@ -271,13 +270,13 @@ impl std::fmt::Display for FinishError {
 /// The worktree is preserved — it will be cleaned up when the task is archived.
 pub fn finish_task(
     repo_path: &str,
-    worktree: &WorktreePath,
+    worktree: &str,
     branch: &str,
-    tmux_window: Option<&TmuxWindow>,
+    tmux_window: Option<&str>,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<(), FinishError> {
     let repo_path = &expand_tilde(repo_path);
-    let worktree = &expand_tilde(worktree.as_ref());
+    let worktree = &expand_tilde(worktree);
     let default_branch = detect_default_branch(repo_path, runner);
 
     // 1. Verify we're on the default branch
@@ -373,13 +372,13 @@ pub fn finish_task(
 ///
 /// This function is **synchronous** and should be called via
 /// `tokio::task::spawn_blocking` from async contexts.
-pub fn resume_agent(task_id: TaskId, worktree_path: &WorktreePath, runner: &dyn ProcessRunner) -> Result<ResumeResult> {
+pub fn resume_agent(task_id: TaskId, worktree_path: &str, runner: &dyn ProcessRunner) -> Result<ResumeResult> {
     let tmux_window = build_tmux_window_name(task_id);
 
-    tmux::new_window(&tmux_window, worktree_path.as_ref(), runner)
+    tmux::new_window(&tmux_window, worktree_path, runner)
         .context("failed to create tmux window for resume")?;
 
-    tmux::set_after_split_hook(&tmux_window, worktree_path.as_ref(), runner)
+    tmux::set_after_split_hook(&tmux_window, worktree_path, runner)
         .context("failed to set tmux split hook")?;
 
     tmux::send_keys(&tmux_window, "claude --continue", runner)
@@ -391,99 +390,11 @@ pub fn resume_agent(task_id: TaskId, worktree_path: &WorktreePath, runner: &dyn 
 }
 
 // ---------------------------------------------------------------------------
-// review agent dispatch and resume
-// ---------------------------------------------------------------------------
-
-pub fn dispatch_review_agent(
-    pr: &crate::models::ReviewPr,
-    dispatch_repo: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<DispatchResult> {
-    let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-    let worktree_name = format!("review-{repo_short}-{}", pr.number);
-    let worktree_path = format!("{dispatch_repo}/.worktrees/{worktree_name}");
-    let tmux_window = build_review_tmux_window_name(&pr.repo, pr.number);
-
-    tracing::info!(pr_url = %pr.url, %worktree_path, "dispatching review agent");
-
-    fs::create_dir_all(format!("{dispatch_repo}/.worktrees"))
-        .context("failed to create .worktrees directory")?;
-
-    if !std::path::Path::new(&worktree_path).exists() {
-        let output = runner
-            .run("git", &["-C", dispatch_repo, "worktree", "add", "--detach", &worktree_path])
-            .context("failed to run git worktree add")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "git worktree add failed: {}",
-            stderr_str(&output)
-        );
-    }
-
-    tmux::new_window(&tmux_window, &worktree_path, runner)
-        .context("failed to create tmux window for review")?;
-
-    tmux::set_after_split_hook(&tmux_window, &worktree_path, runner)
-        .context("failed to set tmux split hook")?;
-
-    let prompt = build_review_prompt(pr);
-    tmux::send_keys(&tmux_window, &format!("claude \"{prompt}\""), runner)
-        .context("failed to send keys to review tmux window")?;
-
-    Ok(DispatchResult {
-        worktree_path: WorktreePath(worktree_path),
-        tmux_window,
-    })
-}
-
-pub fn resume_review_agent(
-    repo: &str,
-    number: i64,
-    worktree_path: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<ResumeResult> {
-    let tmux_window = build_review_tmux_window_name(repo, number);
-
-    tmux::new_window(&tmux_window, worktree_path, runner)
-        .context("failed to create tmux window for review resume")?;
-
-    tmux::set_after_split_hook(&tmux_window, worktree_path, runner)
-        .context("failed to set tmux split hook")?;
-
-    tmux::send_keys(&tmux_window, "claude --continue", runner)
-        .context("failed to send resume keys")?;
-
-    tracing::info!(%repo, number, %tmux_window, "review agent resumed");
-
-    Ok(ResumeResult { tmux_window })
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn build_tmux_window_name(task_id: TaskId) -> TmuxWindow {
-    TmuxWindow(format!("task-{task_id}"))
-}
-
-fn build_review_tmux_window_name(repo: &str, number: i64) -> TmuxWindow {
-    let repo_short = repo.split('/').next_back().unwrap_or(repo);
-    TmuxWindow(format!("review-{repo_short}-{number}"))
-}
-
-fn build_review_prompt(pr: &crate::models::ReviewPr) -> String {
-    format!(
-        "You are reviewing PR {repo}#{number}: {title}\n\
-         URL: {url}\n\n\
-         Run /code-review {url}\n\n\
-         When done, call the complete_review tool via the dispatch MCP server with:\n\
-         - url: \"{url}\"\n\
-         - notes: your review summary",
-        repo = pr.repo,
-        number = pr.number,
-        title = pr.title,
-        url = pr.url,
-    )
+fn build_tmux_window_name(task_id: TaskId) -> String {
+    format!("task-{task_id}")
 }
 
 fn build_prompt(task_id: TaskId, title: &str, description: &str, plan: Option<&str>) -> String {
@@ -646,6 +557,19 @@ pub enum PrState {
     Closed,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+#[derive(Debug)]
+pub struct PrStatus {
+    pub state: PrState,
+    pub review_decision: Option<PrReviewDecision>,
+}
+
 // ---------------------------------------------------------------------------
 // PR functions
 // ---------------------------------------------------------------------------
@@ -717,33 +641,55 @@ pub fn create_pr(
 pub fn check_pr_status(
     pr_url: &str,
     runner: &dyn ProcessRunner,
-) -> Result<PrState> {
+) -> Result<PrStatus> {
     let output = runner
         .run("gh", &[
             "pr", "view", pr_url,
-            "--json", "state",
-            "-q", ".state",
+            "--json", "state,reviewDecision",
+            "-q", r#"[.state, .reviewDecision] | join("\n")"#,
         ])
         .context("Failed to run gh pr view")?;
     if !output.status.success() {
         anyhow::bail!("gh pr view failed: {}", stderr_str(&output));
     }
 
-    let state = stdout_str(&output).to_uppercase();
-    match state.as_str() {
-        "MERGED" => Ok(PrState::Merged),
-        "CLOSED" => Ok(PrState::Closed),
-        _ => Ok(PrState::Open),
-    }
+    let stdout = stdout_str(&output);
+    let mut lines = stdout.lines();
+    let state_str = lines.next().unwrap_or("").to_uppercase();
+    let review_str = lines.next().unwrap_or("").to_uppercase();
+
+    let state = match state_str.as_str() {
+        "MERGED" => PrState::Merged,
+        "CLOSED" => PrState::Closed,
+        _ => PrState::Open,
+    };
+
+    let review_decision = match review_str.as_str() {
+        "APPROVED" => Some(PrReviewDecision::Approved),
+        "CHANGES_REQUESTED" => Some(PrReviewDecision::ChangesRequested),
+        "REVIEW_REQUIRED" => Some(PrReviewDecision::ReviewRequired),
+        _ => None,
+    };
+
+    Ok(PrStatus { state, review_decision })
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// A task can be wrapped up if it has a worktree and is either:
+/// - In Review (any sub-status), or
+/// - In Running with sub_status NeedsInput (Blocked)
+pub fn is_wrappable(task: &Task) -> bool {
+    task.worktree.is_some()
+        && (task.status == TaskStatus::Review
+            || (task.status == TaskStatus::Running && task.sub_status == SubStatus::NeedsInput))
+}
+
 /// Extract the branch name from a worktree path (its last path component).
-pub fn branch_from_worktree(worktree: &WorktreePath) -> Option<String> {
-    std::path::Path::new(worktree.as_ref())
+pub fn branch_from_worktree(worktree: &str) -> Option<String> {
+    std::path::Path::new(worktree)
         .file_name()
         .and_then(|n| n.to_str())
         .map(|s| s.to_string())
@@ -778,7 +724,7 @@ mod tests {
     use super::*;
     use crate::DEFAULT_PORT;
     use crate::process::{MockProcessRunner, exit_fail};
-    use crate::models::{EpicId, RepoPath, Task, TaskId, TaskStatus};
+    use crate::models::{EpicId, Task, TaskId, TaskStatus};
     use chrono::Utc;
     use std::process::Output;
 
@@ -787,13 +733,13 @@ mod tests {
             id: TaskId(42),
             title: "Fix bug".to_string(),
             description: "A nasty crash".to_string(),
-            repo_path: RepoPath(repo_path.to_string()),
+            repo_path: repo_path.to_string(),
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
             plan: None,
             epic_id: None,
-            needs_input: false,
+            sub_status: crate::models::SubStatus::None,
             pr_url: None,
             tag: None,
             sort_order: None,
@@ -845,7 +791,7 @@ mod tests {
     #[test]
     fn resume_window_name_matches_dispatch() {
         // The resume window name should use the same naming convention as dispatch
-        assert_eq!(build_tmux_window_name(TaskId(42)), TmuxWindow("task-42".into()));
+        assert_eq!(build_tmux_window_name(TaskId(42)), "task-42");
     }
 
     #[test]
@@ -1060,7 +1006,7 @@ mod tests {
         assert_eq!(calls[1].0, "tmux");
         assert_eq!(calls[1].1[0], "new-window");
 
-        let expected_path = WorktreePath(format!("{repo_path}/.worktrees/42-fix-bug"));
+        let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
         assert_eq!(result.worktree_path, expected_path);
     }
 
@@ -1083,7 +1029,7 @@ mod tests {
         assert!(calls.iter().all(|(prog, _)| prog != "git"), "git should be skipped");
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1[0], "new-window");
-        assert_eq!(result.worktree_path, WorktreePath(worktree_dir.to_str().unwrap().to_string()));
+        assert_eq!(result.worktree_path, worktree_dir.to_str().unwrap());
     }
 
     #[test]
@@ -1107,7 +1053,7 @@ mod tests {
         assert_eq!(git_args.last().unwrap(), "99-prev-task",
             "base branch should be last git arg, got: {git_args:?}");
 
-        let expected_path = WorktreePath(format!("{repo_path}/.worktrees/42-fix-bug"));
+        let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
         assert_eq!(result.worktree_path, expected_path);
     }
 
@@ -1128,7 +1074,7 @@ mod tests {
     #[test]
     fn resume_skips_git_issues_tmux_continue() {
         let dir = tempfile::TempDir::new().unwrap();
-        let worktree_path = WorktreePath(dir.path().to_str().unwrap().to_string());
+        let worktree_path = dir.path().to_str().unwrap().to_string();
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // tmux new-window
@@ -1158,7 +1104,7 @@ mod tests {
             MockProcessRunner::ok(), // git branch -D (best-effort)
         ]);
 
-        cleanup_task("/repo", &WorktreePath("/repo/.worktrees/42-fix-bug".into()), Some(&TmuxWindow("task-42".into())), &mock).unwrap();
+        cleanup_task("/repo", "/repo/.worktrees/42-fix-bug", Some("task-42"), &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert_eq!(calls[0].0, "tmux");
@@ -1347,7 +1293,7 @@ mod tests {
             MockProcessRunner::ok(),                             // tmux kill-window
         ]);
 
-        finish_task("/repo", &WorktreePath("/repo/.worktrees/42-fix-bug".into()), "42-fix-bug", Some(&TmuxWindow("task-42".into())), &mock).unwrap();
+        finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", Some("task-42"), &mock).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().any(|c| c.1.contains(&"rebase".to_string())));
@@ -1367,7 +1313,7 @@ mod tests {
             MockProcessRunner::ok(),                              // git merge --ff-only
         ]);
 
-        finish_task("/repo", &WorktreePath("/repo/.worktrees/42-fix-bug".into()), "42-fix-bug", None, &mock).unwrap();
+        finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock).unwrap();
 
         let calls = mock.recorded_calls();
         // pull should reference "master" not "main"
@@ -1385,7 +1331,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"feature-branch\n"),            // rev-parse HEAD
         ]);
 
-        let result = finish_task("/repo", &WorktreePath("/repo/.worktrees/42-fix-bug".into()), "42-fix-bug", None, &mock);
+        let result = finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, FinishError::NotOnDefaultBranch { .. }));
@@ -1406,7 +1352,7 @@ mod tests {
             MockProcessRunner::ok(),                             // git rebase --abort
         ]);
 
-        let result = finish_task("/repo", &WorktreePath("/repo/.worktrees/42-fix-bug".into()), "42-fix-bug", None, &mock);
+        let result = finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock);
         assert!(matches!(result.unwrap_err(), FinishError::RebaseConflict(_)));
         let calls = mock.recorded_calls();
         assert!(calls.last().unwrap().1.contains(&"--abort".to_string()));
@@ -1421,7 +1367,7 @@ mod tests {
             MockProcessRunner::fail("fatal: unable to access remote"),            // git pull fails
         ]);
 
-        let result = finish_task("/repo", &WorktreePath("/repo/.worktrees/42-fix-bug".into()), "42-fix-bug", None, &mock);
+        let result = finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock);
         assert!(matches!(result.unwrap_err(), FinishError::Other(_)));
     }
 
@@ -1496,10 +1442,11 @@ mod tests {
     #[test]
     fn check_pr_status_open() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"OPEN\n"),  // gh pr view
+            MockProcessRunner::ok_with_stdout(b"OPEN\nREVIEW_REQUIRED\n"),
         ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-        assert_eq!(result, PrState::Open);
+        assert_eq!(result.state, PrState::Open);
+        assert_eq!(result.review_decision, Some(PrReviewDecision::ReviewRequired));
     }
 
     #[test]
@@ -1508,7 +1455,8 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"MERGED\n"),
         ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-        assert_eq!(result, PrState::Merged);
+        assert_eq!(result.state, PrState::Merged);
+        assert_eq!(result.review_decision, None);
     }
 
     #[test]
@@ -1517,7 +1465,28 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"CLOSED\n"),
         ]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
-        assert_eq!(result, PrState::Closed);
+        assert_eq!(result.state, PrState::Closed);
+        assert_eq!(result.review_decision, None);
+    }
+
+    #[test]
+    fn check_pr_status_open_approved() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"),
+        ]);
+        let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
+        assert_eq!(result.state, PrState::Open);
+        assert_eq!(result.review_decision, Some(PrReviewDecision::Approved));
+    }
+
+    #[test]
+    fn check_pr_status_open_changes_requested() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"OPEN\nCHANGES_REQUESTED\n"),
+        ]);
+        let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
+        assert_eq!(result.state, PrState::Open);
+        assert_eq!(result.review_decision, Some(PrReviewDecision::ChangesRequested));
     }
 
     // --- parse_repo_slug tests ---
@@ -1557,73 +1526,10 @@ mod tests {
             // No tmux window, no cleanup
         ]);
 
-        finish_task("/repo", &WorktreePath("/repo/.worktrees/42-fix-bug".into()), "42-fix-bug", None, &mock).unwrap();
+        finish_task("/repo", "/repo/.worktrees/42-fix-bug", "42-fix-bug", None, &mock).unwrap();
         let calls = mock.recorded_calls();
         // Should not have a "pull" call
         assert!(!calls.iter().any(|c| c.1.contains(&"pull".to_string())));
-    }
-
-    #[test]
-    fn dispatch_review_agent_creates_window_and_sends_prompt() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let repo_path = dir.path().to_str().unwrap();
-
-        // Create .worktrees directory
-        std::fs::create_dir_all(format!("{}/.worktrees", repo_path)).unwrap();
-
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),                          // git worktree add
-            MockProcessRunner::ok(),                          // tmux new-window
-            MockProcessRunner::ok(),                          // tmux set-hook
-            MockProcessRunner::ok(),                          // tmux send-keys -l (prompt)
-            MockProcessRunner::ok(),                          // tmux send-keys Enter
-        ]);
-
-        use crate::models::{ReviewDecision, ReviewPr};
-        let pr = ReviewPr {
-            number: 42,
-            title: "Fix auth".to_string(),
-            author: "alice".to_string(),
-            repo: "acme/app".to_string(),
-            url: "https://github.com/acme/app/pull/42".to_string(),
-            is_draft: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            additions: 10,
-            deletions: 3,
-            review_decision: ReviewDecision::ReviewRequired,
-            labels: vec![],
-            tmux_window: None,
-            review_notes: None,
-        };
-
-        let result = dispatch_review_agent(&pr, repo_path, &mock).unwrap();
-        assert!(result.tmux_window.0.contains("review-app-42"));
-        assert!(result.worktree_path.0.contains("review-app-42"));
-
-        let calls = mock.recorded_calls();
-        // Verify prompt contains the PR URL and complete_review instruction
-        let prompt_call = calls.iter().find(|(p, a)| *p == "tmux" && a.iter().any(|s| s.contains("complete_review"))).unwrap();
-        assert!(prompt_call.1.iter().any(|s| s.contains("https://github.com/acme/app/pull/42")));
-    }
-
-    #[test]
-    fn resume_review_agent_opens_window_with_continue() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let worktree_path = dir.path().to_str().unwrap();
-
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // tmux new-window
-            MockProcessRunner::ok(), // tmux set-hook
-            MockProcessRunner::ok(), // tmux send-keys -l
-            MockProcessRunner::ok(), // tmux send-keys Enter
-        ]);
-
-        let result = resume_review_agent("acme/app", 42, worktree_path, &mock).unwrap();
-        assert_eq!(result.tmux_window, TmuxWindow("review-app-42".to_string()));
-
-        let calls = mock.recorded_calls();
-        assert!(calls.iter().any(|(p, a)| *p == "tmux" && a.iter().any(|s| s.contains("--continue"))));
     }
 }
 
@@ -1634,13 +1540,13 @@ mod branch_tests {
     #[test]
     fn branch_from_worktree_extracts_last_component() {
         assert_eq!(
-            branch_from_worktree(&WorktreePath("/repo/.worktrees/42-fix-login".into())),
+            branch_from_worktree("/repo/.worktrees/42-fix-login"),
             Some("42-fix-login".to_string())
         );
     }
 
     #[test]
     fn branch_from_worktree_returns_none_for_empty() {
-        assert_eq!(branch_from_worktree(&WorktreePath("".into())), None);
+        assert_eq!(branch_from_worktree(""), None);
     }
 }

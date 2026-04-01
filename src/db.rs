@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::models::{Epic, EpicId, ReviewDecision, ReviewPr, RepoPath, Task, TaskId, TaskStatus, TaskUsage, TmuxWindow, WorktreePath, UsageReport};
+use crate::models::{Epic, EpicId, ReviewDecision, ReviewPr, SubStatus, Task, TaskId, TaskStatus, TaskUsage, UsageReport};
 
 // ---------------------------------------------------------------------------
 // TaskPatch — builder for selective field updates
@@ -23,7 +23,7 @@ pub struct TaskPatch<'a> {
     pub repo_path: Option<&'a str>,
     pub worktree: Option<Option<&'a str>>,
     pub tmux_window: Option<Option<&'a str>>,
-    pub needs_input: Option<bool>,
+    pub sub_status: Option<SubStatus>,
     pub pr_url: Option<Option<&'a str>>,
     pub tag: Option<Option<&'a str>>,
     pub sort_order: Option<Option<i64>>,
@@ -35,6 +35,7 @@ impl<'a> TaskPatch<'a> {
     }
 
     pub fn status(mut self, status: TaskStatus) -> Self {
+        self.sub_status = Some(SubStatus::default_for(status));  // auto-reset: valid pair guaranteed
         self.status = Some(status);
         self
     }
@@ -69,8 +70,8 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
-    pub fn needs_input(mut self, needs_input: bool) -> Self {
-        self.needs_input = Some(needs_input);
+    pub fn sub_status(mut self, sub_status: SubStatus) -> Self {
+        self.sub_status = Some(sub_status);
         self
     }
 
@@ -97,7 +98,7 @@ impl<'a> TaskPatch<'a> {
             || self.repo_path.is_some()
             || self.worktree.is_some()
             || self.tmux_window.is_some()
-            || self.needs_input.is_some()
+            || self.sub_status.is_some()
             || self.pr_url.is_some()
             || self.tag.is_some()
             || self.sort_order.is_some()
@@ -214,14 +215,6 @@ pub trait TaskStore: Send + Sync {
     // Review PRs
     fn save_review_prs(&self, prs: &[crate::models::ReviewPr]) -> Result<()>;
     fn load_review_prs(&self) -> Result<Vec<crate::models::ReviewPr>>;
-    /// Patch agent fields on a review PR row (identified by URL).
-    /// Uses double-Option: `None` = leave unchanged, `Some(None)` = set NULL, `Some(Some(s))` = set value.
-    fn patch_review_pr(
-        &self,
-        url: &str,
-        review_notes: Option<Option<&str>>,
-        tmux_window: Option<Option<&str>>,
-    ) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -472,13 +465,109 @@ impl Database {
         }
 
         if current_version < 15 {
+            // Migration 15: replace needs_input (INTEGER) with sub_status (TEXT).
+            let _ = conn.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN sub_status TEXT NOT NULL DEFAULT 'none'"
+            );
+            let _ = conn.execute_batch(
+                "UPDATE tasks SET sub_status = 'needs_input' WHERE needs_input = 1"
+            );
+            let _ = conn.execute_batch(
+                "UPDATE tasks SET sub_status = 'active' WHERE status = 'running' AND sub_status = 'none'"
+            );
+            let _ = conn.execute_batch(
+                "UPDATE tasks SET sub_status = 'awaiting_review' WHERE status = 'review' AND sub_status = 'none'"
+            );
             conn.execute_batch(
-                "ALTER TABLE review_prs ADD COLUMN tmux_window TEXT;
-                 ALTER TABLE review_prs ADD COLUMN review_notes TEXT;",
-            )
-            .context("Failed to add agent columns to review_prs")?;
+                "CREATE TABLE tasks_new (
+                    id          INTEGER PRIMARY KEY,
+                    title       TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    repo_path   TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'backlog',
+                    worktree    TEXT,
+                    tmux_window TEXT,
+                    plan        TEXT,
+                    epic_id     INTEGER REFERENCES epics(id),
+                    sub_status  TEXT NOT NULL DEFAULT 'none',
+                    pr_url      TEXT,
+                    tag         TEXT,
+                    sort_order  INTEGER,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO tasks_new SELECT id, title, description, repo_path, status, worktree, tmux_window, plan, epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at FROM tasks;
+                DROP TABLE tasks;
+                ALTER TABLE tasks_new RENAME TO tasks;"
+            ).context("Failed to rebuild tasks table for sub_status migration")?;
             conn.pragma_update(None, "user_version", 15i64)
                 .context("Failed to update schema version to 15")?;
+        }
+
+        if current_version < 16 {
+            // Migration 16: clean up invalid (status, sub_status) pairs and add CHECK constraint.
+            //
+            // Before this migration, (review, needs_input) rows could exist from old hook behavior.
+            // Clean them up first so the CHECK constraint can be added without constraint violations.
+            let _ = conn.execute_batch(
+                "-- Legacy (review, needs_input) from old HookNotification hook → awaiting_review
+                 UPDATE tasks SET sub_status = 'awaiting_review'
+                 WHERE status = 'review' AND sub_status = 'needs_input';
+
+                 -- Any other invalid running pairs → active
+                 UPDATE tasks SET sub_status = 'active'
+                 WHERE status = 'running'
+                   AND sub_status NOT IN ('active', 'needs_input', 'stale', 'crashed');
+
+                 -- Any other invalid review pairs → awaiting_review
+                 UPDATE tasks SET sub_status = 'awaiting_review'
+                 WHERE status = 'review'
+                   AND sub_status NOT IN ('awaiting_review', 'changes_requested', 'approved');
+
+                 -- Any other invalid terminal-status pairs → none
+                 UPDATE tasks SET sub_status = 'none'
+                 WHERE status IN ('backlog', 'done', 'archived') AND sub_status != 'none';"
+            );
+
+            conn.execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                 BEGIN;
+                 CREATE TABLE tasks_new (
+                     id          INTEGER PRIMARY KEY,
+                     title       TEXT NOT NULL,
+                     description TEXT NOT NULL,
+                     repo_path   TEXT NOT NULL,
+                     status      TEXT NOT NULL DEFAULT 'backlog',
+                     worktree    TEXT,
+                     tmux_window TEXT,
+                     plan        TEXT,
+                     epic_id     INTEGER REFERENCES epics(id),
+                     sub_status  TEXT NOT NULL DEFAULT 'none',
+                     pr_url      TEXT,
+                     tag         TEXT,
+                     sort_order  INTEGER,
+                     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                     CHECK (
+                         (status = 'backlog'  AND sub_status = 'none') OR
+                         (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed')) OR
+                         (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved')) OR
+                         (status = 'done'     AND sub_status = 'none') OR
+                         (status = 'archived' AND sub_status = 'none')
+                     )
+                 );
+                 INSERT INTO tasks_new
+                     SELECT id, title, description, repo_path, status, worktree, tmux_window, plan,
+                            epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at
+                     FROM tasks;
+                 DROP TABLE tasks;
+                 ALTER TABLE tasks_new RENAME TO tasks;
+                 COMMIT;
+                 PRAGMA foreign_keys = ON;"
+            ).context("Failed to rebuild tasks table with CHECK constraint for migration 16")?;
+
+            conn.pragma_update(None, "user_version", 16i64)
+                .context("Failed to update schema version to 16")?;
         }
 
         Ok(())
@@ -494,7 +583,7 @@ impl Database {
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, \
-     plan, epic_id, needs_input, pr_url, tag, sort_order, created_at, updated_at";
+     plan, epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at";
 
 impl TaskStore for Database {
     fn create_task(
@@ -506,9 +595,10 @@ impl TaskStore for Database {
         status: TaskStatus,
     ) -> Result<TaskId> {
         let conn = self.conn()?;
+        let sub_status = SubStatus::default_for(status);
         conn.execute(
-            "INSERT INTO tasks (title, description, repo_path, plan, status) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![title, description, repo_path, plan, status.as_str()],
+            "INSERT INTO tasks (title, description, repo_path, plan, status, sub_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![title, description, repo_path, plan, status.as_str(), sub_status.as_str()],
         )
         .context("Failed to insert task")?;
         Ok(TaskId(conn.last_insert_rowid()))
@@ -557,10 +647,11 @@ impl TaskStore for Database {
 
     fn update_status_if(&self, id: TaskId, new_status: TaskStatus, expected: TaskStatus) -> Result<bool> {
         let conn = self.conn()?;
+        let default_sub = SubStatus::default_for(new_status);
         let rows = conn
             .execute(
-                "UPDATE tasks SET status = ?1, updated_at = datetime('now') WHERE id = ?2 AND status = ?3",
-                params![new_status.as_str(), id.0, expected.as_str()],
+                "UPDATE tasks SET status = ?1, sub_status = ?2, updated_at = datetime('now') WHERE id = ?3 AND status = ?4",
+                params![new_status.as_str(), default_sub.as_str(), id.0, expected.as_str()],
             )
             .context("Failed to conditional-update status")?;
         Ok(rows > 0)
@@ -629,6 +720,11 @@ impl TaskStore for Database {
         if !patch.has_changes() {
             return Ok(());
         }
+        debug_assert!(
+            !matches!((patch.status, patch.sub_status), (Some(s), Some(ss)) if !ss.is_valid_for(s)),
+            "invalid (status, sub_status) pair in patch: {:?}/{:?}",
+            patch.status, patch.sub_status
+        );
         let conn = self.conn()?;
         let mut sets: Vec<&str> = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -661,9 +757,9 @@ impl TaskStore for Database {
             sets.push("tmux_window = ?");
             values.push(Box::new(t.map(|s| s.to_string())));
         }
-        if let Some(ni) = patch.needs_input {
-            sets.push("needs_input = ?");
-            values.push(Box::new(ni as i64));
+        if let Some(ss) = patch.sub_status {
+            sets.push("sub_status = ?");
+            values.push(Box::new(ss.as_str().to_string()));
         }
         if let Some(url) = &patch.pr_url {
             sets.push("pr_url = ?");
@@ -969,37 +1065,15 @@ impl TaskStore for Database {
         rows.collect::<Result<Vec<_>, _>>().context("Failed to list filter presets")
     }
 
-    /// Saves (upserts) a batch of review PRs from a GitHub refresh.
-    ///
-    /// On conflict with `(repo, number)`, GitHub-sourced fields are updated but
-    /// `tmux_window` and `review_notes` are preserved via `COALESCE` — meaning
-    /// agent fields can only be modified through [`Self::patch_review_pr`].
-    ///
-    /// Note: rows for PRs no longer in the GitHub response are NOT deleted.
-    /// PRs may have active review agents, so pruning is handled separately
-    /// if needed.
     fn save_review_prs(&self, prs: &[ReviewPr]) -> Result<()> {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM review_prs", [])?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
-                 created_at, updated_at, additions, deletions, review_decision, labels,
-                 tmux_window, review_notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-                 ON CONFLICT(repo, number) DO UPDATE SET
-                   title           = excluded.title,
-                   author          = excluded.author,
-                   url             = excluded.url,
-                   is_draft        = excluded.is_draft,
-                   created_at      = excluded.created_at,
-                   updated_at      = excluded.updated_at,
-                   additions       = excluded.additions,
-                   deletions       = excluded.deletions,
-                   review_decision = excluded.review_decision,
-                   labels          = excluded.labels,
-                   tmux_window     = COALESCE(review_prs.tmux_window, excluded.tmux_window),
-                   review_notes    = COALESCE(review_prs.review_notes, excluded.review_notes)",
+                 created_at, updated_at, additions, deletions, review_decision, labels)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             )?;
             for pr in prs {
                 let labels_json =
@@ -1017,8 +1091,6 @@ impl TaskStore for Database {
                     pr.deletions,
                     pr.review_decision.as_db_str(),
                     labels_json,
-                    pr.tmux_window,
-                    pr.review_notes,
                 ])?;
             }
         }
@@ -1031,7 +1103,7 @@ impl TaskStore for Database {
         let mut stmt = conn.prepare(
             "SELECT repo, number, title, author, url, is_draft,
                     created_at, updated_at, additions, deletions,
-                    review_decision, labels, tmux_window, review_notes
+                    review_decision, labels
              FROM review_prs",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -1047,8 +1119,6 @@ impl TaskStore for Database {
             let deletions: i64 = row.get(9)?;
             let decision_str: String = row.get(10)?;
             let labels_json: String = row.get(11)?;
-            let tmux_window: Option<String> = row.get(12)?;
-            let review_notes: Option<String> = row.get(13)?;
             Ok((
                 repo,
                 number,
@@ -1062,8 +1132,6 @@ impl TaskStore for Database {
                 deletions,
                 decision_str,
                 labels_json,
-                tmux_window,
-                review_notes,
             ))
         })?;
 
@@ -1082,8 +1150,6 @@ impl TaskStore for Database {
                 deletions,
                 decision_str,
                 labels_json,
-                tmux_window,
-                review_notes,
             ) = row?;
 
             let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -1109,56 +1175,9 @@ impl TaskStore for Database {
                 deletions,
                 review_decision,
                 labels,
-                tmux_window,
-                review_notes,
             });
         }
         Ok(prs)
-    }
-
-    fn patch_review_pr(
-        &self,
-        url: &str,
-        review_notes: Option<Option<&str>>,
-        tmux_window: Option<Option<&str>>,
-    ) -> Result<()> {
-        if review_notes.is_none() && tmux_window.is_none() {
-            return Ok(());
-        }
-        let conn = self.conn()?;
-        let mut parts = Vec::new();
-        if review_notes.is_some() {
-            parts.push("review_notes = ?");
-        }
-        if tmux_window.is_some() {
-            parts.push("tmux_window = ?");
-        }
-        let sql = format!("UPDATE review_prs SET {} WHERE url = ?", parts.join(", "));
-        let mut stmt = conn.prepare(&sql)?;
-
-        // Build params dynamically
-        match (review_notes, tmux_window) {
-            (Some(notes), Some(window)) => {
-                let n = stmt.execute(rusqlite::params![notes, window, url])?;
-                if n == 0 {
-                    anyhow::bail!("patch_review_pr: no review PR found with url={url}");
-                }
-            }
-            (Some(notes), None) => {
-                let n = stmt.execute(rusqlite::params![notes, url])?;
-                if n == 0 {
-                    anyhow::bail!("patch_review_pr: no review PR found with url={url}");
-                }
-            }
-            (None, Some(window)) => {
-                let n = stmt.execute(rusqlite::params![window, url])?;
-                if n == 0 {
-                    anyhow::bail!("patch_review_pr: no review PR found with url={url}");
-                }
-            }
-            (None, None) => unreachable!(),
-        }
-        Ok(())
     }
 }
 
@@ -1180,15 +1199,18 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         id: TaskId(row.get("id")?),
         title: row.get("title")?,
         description: row.get("description")?,
-        repo_path: RepoPath(row.get::<_, String>("repo_path")?),
+        repo_path: row.get("repo_path")?,
         status,
-        worktree: row.get::<_, Option<String>>("worktree")?.map(WorktreePath),
-        tmux_window: row.get::<_, Option<String>>("tmux_window")?.map(TmuxWindow),
+        worktree: row.get("worktree")?,
+        tmux_window: row.get("tmux_window")?,
         plan: row.get("plan")?,
         epic_id: row.get::<_, Option<i64>>("epic_id")
             .unwrap_or(None)
             .map(EpicId),
-        needs_input: row.get::<_, i64>("needs_input").unwrap_or(0) != 0,
+        sub_status: row.get::<_, String>("sub_status")
+            .ok()
+            .and_then(|s| SubStatus::parse(&s))
+            .unwrap_or(SubStatus::None),
         pr_url: row.get::<_, Option<String>>("pr_url").unwrap_or(None),
         tag: row.get::<_, Option<String>>("tag").unwrap_or(None),
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
@@ -1206,7 +1228,7 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         id: EpicId(row.get("id")?),
         title: row.get("title")?,
         description: row.get("description")?,
-        repo_path: RepoPath(row.get::<_, String>("repo_path")?),
+        repo_path: row.get("repo_path")?,
         done: done_int != 0,
         plan: row.get("plan")?,
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
@@ -1243,7 +1265,7 @@ mod tests {
         assert_eq!(task.id, id);
         assert_eq!(task.title, "My Task");
         assert_eq!(task.description, "A description");
-        assert_eq!(task.repo_path, RepoPath("/repo/path".into()));
+        assert_eq!(task.repo_path, "/repo/path");
         assert_eq!(task.status, TaskStatus::Backlog);
         assert!(task.worktree.is_none());
         assert!(task.tmux_window.is_none());
@@ -1376,7 +1398,7 @@ mod tests {
         let db = in_memory_db();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 15, "fresh DB should be at schema version 15");
+        assert_eq!(version, 16, "fresh DB should be at schema version 16");
     }
 
     #[test]
@@ -1427,7 +1449,7 @@ mod tests {
 
         // Version should be latest
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 16);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn
@@ -1490,7 +1512,7 @@ mod tests {
         assert_eq!(status, "backlog");
 
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 16);
     }
 
     #[test]
@@ -1525,7 +1547,7 @@ mod tests {
         let task = db.create_task_returning("Title", "Desc", "/repo", None, TaskStatus::Backlog).unwrap();
         assert_eq!(task.title, "Title");
         assert_eq!(task.description, "Desc");
-        assert_eq!(task.repo_path, RepoPath("/repo".into()));
+        assert_eq!(task.repo_path, "/repo");
         assert_eq!(task.status, TaskStatus::Backlog);
         assert!(task.worktree.is_none());
         assert!(task.tmux_window.is_none());
@@ -1661,8 +1683,8 @@ mod tests {
             .tmux_window(Some("session:1-my-task"));
         db.patch_task(id, &patch).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
-        assert_eq!(task.worktree.as_ref().map(|w| w.as_ref()), Some("/repo/.worktrees/1-my-task"));
-        assert_eq!(task.tmux_window, Some(TmuxWindow("session:1-my-task".into())));
+        assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
+        assert_eq!(task.tmux_window.as_deref(), Some("session:1-my-task"));
     }
 
     #[test]
@@ -1703,8 +1725,46 @@ mod tests {
         db.patch_task(id, &patch).unwrap();
         let task = db.get_task(id).unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Running);
-        assert_eq!(task.worktree.as_ref().map(|w| w.as_ref()), Some("/repo/.worktrees/1-my-task"));
-        assert_eq!(task.tmux_window, Some(TmuxWindow("session:1-my-task".into())));
+        assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-my-task"));
+        assert_eq!(task.tmux_window.as_deref(), Some("session:1-my-task"));
+    }
+
+    #[test]
+    fn task_patch_status_auto_resets_sub_status() {
+        // Calling .status() without .sub_status() should still produce a valid pair
+        let patch = TaskPatch::new().status(TaskStatus::Review);
+        assert_eq!(patch.status, Some(TaskStatus::Review));
+        assert_eq!(patch.sub_status, Some(SubStatus::AwaitingReview));
+    }
+
+    #[test]
+    fn task_patch_status_running_defaults_to_active() {
+        let patch = TaskPatch::new().status(TaskStatus::Running);
+        assert_eq!(patch.sub_status, Some(SubStatus::Active));
+    }
+
+    #[test]
+    fn task_patch_status_sub_status_can_override_default() {
+        // Explicitly chaining .sub_status() after .status() overrides the auto-reset
+        let patch = TaskPatch::new()
+            .status(TaskStatus::Review)
+            .sub_status(SubStatus::Approved);
+        assert_eq!(patch.status, Some(TaskStatus::Review));
+        assert_eq!(patch.sub_status, Some(SubStatus::Approved));
+    }
+
+    #[test]
+    fn patch_task_status_change_resets_sub_status_in_db() {
+        // End-to-end: after a status-only patch, sub_status in DB reflects the new default
+        let db = Database::open_in_memory().unwrap();
+        let id = db.create_task("T", "d", "/r", None, TaskStatus::Running).unwrap();
+        db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale)).unwrap();
+
+        db.patch_task(id, &TaskPatch::default().status(TaskStatus::Review)).unwrap();
+
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Review);
+        assert_eq!(task.sub_status, SubStatus::AwaitingReview);
     }
 
     #[test]
@@ -1746,7 +1806,7 @@ mod tests {
         let epic = db.create_epic("Auth Rewrite", "Rewrite auth", "/repo").unwrap();
         assert_eq!(epic.title, "Auth Rewrite");
         assert_eq!(epic.description, "Rewrite auth");
-        assert_eq!(epic.repo_path, RepoPath("/repo".into()));
+        assert_eq!(epic.repo_path, "/repo");
         assert!(!epic.done);
 
         let fetched = db.get_epic(epic.id).unwrap().unwrap();
@@ -2002,8 +2062,6 @@ mod tests {
             deletions: 5,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec!["bug".to_string()],
-            tmux_window: None,
-            review_notes: None,
         };
         let pr2 = ReviewPr {
             number: 99,
@@ -2018,8 +2076,6 @@ mod tests {
             deletions: 80,
             review_decision: ReviewDecision::Approved,
             labels: vec![],
-            tmux_window: None,
-            review_notes: None,
         };
 
         db.save_review_prs(&[pr1, pr2]).unwrap();
@@ -2043,7 +2099,7 @@ mod tests {
     }
 
     #[test]
-    fn save_review_prs_upserts() {
+    fn save_review_prs_replaces_all() {
         use crate::models::{ReviewDecision, ReviewPr};
         use chrono::Utc;
 
@@ -2062,13 +2118,11 @@ mod tests {
             deletions: 0,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec![],
-            tmux_window: None,
-            review_notes: None,
         };
         db.save_review_prs(&[pr1]).unwrap();
         assert_eq!(db.load_review_prs().unwrap().len(), 1);
 
-        // Save new set — upsert keeps existing rows and adds new ones
+        // Save new set — old ones should be gone
         let pr2 = ReviewPr {
             number: 2,
             title: "New PR".to_string(),
@@ -2082,137 +2136,312 @@ mod tests {
             deletions: 3,
             review_decision: ReviewDecision::ChangesRequested,
             labels: vec!["urgent".to_string()],
-            tmux_window: None,
-            review_notes: None,
         };
         db.save_review_prs(&[pr2]).unwrap();
 
         let loaded = db.load_review_prs().unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert!(loaded.iter().any(|p| p.number == 1));
-        assert!(loaded.iter().any(|p| p.number == 2 && p.repo == "acme/other"));
-    }
-
-    #[test]
-    fn save_review_prs_preserves_agent_fields_on_upsert() {
-        use crate::models::{ReviewDecision, ReviewPr};
-        use chrono::Utc;
-
-        let db = Database::open_in_memory().unwrap();
-
-        let pr = ReviewPr {
-            number: 1,
-            title: "Original".to_string(),
-            author: "alice".to_string(),
-            repo: "acme/app".to_string(),
-            url: "https://github.com/acme/app/pull/1".to_string(),
-            is_draft: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            additions: 10,
-            deletions: 2,
-            review_decision: ReviewDecision::ReviewRequired,
-            labels: vec![],
-            tmux_window: Some("review-app-1".to_string()),
-            review_notes: Some("Looks good".to_string()),
-        };
-        db.save_review_prs(&[pr]).unwrap();
-
-        // Simulate a GitHub refresh: same PR, no agent fields
-        let refreshed = ReviewPr {
-            number: 1,
-            title: "Updated title".to_string(),
-            author: "alice".to_string(),
-            repo: "acme/app".to_string(),
-            url: "https://github.com/acme/app/pull/1".to_string(),
-            is_draft: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            additions: 10,
-            deletions: 2,
-            review_decision: ReviewDecision::ReviewRequired,
-            labels: vec![],
-            tmux_window: None,
-            review_notes: None,
-        };
-        db.save_review_prs(&[refreshed]).unwrap();
-
-        let loaded = db.load_review_prs().unwrap();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].title, "Updated title"); // GitHub data updated
-        assert_eq!(loaded[0].tmux_window.as_deref(), Some("review-app-1")); // agent field preserved
-        assert_eq!(loaded[0].review_notes.as_deref(), Some("Looks good")); // notes preserved
+        assert_eq!(loaded[0].number, 2);
+        assert_eq!(loaded[0].repo, "acme/other");
     }
 
     #[test]
-    fn patch_review_pr_saves_notes_and_clears_window() {
-        use crate::models::{ReviewDecision, ReviewPr};
-        use chrono::Utc;
-
+    fn task_sub_status_persists() {
         let db = Database::open_in_memory().unwrap();
-
-        let pr = ReviewPr {
-            number: 42,
-            title: "T".to_string(),
-            author: "bob".to_string(),
-            repo: "acme/app".to_string(),
-            url: "https://github.com/acme/app/pull/42".to_string(),
-            is_draft: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            additions: 5,
-            deletions: 1,
-            review_decision: ReviewDecision::ReviewRequired,
-            labels: vec![],
-            tmux_window: Some("review-app-42".to_string()),
-            review_notes: None,
-        };
-        db.save_review_prs(&[pr]).unwrap();
-
-        db.patch_review_pr("https://github.com/acme/app/pull/42", Some(Some("Great PR")), Some(None::<&str>)).unwrap();
-
-        let loaded = db.load_review_prs().unwrap();
-        assert_eq!(loaded[0].review_notes.as_deref(), Some("Great PR"));
-        assert_eq!(loaded[0].tmux_window, None);
+        let id = db.create_task("Test", "desc", "/repo", None, TaskStatus::Running).unwrap();
+        db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale)).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.sub_status, SubStatus::Stale);
     }
 
     #[test]
-    fn patch_review_pr_sets_tmux_window() {
-        use crate::models::{ReviewDecision, ReviewPr};
-        use chrono::Utc;
-
+    fn task_sub_status_defaults_to_none() {
         let db = Database::open_in_memory().unwrap();
-
-        let pr = ReviewPr {
-            number: 7,
-            title: "T".to_string(),
-            author: "carol".to_string(),
-            repo: "acme/app".to_string(),
-            url: "https://github.com/acme/app/pull/7".to_string(),
-            is_draft: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            additions: 0,
-            deletions: 0,
-            review_decision: ReviewDecision::ReviewRequired,
-            labels: vec![],
-            tmux_window: None,
-            review_notes: None,
-        };
-        db.save_review_prs(&[pr]).unwrap();
-
-        db.patch_review_pr("https://github.com/acme/app/pull/7", None::<Option<&str>>, Some(Some("review-app-7"))).unwrap();
-
-        let loaded = db.load_review_prs().unwrap();
-        assert_eq!(loaded[0].tmux_window.as_deref(), Some("review-app-7"));
-        assert_eq!(loaded[0].review_notes, None);
+        let id = db.create_task("Test", "desc", "/repo", None, TaskStatus::Backlog).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.sub_status, SubStatus::None);
     }
 
     #[test]
-    fn patch_review_pr_errors_on_missing_url() {
+    fn migration_13_converts_needs_input() {
+        // Simulate a database at version 12 with needs_input column
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE tasks (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 description TEXT NOT NULL,
+                 repo_path TEXT NOT NULL,
+                 status TEXT NOT NULL DEFAULT 'backlog',
+                 worktree TEXT,
+                 tmux_window TEXT,
+                 plan TEXT,
+                 epic_id INTEGER,
+                 needs_input INTEGER NOT NULL DEFAULT 0,
+                 pr_url TEXT,
+                 sort_order INTEGER,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE repo_paths (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT NOT NULL UNIQUE,
+                 last_used TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE epics (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 description TEXT NOT NULL,
+                 repo_path TEXT NOT NULL,
+                 done INTEGER NOT NULL DEFAULT 0,
+                 plan TEXT,
+                 sort_order INTEGER,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE settings (
+                 key TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );
+             CREATE TABLE task_usage (
+                 task_id            INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+                 cost_usd           REAL    NOT NULL DEFAULT 0.0,
+                 input_tokens       INTEGER NOT NULL DEFAULT 0,
+                 output_tokens      INTEGER NOT NULL DEFAULT 0,
+                 cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+                 cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                 updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE filter_presets (
+                 name       TEXT PRIMARY KEY,
+                 repo_paths TEXT NOT NULL
+             );
+             PRAGMA user_version = 12;",
+        ).unwrap();
+
+        // Insert tasks with various states
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status, needs_input) VALUES ('Blocked', 'desc', '/r', 'running', 1)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status, needs_input) VALUES ('Active', 'desc', '/r', 'running', 0)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status, needs_input) VALUES ('InReview', 'desc', '/r', 'review', 0)",
+            [],
+        ).unwrap();
+
+        // Run migration
+        Database::init_schema(&conn).unwrap();
+
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 16);
+
+        // Verify needs_input=1 became sub_status='needs_input'
+        let ss: String = conn.query_row(
+            "SELECT sub_status FROM tasks WHERE id = 1", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(ss, "needs_input");
+
+        // Verify running task with needs_input=0 became 'active'
+        let ss: String = conn.query_row(
+            "SELECT sub_status FROM tasks WHERE id = 2", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(ss, "active");
+
+        // Verify review task became 'awaiting_review'
+        let ss: String = conn.query_row(
+            "SELECT sub_status FROM tasks WHERE id = 3", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(ss, "awaiting_review");
+
+        // Verify needs_input column no longer exists
+        let has_needs_input = conn.prepare("SELECT needs_input FROM tasks LIMIT 1").is_ok();
+        assert!(!has_needs_input, "needs_input column should be removed after migration");
+    }
+
+    #[test]
+    fn create_task_sets_default_sub_status_for_running() {
+        // create_task with status=Running must produce sub_status=active, not 'none'
+        let db = in_memory_db();
+        let id = db.create_task("T", "d", "/r", None, TaskStatus::Running).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.sub_status, SubStatus::Active);
+    }
+
+    #[test]
+    fn create_task_sets_default_sub_status_for_backlog() {
+        let db = in_memory_db();
+        let id = db.create_task("T", "d", "/r", None, TaskStatus::Backlog).unwrap();
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.sub_status, SubStatus::None);
+    }
+
+    #[test]
+    fn update_status_if_resets_sub_status_to_default() {
+        let db = in_memory_db();
+        let id = db.create_task("T", "d", "/r", None, TaskStatus::Running).unwrap();
+        db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale)).unwrap();
+
+        let updated = db.update_status_if(id, TaskStatus::Review, TaskStatus::Running).unwrap();
+        assert!(updated, "should have updated");
+
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Review);
+        assert_eq!(task.sub_status, SubStatus::AwaitingReview); // default for review
+    }
+
+    #[test]
+    fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
+        let db = in_memory_db();
+        let id = db.create_task("T", "d", "/r", None, TaskStatus::Running).unwrap();
+        db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Active)).unwrap();
+
+        let updated = db.update_status_if(id, TaskStatus::Review, TaskStatus::Backlog).unwrap();
+        assert!(!updated, "condition was wrong, should not have updated");
+
+        let task = db.get_task(id).unwrap().unwrap();
+        assert_eq!(task.sub_status, SubStatus::Active); // unchanged
+    }
+
+    #[test]
+    fn schema_version_is_16() {
         let db = Database::open_in_memory().unwrap();
-        let result = db.patch_review_pr("https://github.com/x/y/pull/999", Some(Some("notes")), None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("no review PR found"));
+        let conn = db.conn.lock().unwrap();
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 16, "fresh DB should be at schema version 16");
+    }
+
+    #[test]
+    fn check_constraint_rejects_review_with_active_substatus() {
+        let db = Database::open_in_memory().unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
+             VALUES ('T', 'D', '/r', 'backlog', 'none')",
+            [],
+        ).unwrap();
+        let result = conn.execute(
+            "UPDATE tasks SET status = 'review', sub_status = 'active' WHERE id = 1",
+            [],
+        );
+        assert!(result.is_err(), "CHECK constraint must reject (review, active)");
+    }
+
+    #[test]
+    fn check_constraint_accepts_review_with_awaiting_review() {
+        let db = Database::open_in_memory().unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
+             VALUES ('T', 'D', '/r', 'backlog', 'none')",
+            [],
+        ).unwrap();
+        let result = conn.execute(
+            "UPDATE tasks SET status = 'review', sub_status = 'awaiting_review' WHERE id = 1",
+            [],
+        );
+        assert!(result.is_ok(), "valid pair should be accepted");
+    }
+
+    #[test]
+    fn migration_16_cleans_invalid_review_needs_input() {
+        // Simulate a v15 DB that has (review, needs_input) rows from old hook behavior
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE tasks (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 description TEXT NOT NULL,
+                 repo_path TEXT NOT NULL,
+                 status TEXT NOT NULL DEFAULT 'backlog',
+                 worktree TEXT,
+                 tmux_window TEXT,
+                 plan TEXT,
+                 epic_id INTEGER,
+                 sub_status TEXT NOT NULL DEFAULT 'none',
+                 pr_url TEXT,
+                 tag TEXT,
+                 sort_order INTEGER,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE repo_paths (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT NOT NULL UNIQUE,
+                 last_used TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE epics (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 description TEXT NOT NULL,
+                 repo_path TEXT NOT NULL,
+                 done INTEGER NOT NULL DEFAULT 0,
+                 plan TEXT,
+                 sort_order INTEGER,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE task_usage (
+                 task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+                 cost_usd REAL NOT NULL DEFAULT 0.0,
+                 input_tokens INTEGER NOT NULL DEFAULT 0,
+                 output_tokens INTEGER NOT NULL DEFAULT 0,
+                 cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                 cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE filter_presets (name TEXT PRIMARY KEY, repo_paths TEXT NOT NULL);
+             CREATE TABLE review_prs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 number INTEGER NOT NULL,
+                 title TEXT NOT NULL,
+                 url TEXT NOT NULL,
+                 repo TEXT NOT NULL,
+                 author TEXT NOT NULL,
+                 state TEXT NOT NULL DEFAULT 'open',
+                 review_decision TEXT,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );
+             PRAGMA user_version = 15;",
+        ).unwrap();
+
+        // Insert invalid rows that migration 16 must clean up
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
+             VALUES ('ReviewBlocked', 'desc', '/r', 'review', 'needs_input')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
+             VALUES ('ValidReview', 'desc', '/r', 'review', 'awaiting_review')",
+            [],
+        ).unwrap();
+
+        // Run migrations
+        Database::init_schema(&conn).unwrap();
+
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, 16);
+
+        // (review, needs_input) must be converted to (review, awaiting_review)
+        let ss: String = conn.query_row(
+            "SELECT sub_status FROM tasks WHERE title = 'ReviewBlocked'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(ss, "awaiting_review", "legacy (review, needs_input) must be cleaned up");
+
+        // Valid row must be unchanged
+        let ss2: String = conn.query_row(
+            "SELECT sub_status FROM tasks WHERE title = 'ValidReview'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(ss2, "awaiting_review");
     }
 }

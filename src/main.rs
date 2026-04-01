@@ -40,7 +40,10 @@ enum Commands {
         /// Only update if current status matches this value
         #[arg(long)]
         only_if: Option<String>,
-        /// Mark the task as needing human input (e.g. permission prompt)
+        /// Set the sub-status (e.g. active, needs_input, stale, crashed, awaiting_review)
+        #[arg(long)]
+        sub_status: Option<String>,
+        /// Mark the task as needing human input (deprecated, use --sub-status needs_input)
         #[arg(long)]
         needs_input: bool,
     },
@@ -129,21 +132,38 @@ async fn main() -> Result<()> {
                 .init();
             runtime::run_tui(&cli.db, port, inactivity_timeout).await?;
         }
-        Commands::Update { id, status, only_if, needs_input } => {
+        Commands::Update { id, status, only_if, sub_status, needs_input } => {
             let new_status = parse_status(&status)?;
             let db = db::Database::open(&cli.db)?;
             let task_id = models::TaskId(id);
+
+            // Resolve sub_status: explicit --sub-status takes precedence over --needs-input
+            let resolved_sub_status = if let Some(ref ss) = sub_status {
+                Some(models::SubStatus::parse(ss)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid sub-status: {}", ss))?)
+            } else if needs_input {
+                Some(models::SubStatus::NeedsInput)
+            } else {
+                None
+            };
+
             if let Some(ref condition) = only_if {
                 let expected = parse_status(condition)?;
                 let updated = db.update_status_if(task_id, new_status, expected)?;
                 if updated {
-                    db.patch_task(task_id, &db::TaskPatch::new().needs_input(needs_input))?;
+                    if let Some(ss) = resolved_sub_status {
+                        db.patch_task(task_id, &db::TaskPatch::new().sub_status(ss))?;
+                    }
                     println!("Task {} updated to {}", id, status);
                 } else {
                     println!("Task {} not updated (status is not {})", id, condition);
                 }
             } else {
-                db.patch_task(task_id, &db::TaskPatch::new().status(new_status).needs_input(needs_input))?;
+                let mut patch = db::TaskPatch::new().status(new_status);
+                if let Some(ss) = resolved_sub_status {
+                    patch = patch.sub_status(ss);
+                }
+                db.patch_task(task_id, &patch)?;
                 println!("Task {} updated to {}", id, status);
             }
         }

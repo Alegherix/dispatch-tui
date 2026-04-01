@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::db;
 use crate::dispatch;
-use crate::models::{EpicId, Task, TaskId, TaskStatus, UsageReport};
+use crate::models::{EpicId, SubStatus, Task, TaskId, TaskStatus, UsageReport};
 use crate::mcp::McpState;
 
 use super::types::{JsonRpcResponse, deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args};
@@ -32,6 +32,8 @@ pub(super) struct UpdateTaskArgs {
     pub(super) pr_url: Option<String>,
     #[serde(default)]
     pub(super) tag: Option<String>,
+    #[serde(default)]
+    pub(super) sub_status: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -89,12 +91,6 @@ pub(super) struct WrapUpArgs {
     pub(super) action: String, // "rebase" | "pr"
 }
 
-#[derive(Deserialize)]
-pub(super) struct CompleteReviewArgs {
-    pub(super) url: String,
-    pub(super) notes: String,
-}
-
 // ---------------------------------------------------------------------------
 // Response formatting
 // ---------------------------------------------------------------------------
@@ -108,6 +104,7 @@ fn format_task_detail(task: &Task) -> String {
         repo = task.repo_path,
         desc = task.description,
     );
+    text.push_str(&format!("\nSub-status: {}", task.sub_status.as_str()));
     if let Some(ref epic_id) = task.epic_id {
         text.push_str(&format!("\nEpic: {epic_id}"));
     }
@@ -125,9 +122,6 @@ fn format_task_detail(task: &Task) -> String {
     }
     if let Some(ref tmux_window) = task.tmux_window {
         text.push_str(&format!("\nTmux window: {tmux_window}"));
-    }
-    if task.needs_input {
-        text.push_str("\nNeeds input: yes");
     }
     if let Some(sort_order) = task.sort_order {
         text.push_str(&format!("\nSort order: {sort_order}"));
@@ -158,8 +152,8 @@ fn format_task_line(t: &Task) -> String {
         None => String::new(),
     };
     format!(
-        "- [{}] {} ({}){}{}{}: {}",
-        t.id, t.title, t.status.as_str(), plan_indicator, tag_indicator, epic_indicator, desc_preview
+        "- [{}] {} ({}/{}){}{}{}: {}",
+        t.id, t.title, t.status.as_str(), t.sub_status.as_str(), plan_indicator, tag_indicator, epic_indicator, desc_preview
     )
 }
 
@@ -181,13 +175,14 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
         || parsed.repo_path.is_some()
         || parsed.sort_order.is_some()
         || parsed.pr_url.is_some()
-        || parsed.tag.is_some();
+        || parsed.tag.is_some()
+        || parsed.sub_status.is_some();
 
     if !has_update {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "At least one of status, plan, title, description, repo_path, sort_order, pr_url, or tag must be provided",
+            "At least one of status, plan, title, description, repo_path, sort_order, pr_url, tag, or sub_status must be provided",
         );
     }
 
@@ -242,6 +237,31 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
         patch = patch.tag(Some(t.as_str()));
     }
 
+    if let Some(ref ss_str) = parsed.sub_status {
+        let ss = match SubStatus::parse(ss_str) {
+            Some(ss) => ss,
+            None => return JsonRpcResponse::err(
+                id, -32602,
+                format!("Invalid sub_status: {ss_str}. Valid values: none, active, needs_input, stale, crashed, awaiting_review, changes_requested, approved"),
+            ),
+        };
+        // Validate against current (or new) status
+        let effective_status = parsed.status.as_deref()
+            .and_then(TaskStatus::parse)
+            .or_else(|| {
+                state.db.get_task(TaskId(parsed.task_id)).ok().flatten().map(|t| t.status)
+            });
+        if let Some(eff) = effective_status {
+            if !ss.is_valid_for(eff) {
+                return JsonRpcResponse::err(
+                    id, -32602,
+                    format!("sub_status '{}' is not valid for status '{}'", ss_str, eff.as_str()),
+                );
+            }
+        }
+        patch = patch.sub_status(ss);
+    }
+
     if let Err(e) = state.db.patch_task(TaskId(parsed.task_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }
@@ -257,6 +277,7 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     if parsed.sort_order.is_some() { updated.push("sort_order".to_string()); }
     if parsed.pr_url.is_some() { updated.push("pr_url".to_string()); }
     if parsed.tag.is_some() { updated.push("tag".to_string()); }
+    if parsed.sub_status.is_some() { updated.push("sub_status".to_string()); }
 
     JsonRpcResponse::ok(
         id,
@@ -424,7 +445,7 @@ pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value
         .map(|idx| &parsed.worktree[..idx])
         .unwrap_or(&parsed.worktree);
 
-    if repo_from_worktree != task.repo_path.as_ref() {
+    if repo_from_worktree != task.repo_path {
         return JsonRpcResponse::err(
             id,
             -32602,
@@ -476,28 +497,15 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     };
 
-    if task.status != TaskStatus::Review && task.status != TaskStatus::Running {
+    if !dispatch::is_wrappable(&task) {
         return JsonRpcResponse::err(
             id,
             -32602,
-            format!(
-                "Task {} is '{}', not 'review' or 'running'. Only review/running tasks can be wrapped up.",
-                parsed.task_id,
-                task.status.as_str()
-            ),
+            format!("Task {} cannot be wrapped up. Requires Review status or Running/Blocked with a worktree.", parsed.task_id),
         );
     }
 
-    let worktree = match task.worktree.clone() {
-        Some(wt) => wt,
-        None => {
-            return JsonRpcResponse::err(
-                id,
-                -32602,
-                format!("Task {} has no worktree", parsed.task_id),
-            )
-        }
-    };
+    let worktree = task.worktree.clone().expect("is_wrappable guarantees worktree is Some");
 
     let branch = match dispatch::branch_from_worktree(&worktree) {
         Some(b) => b,
@@ -542,7 +550,7 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
             let rebase_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
                 dispatch::finish_task(
-                    repo_path.as_ref(),
+                    &repo_path,
                     &worktree,
                     &branch,
                     None, // Don't kill tmux yet -- need to return response first
@@ -594,7 +602,7 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
             let description = task.description.clone();
             let pr_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up pr starting");
-                dispatch::create_pr(repo_path.as_ref(), &branch, &title, &description, &*pr_runner)
+                dispatch::create_pr(&repo_path, &branch, &title, &description, &*pr_runner)
             }).await {
                 Ok(r) => r,
                 Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
@@ -682,8 +690,8 @@ fn auto_dispatch_next(
         Ok(dispatch_result) => {
             let patch = db::TaskPatch::new()
                 .status(TaskStatus::Running)
-                .worktree(Some(dispatch_result.worktree_path.as_ref()))
-                .tmux_window(Some(dispatch_result.tmux_window.as_ref()));
+                .worktree(Some(&dispatch_result.worktree_path))
+                .tmux_window(Some(&dispatch_result.tmux_window));
             if let Err(e) = db.patch_task(next_id, &patch) {
                 tracing::warn!(
                     task_id = next_id.0,
@@ -698,45 +706,6 @@ fn auto_dispatch_next(
             );
         }
     }
-}
-
-pub(super) async fn handle_complete_review(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
-    let parsed = match parse_args::<CompleteReviewArgs>(&id, args) {
-        Ok(a) => a,
-        Err(resp) => return resp,
-    };
-    tracing::info!(url = %parsed.url, "MCP complete_review");
-
-    // Load PRs to get the tmux_window before clearing it
-    let prs = match state.db.load_review_prs() {
-        Ok(prs) => prs,
-        Err(e) => return JsonRpcResponse::err(id, -32603, format!("DB error: {e}")),
-    };
-    let tmux_window = prs.iter()
-        .find(|p| p.url == parsed.url)
-        .and_then(|p| p.tmux_window.clone());
-
-    // Save notes and clear tmux_window
-    if let Err(e) = state.db.patch_review_pr(
-        &parsed.url,
-        Some(Some(parsed.notes.as_str())),
-        Some(None),
-    ) {
-        return JsonRpcResponse::err(id, -32603, format!("Failed to save review notes: {e}"));
-    }
-
-    // Kill the tmux window
-    if let Some(window) = &tmux_window {
-        if let Err(e) = state.runner.run("tmux", &["kill-window", "-t", window]) {
-            tracing::warn!("Failed to kill review tmux window {window}: {e}");
-        }
-    }
-
-    state.notify();
-
-    JsonRpcResponse::ok(id, json!({
-        "content": [{"type": "text", "text": format!("Review complete for {}", parsed.url)}]
-    }))
 }
 
 pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {

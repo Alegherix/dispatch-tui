@@ -103,6 +103,129 @@ impl std::str::FromStr for TaskStatus {
 }
 
 // ---------------------------------------------------------------------------
+// SubStatus
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubStatus {
+    None,
+    Active,
+    NeedsInput,
+    Stale,
+    Crashed,
+    AwaitingReview,
+    ChangesRequested,
+    Approved,
+}
+
+impl SubStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SubStatus::None => "none",
+            SubStatus::Active => "active",
+            SubStatus::NeedsInput => "needs_input",
+            SubStatus::Stale => "stale",
+            SubStatus::Crashed => "crashed",
+            SubStatus::AwaitingReview => "awaiting_review",
+            SubStatus::ChangesRequested => "changes_requested",
+            SubStatus::Approved => "approved",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "none" => Some(SubStatus::None),
+            "active" => Some(SubStatus::Active),
+            "needs_input" => Some(SubStatus::NeedsInput),
+            "stale" => Some(SubStatus::Stale),
+            "crashed" => Some(SubStatus::Crashed),
+            "awaiting_review" => Some(SubStatus::AwaitingReview),
+            "changes_requested" => Some(SubStatus::ChangesRequested),
+            "approved" => Some(SubStatus::Approved),
+            _ => None,
+        }
+    }
+
+    /// Check whether this sub-status is valid for the given parent status.
+    pub fn is_valid_for(&self, status: TaskStatus) -> bool {
+        match status {
+            TaskStatus::Backlog => matches!(self, SubStatus::None),
+            TaskStatus::Running => matches!(
+                self,
+                SubStatus::Active | SubStatus::NeedsInput | SubStatus::Stale | SubStatus::Crashed
+            ),
+            TaskStatus::Review => matches!(
+                self,
+                SubStatus::AwaitingReview | SubStatus::ChangesRequested | SubStatus::Approved
+            ),
+            TaskStatus::Done => matches!(self, SubStatus::None),
+            TaskStatus::Archived => matches!(self, SubStatus::None),
+        }
+    }
+
+    /// Return the default sub-status for a given parent status.
+    pub fn default_for(status: TaskStatus) -> Self {
+        match status {
+            TaskStatus::Backlog => SubStatus::None,
+            TaskStatus::Running => SubStatus::Active,
+            TaskStatus::Review => SubStatus::AwaitingReview,
+            TaskStatus::Done => SubStatus::None,
+            TaskStatus::Archived => SubStatus::None,
+        }
+    }
+}
+
+impl std::fmt::Display for SubStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SubStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown sub-status: {s}"))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VisualColumn — the 8 visual columns for the kanban board
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct VisualColumn {
+    pub label: &'static str,
+    pub parent_status: TaskStatus,
+    pub sub_statuses: &'static [SubStatus],
+}
+
+impl VisualColumn {
+    pub const COUNT: usize = 8;
+    pub const ALL: &'static [VisualColumn] = &[
+        VisualColumn { label: "Backlog",    parent_status: TaskStatus::Backlog,  sub_statuses: &[SubStatus::None] },
+        VisualColumn { label: "Active",     parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::Active] },
+        VisualColumn { label: "Blocked",    parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::NeedsInput] },
+        VisualColumn { label: "Stale",      parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::Stale, SubStatus::Crashed] },
+        VisualColumn { label: "PR Created", parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::AwaitingReview] },
+        VisualColumn { label: "Revise",     parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::ChangesRequested] },
+        VisualColumn { label: "Approved",   parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::Approved] },
+        VisualColumn { label: "Done",       parent_status: TaskStatus::Done,     sub_statuses: &[SubStatus::None] },
+    ];
+
+    pub fn contains(&self, sub_status: SubStatus) -> bool {
+        self.sub_statuses.contains(&sub_status)
+    }
+
+    pub fn parent_group_start(status: TaskStatus) -> usize {
+        Self::ALL.iter().position(|vc| vc.parent_status == status).unwrap_or(0)
+    }
+
+    pub fn parent_group_span(status: TaskStatus) -> usize {
+        Self::ALL.iter().filter(|vc| vc.parent_status == status).count()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TaskId
 // ---------------------------------------------------------------------------
 
@@ -129,64 +252,6 @@ impl std::fmt::Display for EpicId {
 }
 
 // ---------------------------------------------------------------------------
-// TmuxWindow
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct TmuxWindow(pub String);
-
-impl std::fmt::Display for TmuxWindow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl AsRef<str> for TmuxWindow {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-// ---------------------------------------------------------------------------
-// WorktreePath
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct WorktreePath(pub String);
-
-impl std::fmt::Display for WorktreePath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl AsRef<str> for WorktreePath {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-
-// ---------------------------------------------------------------------------
-// RepoPath
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct RepoPath(pub String);
-
-impl std::fmt::Display for RepoPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl AsRef<str> for RepoPath {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Epic
 // ---------------------------------------------------------------------------
 
@@ -195,7 +260,7 @@ pub struct Epic {
     pub id: EpicId,
     pub title: String,
     pub description: String,
-    pub repo_path: RepoPath,
+    pub repo_path: String,
     pub done: bool,
     pub plan: Option<String>,
     pub sort_order: Option<i64>,
@@ -333,8 +398,6 @@ pub struct ReviewPr {
     pub deletions: i64,
     pub review_decision: ReviewDecision,
     pub labels: Vec<String>,
-    pub tmux_window: Option<String>,
-    pub review_notes: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -346,13 +409,13 @@ pub struct Task {
     pub id: TaskId,
     pub title: String,
     pub description: String,
-    pub repo_path: RepoPath,
+    pub repo_path: String,
     pub status: TaskStatus,
-    pub worktree: Option<WorktreePath>,
-    pub tmux_window: Option<TmuxWindow>,
+    pub worktree: Option<String>,
+    pub tmux_window: Option<String>,
     pub plan: Option<String>,
     pub epic_id: Option<EpicId>,
-    pub needs_input: bool,
+    pub sub_status: SubStatus,
     pub pr_url: Option<String>,
     pub tag: Option<String>,
     pub sort_order: Option<i64>,
@@ -366,8 +429,8 @@ pub struct Task {
 
 #[derive(Debug, Clone)]
 pub struct DispatchResult {
-    pub worktree_path: WorktreePath,
-    pub tmux_window: TmuxWindow,
+    pub worktree_path: String,
+    pub tmux_window: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -376,7 +439,7 @@ pub struct DispatchResult {
 
 #[derive(Debug, Clone)]
 pub struct ResumeResult {
-    pub tmux_window: TmuxWindow,
+    pub tmux_window: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +661,139 @@ mod tests {
     fn column_index_out_of_range() {
         assert!(TaskStatus::from_column_index(4).is_none());
         assert!(TaskStatus::from_column_index(999).is_none());
+    }
+
+    // --- SubStatus ---
+
+    #[test]
+    fn substatus_roundtrip() {
+        let all = [
+            SubStatus::None,
+            SubStatus::Active,
+            SubStatus::NeedsInput,
+            SubStatus::Stale,
+            SubStatus::Crashed,
+            SubStatus::AwaitingReview,
+            SubStatus::ChangesRequested,
+            SubStatus::Approved,
+        ];
+        for sub in all {
+            let s = sub.as_str();
+            let parsed: SubStatus = s.parse().unwrap_or_else(|e| panic!("roundtrip failed for {s}: {e}"));
+            assert_eq!(sub, parsed, "roundtrip failed for {s}");
+        }
+    }
+
+    #[test]
+    fn substatus_as_str_is_snake_case() {
+        assert_eq!(SubStatus::None.as_str(), "none");
+        assert_eq!(SubStatus::Active.as_str(), "active");
+        assert_eq!(SubStatus::NeedsInput.as_str(), "needs_input");
+        assert_eq!(SubStatus::Stale.as_str(), "stale");
+        assert_eq!(SubStatus::Crashed.as_str(), "crashed");
+        assert_eq!(SubStatus::AwaitingReview.as_str(), "awaiting_review");
+        assert_eq!(SubStatus::ChangesRequested.as_str(), "changes_requested");
+        assert_eq!(SubStatus::Approved.as_str(), "approved");
+    }
+
+    #[test]
+    fn substatus_from_str_invalid() {
+        assert!("bogus".parse::<SubStatus>().is_err());
+        assert!("".parse::<SubStatus>().is_err());
+        assert!("None".parse::<SubStatus>().is_err(), "should be case-sensitive");
+    }
+
+    #[test]
+    fn substatus_display() {
+        assert_eq!(format!("{}", SubStatus::NeedsInput), "needs_input");
+        assert_eq!(format!("{}", SubStatus::AwaitingReview), "awaiting_review");
+    }
+
+    #[test]
+    fn substatus_valid_combinations() {
+        // Backlog: only None
+        assert!(SubStatus::None.is_valid_for(TaskStatus::Backlog));
+        assert!(!SubStatus::Active.is_valid_for(TaskStatus::Backlog));
+        assert!(!SubStatus::NeedsInput.is_valid_for(TaskStatus::Backlog));
+        assert!(!SubStatus::AwaitingReview.is_valid_for(TaskStatus::Backlog));
+
+        // Running: Active, NeedsInput, Stale, Crashed
+        assert!(!SubStatus::None.is_valid_for(TaskStatus::Running));
+        assert!(SubStatus::Active.is_valid_for(TaskStatus::Running));
+        assert!(SubStatus::NeedsInput.is_valid_for(TaskStatus::Running));
+        assert!(SubStatus::Stale.is_valid_for(TaskStatus::Running));
+        assert!(SubStatus::Crashed.is_valid_for(TaskStatus::Running));
+        assert!(!SubStatus::AwaitingReview.is_valid_for(TaskStatus::Running));
+
+        // Review: AwaitingReview, ChangesRequested, Approved
+        assert!(!SubStatus::None.is_valid_for(TaskStatus::Review));
+        assert!(!SubStatus::Active.is_valid_for(TaskStatus::Review));
+        assert!(SubStatus::AwaitingReview.is_valid_for(TaskStatus::Review));
+        assert!(SubStatus::ChangesRequested.is_valid_for(TaskStatus::Review));
+        assert!(SubStatus::Approved.is_valid_for(TaskStatus::Review));
+
+        // Done: only None
+        assert!(SubStatus::None.is_valid_for(TaskStatus::Done));
+        assert!(!SubStatus::Active.is_valid_for(TaskStatus::Done));
+
+        // Archived: only None
+        assert!(SubStatus::None.is_valid_for(TaskStatus::Archived));
+        assert!(!SubStatus::Active.is_valid_for(TaskStatus::Archived));
+    }
+
+    #[test]
+    fn substatus_default_for() {
+        assert_eq!(SubStatus::default_for(TaskStatus::Backlog), SubStatus::None);
+        assert_eq!(SubStatus::default_for(TaskStatus::Running), SubStatus::Active);
+        assert_eq!(SubStatus::default_for(TaskStatus::Review), SubStatus::AwaitingReview);
+        assert_eq!(SubStatus::default_for(TaskStatus::Done), SubStatus::None);
+        assert_eq!(SubStatus::default_for(TaskStatus::Archived), SubStatus::None);
+    }
+
+    // --- VisualColumn ---
+
+    #[test]
+    fn visual_columns_count_is_8() {
+        assert_eq!(VisualColumn::ALL.len(), 8);
+        assert_eq!(VisualColumn::COUNT, 8);
+        assert_eq!(VisualColumn::ALL.len(), VisualColumn::COUNT);
+    }
+
+    #[test]
+    fn visual_column_parent_status_mapping() {
+        assert_eq!(VisualColumn::ALL[0].parent_status, TaskStatus::Backlog);
+        assert_eq!(VisualColumn::ALL[1].parent_status, TaskStatus::Running);
+        assert_eq!(VisualColumn::ALL[2].parent_status, TaskStatus::Running);
+        assert_eq!(VisualColumn::ALL[3].parent_status, TaskStatus::Running);
+        assert_eq!(VisualColumn::ALL[4].parent_status, TaskStatus::Review);
+        assert_eq!(VisualColumn::ALL[5].parent_status, TaskStatus::Review);
+        assert_eq!(VisualColumn::ALL[6].parent_status, TaskStatus::Review);
+        assert_eq!(VisualColumn::ALL[7].parent_status, TaskStatus::Done);
+    }
+
+    #[test]
+    fn visual_column_contains_substatus() {
+        // Column 3 ("Stale") contains Stale and Crashed, but not Active
+        let stale_col = &VisualColumn::ALL[3];
+        assert!(stale_col.contains(SubStatus::Stale));
+        assert!(stale_col.contains(SubStatus::Crashed));
+        assert!(!stale_col.contains(SubStatus::Active));
+    }
+
+    #[test]
+    fn visual_column_parent_group_start() {
+        assert_eq!(VisualColumn::parent_group_start(TaskStatus::Backlog), 0);
+        assert_eq!(VisualColumn::parent_group_start(TaskStatus::Running), 1);
+        assert_eq!(VisualColumn::parent_group_start(TaskStatus::Review), 4);
+        assert_eq!(VisualColumn::parent_group_start(TaskStatus::Done), 7);
+    }
+
+    #[test]
+    fn visual_column_parent_group_span() {
+        assert_eq!(VisualColumn::parent_group_span(TaskStatus::Backlog), 1);
+        assert_eq!(VisualColumn::parent_group_span(TaskStatus::Running), 3);
+        assert_eq!(VisualColumn::parent_group_span(TaskStatus::Review), 3);
+        assert_eq!(VisualColumn::parent_group_span(TaskStatus::Done), 1);
     }
 
     // --- slugify ---
@@ -869,13 +1065,13 @@ mod tests {
             id: TaskId(1),
             title: "Test".to_string(),
             description: "Desc".to_string(),
-            repo_path: RepoPath("/repo".into()),
+            repo_path: "/repo".to_string(),
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
             plan: None,
             epic_id: None,
-            needs_input: false,
+            sub_status: SubStatus::None,
             pr_url: None,
             tag: None,
             sort_order: None,
@@ -892,13 +1088,13 @@ mod tests {
             id: TaskId(1),
             title: "Test".to_string(),
             description: "Desc".to_string(),
-            repo_path: RepoPath("/repo".into()),
+            repo_path: "/repo".to_string(),
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
             plan: None,
             epic_id: Some(EpicId(5)),
-            needs_input: false,
+            sub_status: SubStatus::None,
             pr_url: None,
             tag: None,
             sort_order: None,
@@ -915,7 +1111,7 @@ mod tests {
             id: EpicId(1),
             title: "Auth Rewrite".to_string(),
             description: "Rewrite auth system".to_string(),
-            repo_path: RepoPath("/repo".into()),
+            repo_path: "/repo".to_string(),
             done: false,
             plan: None,
             sort_order: None,
@@ -931,7 +1127,7 @@ mod tests {
     fn make_epic_for_status(done: bool) -> Epic {
         Epic {
             id: EpicId(1), title: String::new(), description: String::new(),
-            repo_path: RepoPath::default(), done, plan: None, sort_order: None,
+            repo_path: String::new(), done, plan: None, sort_order: None,
             created_at: Utc::now(), updated_at: Utc::now(),
         }
     }
@@ -1084,29 +1280,6 @@ mod tests {
                 .unwrap_or_else(|| panic!("failed to parse db str: {s}"));
             assert_eq!(parsed, decision);
         }
-    }
-
-    #[test]
-    fn review_pr_has_agent_fields() {
-        use chrono::Utc;
-        let pr = ReviewPr {
-            number: 1,
-            title: "T".to_string(),
-            author: "a".to_string(),
-            repo: "o/r".to_string(),
-            url: "https://github.com/o/r/pull/1".to_string(),
-            is_draft: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            additions: 0,
-            deletions: 0,
-            review_decision: ReviewDecision::ReviewRequired,
-            labels: vec![],
-            tmux_window: Some("review-r-1".to_string()),
-            review_notes: Some("LGTM".to_string()),
-        };
-        assert_eq!(pr.tmux_window.as_deref(), Some("review-r-1"));
-        assert_eq!(pr.review_notes.as_deref(), Some("LGTM"));
     }
 
 }

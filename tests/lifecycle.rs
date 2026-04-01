@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use dispatch_agent::db::{self, Database, TaskStore};
-use dispatch_agent::models::{RepoPath, Task, TaskId, TaskStatus, TmuxWindow, WorktreePath};
+use dispatch_agent::models::{Task, TaskId, TaskStatus};
 use dispatch_agent::tui::{App, Command, Message, MoveDirection};
 
 fn make_app() -> (App, Database) {
@@ -21,8 +21,8 @@ fn execute(db: &Database, cmds: &[Command]) {
                     task.id,
                     &db::TaskPatch::new()
                         .status(task.status)
-                        .worktree(task.worktree.as_ref().map(|w| w.as_ref()))
-                        .tmux_window(task.tmux_window.as_ref().map(|w| w.as_ref())),
+                        .worktree(task.worktree.as_deref())
+                        .tmux_window(task.tmux_window.as_deref()),
                 );
             }
             Command::DeleteTask(id) => {
@@ -47,13 +47,13 @@ fn full_lifecycle() {
             id: task_id,
             title: "Fix auth bug".to_string(),
             description: "Users can't log in".to_string(),
-            repo_path: RepoPath("/repo".into()),
+            repo_path: "/repo".to_string(),
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
             plan: Some("plan.md".into()),
             epic_id: None,
-            needs_input: false,
+            sub_status: dispatch_agent::models::SubStatus::None,
             pr_url: None,
             tag: None,
             sort_order: None,
@@ -77,14 +77,14 @@ fn full_lifecycle() {
     // Simulate dispatch result → moves to Running
     let cmds = app.update(Message::Dispatched {
         id: task_id,
-        worktree: WorktreePath("/repo/.worktrees/1-fix-auth-bug".into()),
-        tmux_window: TmuxWindow("task-1".into()),
+        worktree: "/repo/.worktrees/1-fix-auth-bug".to_string(),
+        tmux_window: "task-1".to_string(),
         switch_focus: false,
     });
     execute(&db, &cmds);
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     assert_eq!(
-        app.tasks()[0].tmux_window.as_ref().map(|w| w.as_ref()),
+        app.tasks()[0].tmux_window.as_deref(),
         Some("task-1")
     );
 
@@ -94,7 +94,7 @@ fn full_lifecycle() {
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
     // tmux_window is preserved so the worktree can be resumed later
     assert!(app.tasks()[0].tmux_window.is_some());
-    assert!(app.crashed_tasks().contains(&task_id));
+    assert!(app.is_crashed(task_id));
 
     // 4b. Agent advances task to Review via MCP (simulated as MoveTask)
     let cmds = app.update(Message::MoveTask {

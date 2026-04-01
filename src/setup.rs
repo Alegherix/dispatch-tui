@@ -56,7 +56,6 @@ const MCP_PERMISSIONS: &[&str] = &[
     "mcp__dispatch__get_task",
     "mcp__dispatch__create_task",
     "mcp__dispatch__report_usage",
-    "mcp__dispatch__complete_review",
 ];
 
 pub struct PermissionsMergeResult {
@@ -301,8 +300,7 @@ mod tests {
         assert!(allow.contains(&json!("mcp__dispatch__get_task")));
         assert!(allow.contains(&json!("mcp__dispatch__create_task")));
         assert!(allow.contains(&json!("mcp__dispatch__report_usage")));
-        assert!(allow.contains(&json!("mcp__dispatch__complete_review")));
-        assert_eq!(result.added_count, 5);
+        assert_eq!(result.added_count, 4);
     }
 
     #[test]
@@ -319,7 +317,7 @@ mod tests {
         assert!(allow.contains(&json!("Bash(git:*)")));
         assert!(allow.contains(&json!("Read")));
         assert!(allow.contains(&json!("mcp__dispatch__update_task")));
-        assert_eq!(result.added_count, 5);
+        assert_eq!(result.added_count, 4);
         assert_eq!(result.value["permissions"]["defaultMode"], "acceptEdits");
         assert!(result.value["hooks"]["Stop"].is_array());
     }
@@ -332,8 +330,7 @@ mod tests {
                     "mcp__dispatch__update_task",
                     "mcp__dispatch__get_task",
                     "mcp__dispatch__create_task",
-                    "mcp__dispatch__report_usage",
-                    "mcp__dispatch__complete_review"
+                    "mcp__dispatch__report_usage"
                 ]
             }
         }));
@@ -369,6 +366,20 @@ mod tests {
             "hook must extract tool_name from PreToolUse input");
         assert!(HOOK_SCRIPT.contains("mcp__dispatch__"),
             "hook must skip mcp__dispatch__ tools in PreToolUse");
+    }
+
+    #[test]
+    fn hook_script_notification_uses_sub_status_needs_input() {
+        // Notification must NOT change status to review — it keeps running and
+        // sets sub_status=needs_input so the task stays in the Blocked visual column.
+        assert!(
+            HOOK_SCRIPT.contains("--sub-status needs_input"),
+            "Notification handler must use --sub-status needs_input, not --needs-input"
+        );
+        assert!(
+            !HOOK_SCRIPT.contains("--needs-input"),
+            "Deprecated --needs-input flag must not appear in the hook script"
+        );
     }
 
     // -- File I/O --

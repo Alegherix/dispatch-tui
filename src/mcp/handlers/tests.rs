@@ -3,21 +3,20 @@ use std::sync::Arc;
 use axum::{Json, extract::State};
 use serde_json::{Value, json};
 
-use crate::DEFAULT_PORT;
 use crate::db::{self, Database};
 use crate::models::TaskStatus;
 use crate::mcp::McpState;
 use crate::process::{ProcessRunner, MockProcessRunner};
 
 use super::dispatch::{handle_mcp, tool_definitions};
-use super::tasks::{UpdateTaskArgs, GetTaskArgs, CreateTaskWithEpicArgs, ListTasksArgs, ClaimTaskArgs, WrapUpArgs, ReportUsageArgs, CompleteReviewArgs};
+use super::tasks::{UpdateTaskArgs, GetTaskArgs, CreateTaskWithEpicArgs, ListTasksArgs, ClaimTaskArgs, WrapUpArgs, ReportUsageArgs};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
 use super::types::{JsonRpcRequest, JsonRpcResponse};
 
 fn test_state() -> Arc<McpState> {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    Arc::new(McpState { db, notify_tx: None, runner, mcp_port: DEFAULT_PORT })
+    Arc::new(McpState { db, notify_tx: None, runner, mcp_port: 3142 })
 }
 
 async fn call(state: &Arc<McpState>, method: &str, params: Option<Value>) -> JsonRpcResponse {
@@ -461,7 +460,7 @@ async fn update_task_repo_path() {
     assert!(resp.error.is_none(), "should succeed with repo_path only: {:?}", resp.error);
 
     let task = state.db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(task.repo_path.as_ref(), "/new/repo");
+    assert_eq!(task.repo_path, "/new/repo");
     assert_eq!(task.status, crate::models::TaskStatus::Backlog); // unchanged
 }
 
@@ -642,8 +641,8 @@ async fn claim_task_success() {
 
     let task = state.db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
-    assert_eq!(task.worktree.as_ref().map(|w| w.as_ref()), Some("/repo/.worktrees/5-other-task"));
-    assert_eq!(task.tmux_window.as_ref().map(|w| w.as_ref()), Some("task-5"));
+    assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/5-other-task"));
+    assert_eq!(task.tmux_window.as_deref(), Some("task-5"));
 }
 
 #[tokio::test]
@@ -818,9 +817,9 @@ fn tool_schemas_match_arg_structs() {
     let cases: Vec<(&str, BTreeSet<&str>, BTreeSet<&str>, Value)> = vec![
         (
             "update_task",
-            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order", "pr_url", "tag"]),
+            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order", "pr_url", "tag", "sub_status"]),
             BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug"}),
+            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug", "sub_status": "awaiting_review"}),
         ),
         (
             "get_task",
@@ -884,12 +883,6 @@ fn tool_schemas_match_arg_structs() {
             json!({"task_id": 1, "cost_usd": 0.42, "input_tokens": 1000,
                    "output_tokens": 500, "cache_read_tokens": 100, "cache_write_tokens": 50}),
         ),
-        (
-            "complete_review",
-            BTreeSet::from(["url", "notes"]),
-            BTreeSet::from(["url", "notes"]),
-            json!({"url": "https://github.com/o/r/pull/1", "notes": "LGTM"}),
-        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -923,7 +916,6 @@ fn tool_schemas_match_arg_structs() {
             "list_epics" => {} // no args
             "update_epic" => { serde_json::from_value::<UpdateEpicArgs>(payload.clone()).unwrap(); }
             "wrap_up" => { serde_json::from_value::<WrapUpArgs>(payload.clone()).unwrap(); }
-            "complete_review" => { serde_json::from_value::<CompleteReviewArgs>(payload.clone()).unwrap(); }
             other => panic!("No deserialization check for tool: {other}"),
         }
     }
@@ -971,7 +963,7 @@ async fn create_epic_minimal() {
     let epics = state.db.list_epics().unwrap();
     assert_eq!(epics.len(), 1);
     assert_eq!(epics[0].title, "My Epic");
-    assert_eq!(epics[0].repo_path.as_ref(), "/repo");
+    assert_eq!(epics[0].repo_path, "/repo");
 }
 
 #[tokio::test]
@@ -1438,8 +1430,8 @@ async fn claim_task_updates_status_to_running() {
 
     let task = state.db.get_task(crate::models::TaskId(task_id.0)).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
-    assert_eq!(task.worktree.as_ref().map(|w| w.as_ref()), Some("/repo/.worktrees/1-claim"));
-    assert_eq!(task.tmux_window.as_ref().map(|w| w.as_ref()), Some("task-1"));
+    assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/1-claim"));
+    assert_eq!(task.tmux_window.as_deref(), Some("task-1"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1473,24 +1465,25 @@ async fn wrap_up_rejects_backlog_task() {
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     ).await;
-    assert_error(&resp, "not 'review' or 'running'");
+    assert_error(&resp, "cannot be wrapped up");
 }
 
 #[tokio::test]
-async fn wrap_up_accepts_running_task() {
+async fn wrap_up_accepts_running_blocked_task() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                   // detect_default_branch (symbolic-ref fails → "main")
-        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                   // git remote get-url (no remote)
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Running).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
         .worktree(Some("/repo/.worktrees/1-my-task"))
+        .sub_status(crate::models::SubStatus::NeedsInput)
     ).unwrap();
 
     let resp = call(
@@ -1504,8 +1497,25 @@ async fn wrap_up_accepts_running_task() {
 
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up complete"), "Expected 'wrap_up complete', got: {text}");
-    let task = db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(task.status, TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn wrap_up_rejects_running_active_task() {
+    let state = test_state();
+    let task_id = state.db.create_task("T", "d", "/repo", None, TaskStatus::Running).unwrap();
+    state.db.patch_task(task_id, &db::TaskPatch::new()
+        .worktree(Some("/repo/.worktrees/1-t"))
+    ).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "rebase" }
+        })),
+    ).await;
+    assert_error(&resp, "cannot be wrapped up");
 }
 
 #[tokio::test]
@@ -1521,7 +1531,7 @@ async fn wrap_up_task_no_worktree() {
             "arguments": { "task_id": task_id.0, "action": "rebase" }
         })),
     ).await;
-    assert_error(&resp, "no worktree");
+    assert_error(&resp, "cannot be wrapped up");
 }
 
 #[tokio::test]
@@ -1542,16 +1552,16 @@ async fn wrap_up_invalid_action() {
 }
 
 #[tokio::test]
-async fn wrap_up_rebase_success() {
+async fn wrap_up_rebase_returns_started() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                   // detect_default_branch (symbolic-ref fails → "main")
-        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                   // git remote get-url (no remote)
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     let task_id = db.create_task("My Task", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1569,20 +1579,18 @@ async fn wrap_up_rebase_success() {
 
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up complete"), "Expected 'wrap_up complete', got: {text}");
-    let task = db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(task.status, TaskStatus::Done);
 }
 
 #[tokio::test]
-async fn wrap_up_pr_success() {
+async fn wrap_up_pr_returns_started() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                                          // detect_default_branch
+        MockProcessRunner::fail(""),                                          // detect_default_branch (symbolic-ref)
         MockProcessRunner::ok(),                                              // git push
         MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
         MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/7\n"), // gh pr create
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     let task_id = db.create_task("My Feature", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1600,10 +1608,6 @@ async fn wrap_up_pr_success() {
 
     let text = extract_response_text(&resp);
     assert!(text.contains("wrap_up complete"), "Expected 'wrap_up complete', got: {text}");
-    assert!(text.contains("pr_url: https://github.com/org/repo/pull/7"), "Expected PR URL, got: {text}");
-    let task = db.get_task(task_id).unwrap().unwrap();
-    assert_eq!(task.status, TaskStatus::Review);
-    assert_eq!(task.pr_url.as_deref(), Some("https://github.com/org/repo/pull/7"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1614,14 +1618,14 @@ async fn wrap_up_pr_success() {
 async fn wrap_up_rebase_no_epic_skips_auto_dispatch() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                   // detect_default_branch
-        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                   // git remote get-url (no remote)
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
         // No auto-dispatch calls expected
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     let task_id = db.create_task("Solo Task", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1651,8 +1655,8 @@ async fn wrap_up_rebase_auto_dispatches_next_epic_task() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         // Rebase calls for current task
-        MockProcessRunner::fail(""),                   // detect_default_branch
-        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                   // git remote get-url (no remote)
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
@@ -1662,7 +1666,7 @@ async fn wrap_up_rebase_auto_dispatches_next_epic_task() {
         MockProcessRunner::ok(), // tmux send-keys -l (literal text)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     // Create epic and two subtasks
     let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
@@ -1689,7 +1693,7 @@ async fn wrap_up_rebase_auto_dispatches_next_epic_task() {
     assert!(text.contains("next epic task"), "Expected auto-dispatch mention, got: {text}");
     assert!(text.contains(&format!("#{}", task2_id.0)), "Expected next task ID in message, got: {text}");
 
-    // Wait for fire-and-forget spawn_blocking (auto-dispatch) to complete
+    // Wait for spawn_blocking to complete
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     // Verify the next task was dispatched
@@ -1703,13 +1707,13 @@ async fn wrap_up_rebase_auto_dispatches_next_epic_task() {
 async fn wrap_up_rebase_no_backlog_tasks_skips_dispatch() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                   // detect_default_branch
-        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
+        MockProcessRunner::fail(""),                   // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
         MockProcessRunner::fail(""),                   // git remote get-url (no remote)
         MockProcessRunner::ok(),                       // git rebase main
         MockProcessRunner::ok(),                       // git merge --ff-only
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     // Create epic with only one task (already in review — no backlog subtasks)
     let epic = db.create_epic("Test Epic", "desc", "/repo").unwrap();
@@ -1733,10 +1737,132 @@ async fn wrap_up_rebase_no_backlog_tasks_skips_dispatch() {
 }
 
 // ---------------------------------------------------------------------------
-// wrap_up error-path tests
+// sub_status tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+async fn update_task_sets_sub_status() {
+    let state = test_state();
+    let task_id = state.db.create_task("T", "desc", "/repo", None, TaskStatus::Running).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "sub_status": "needs_input" }
+        })),
+    ).await;
+    assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
+    let text = extract_response_text(&resp);
+    assert!(text.contains("sub_status"), "response should mention sub_status: {text}");
+
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.sub_status, crate::models::SubStatus::NeedsInput);
+}
+
+#[tokio::test]
+async fn update_task_rejects_invalid_sub_status_for_status() {
+    let state = test_state();
+    let task_id = state.db.create_task("T", "desc", "/repo", None, TaskStatus::Running).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "sub_status": "approved" }
+        })),
+    ).await;
+    assert_error(&resp, "not valid for status");
+}
+
+#[tokio::test]
+async fn update_task_rejects_bogus_sub_status() {
+    let state = test_state();
+    let task_id = state.db.create_task("T", "desc", "/repo", None, TaskStatus::Running).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "sub_status": "bogus" }
+        })),
+    ).await;
+    assert_error(&resp, "Invalid sub_status");
+}
+
+#[tokio::test]
+async fn update_task_sub_status_with_status_change() {
+    let state = test_state();
+    let task_id = state.db.create_task("T", "desc", "/repo", None, TaskStatus::Running).unwrap();
+
+    // Change status to review and set sub_status to approved in one call
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "status": "review", "sub_status": "approved" }
+        })),
+    ).await;
+    assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
+
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Review);
+    assert_eq!(task.sub_status, crate::models::SubStatus::Approved);
+}
+
+#[tokio::test]
+async fn update_task_sub_status_invalid_for_new_status() {
+    let state = test_state();
+    let task_id = state.db.create_task("T", "desc", "/repo", None, TaskStatus::Running).unwrap();
+
+    // Change status to review but set sub_status to active (valid for running, not review)
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": { "task_id": task_id.0, "status": "review", "sub_status": "active" }
+        })),
+    ).await;
+    assert_error(&resp, "not valid for status");
+}
+
+#[tokio::test]
+async fn list_tasks_shows_sub_status() {
+    let state = test_state();
+    let task_id = state.db.create_task("Listed Task", "desc", "/repo", None, TaskStatus::Running).unwrap();
+    state.db.patch_task(task_id, &db::TaskPatch::new().sub_status(crate::models::SubStatus::NeedsInput)).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+    ).await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("running/needs_input"), "expected running/needs_input in list output, got: {text}");
+}
+
+#[tokio::test]
+async fn get_task_shows_sub_status() {
+    let state = test_state();
+    let task_id = state.db.create_task("Detail Task", "desc", "/repo", None, TaskStatus::Review).unwrap();
+    state.db.patch_task(task_id, &db::TaskPatch::new().sub_status(crate::models::SubStatus::ChangesRequested)).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    ).await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Sub-status: changes_requested"), "expected sub-status in detail, got: {text}");
+}
 async fn wrap_up_rebase_conflict_returns_error() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
@@ -1746,7 +1872,7 @@ async fn wrap_up_rebase_conflict_returns_error() {
         MockProcessRunner::fail("CONFLICT (content): Merge conflict in foo.rs"), // git rebase
         MockProcessRunner::ok(),                       // git rebase --abort
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     let task_id = db.create_task("Conflict Task", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1774,7 +1900,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
         MockProcessRunner::fail(""),                       // detect_default_branch
         MockProcessRunner::ok_with_stdout(b"feature\n"),   // git rev-parse HEAD (not on main)
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     let task_id = db.create_task("Wrong Branch", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1802,7 +1928,7 @@ async fn wrap_up_pr_push_fails_returns_error() {
         MockProcessRunner::fail(""),                        // detect_default_branch
         MockProcessRunner::fail("remote: Permission denied"), // git push fails
     ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: crate::DEFAULT_PORT });
 
     let task_id = db.create_task("Push Fail", "desc", "/repo", None, TaskStatus::Review).unwrap();
     db.patch_task(task_id, &db::TaskPatch::new()
@@ -1822,59 +1948,4 @@ async fn wrap_up_pr_push_fails_returns_error() {
     let task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Review, "Task should remain Review on push failure");
     assert!(task.pr_url.is_none(), "No PR URL should be set on failure");
-}
-
-// =======================================================================
-// complete_review tool tests
-// =======================================================================
-
-#[tokio::test]
-async fn complete_review_saves_notes_and_returns_ok() {
-    use crate::models::{ReviewDecision, ReviewPr};
-    use chrono::Utc;
-
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    // Queue one ok() response for the tmux kill-window call
-    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(),
-    ]));
-    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
-
-    // Seed a review PR
-    let pr = ReviewPr {
-        number: 10,
-        title: "Review me".to_string(),
-        author: "alice".to_string(),
-        repo: "acme/app".to_string(),
-        url: "https://github.com/acme/app/pull/10".to_string(),
-        is_draft: false,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        additions: 5,
-        deletions: 1,
-        review_decision: ReviewDecision::ReviewRequired,
-        labels: vec![],
-        tmux_window: Some("review-app-10".to_string()),
-        review_notes: None,
-    };
-    state.db.save_review_prs(&[pr]).unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "complete_review",
-            "arguments": {
-                "url": "https://github.com/acme/app/pull/10",
-                "notes": "Looks great! Minor nit on line 42."
-            }
-        })),
-    ).await;
-
-    assert!(resp.error.is_none(), "expected success, got error: {:?}", resp.error);
-
-    // Verify notes saved and window cleared
-    let loaded = state.db.load_review_prs().unwrap();
-    assert_eq!(loaded[0].review_notes.as_deref(), Some("Looks great! Minor nit on line 42."));
-    assert_eq!(loaded[0].tmux_window, None);
 }

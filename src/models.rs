@@ -139,6 +139,18 @@ pub enum SubStatus {
 }
 
 impl SubStatus {
+    pub const ALL: &'static [SubStatus] = &[
+        SubStatus::None,
+        SubStatus::Active,
+        SubStatus::NeedsInput,
+        SubStatus::Stale,
+        SubStatus::Crashed,
+        SubStatus::Conflict,
+        SubStatus::AwaitingReview,
+        SubStatus::ChangesRequested,
+        SubStatus::Approved,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             SubStatus::None => "none",
@@ -218,7 +230,7 @@ impl SubStatus {
     /// Label for section header lines within a column.
     pub fn header_label(self) -> &'static str {
         match self {
-            SubStatus::None => "active",
+            SubStatus::None => "",
             SubStatus::Active => "active",
             SubStatus::NeedsInput => "needs input",
             SubStatus::Stale => "stale",
@@ -838,17 +850,7 @@ mod tests {
 
     #[test]
     fn substatus_roundtrip() {
-        let all = [
-            SubStatus::None,
-            SubStatus::Active,
-            SubStatus::NeedsInput,
-            SubStatus::Stale,
-            SubStatus::Crashed,
-            SubStatus::AwaitingReview,
-            SubStatus::ChangesRequested,
-            SubStatus::Approved,
-        ];
-        for sub in all {
+        for &sub in SubStatus::ALL {
             let s = sub.as_str();
             let parsed: SubStatus = s
                 .parse()
@@ -864,6 +866,7 @@ mod tests {
         assert_eq!(SubStatus::NeedsInput.as_str(), "needs_input");
         assert_eq!(SubStatus::Stale.as_str(), "stale");
         assert_eq!(SubStatus::Crashed.as_str(), "crashed");
+        assert_eq!(SubStatus::Conflict.as_str(), "conflict");
         assert_eq!(SubStatus::AwaitingReview.as_str(), "awaiting_review");
         assert_eq!(SubStatus::ChangesRequested.as_str(), "changes_requested");
         assert_eq!(SubStatus::Approved.as_str(), "approved");
@@ -933,6 +936,44 @@ mod tests {
             SubStatus::default_for(TaskStatus::Archived),
             SubStatus::None
         );
+    }
+
+    #[test]
+    fn substatus_rules_consistent_with_visual_columns() {
+        // Every SubStatus in a VisualColumn must be valid for that column's parent_status
+        for vc in VisualColumn::ALL {
+            for &sub in vc.sub_statuses {
+                assert!(
+                    sub.is_valid_for(vc.parent_status),
+                    "{sub:?} in column {:?} but not valid for {:?}",
+                    vc.label,
+                    vc.parent_status
+                );
+            }
+        }
+        // Every valid (status, substatus) pair must appear in exactly one VisualColumn
+        for &status in TaskStatus::ALL {
+            for &sub in SubStatus::ALL {
+                if sub.is_valid_for(status) {
+                    let count = VisualColumn::ALL
+                        .iter()
+                        .filter(|vc| vc.parent_status == status && vc.contains(sub))
+                        .count();
+                    assert_eq!(
+                        count, 1,
+                        "{sub:?}/{status:?} is valid but appears in {count} VisualColumns"
+                    );
+                }
+            }
+        }
+        // default_for() must be valid
+        for &status in TaskStatus::ALL {
+            let default = SubStatus::default_for(status);
+            assert!(
+                default.is_valid_for(status),
+                "default_for({status:?}) = {default:?} is not valid"
+            );
+        }
     }
 
     // --- VisualColumn ---

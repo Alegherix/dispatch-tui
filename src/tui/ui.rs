@@ -342,6 +342,146 @@ fn format_task_title(task: &Task, max_title: usize) -> String {
     truncate(&task.title, max_title)
 }
 
+// ---------------------------------------------------------------------------
+// CardIndicator — what to show on line 2 of a task card
+// ---------------------------------------------------------------------------
+
+/// Classifies a task's current state into a single display indicator.
+/// Priority order matters: conflict > detached-review > crashed > stale >
+/// blocked > detached-running > running > review-pr > done-merged > idle.
+enum CardIndicator {
+    Conflict,
+    DetachedReview { pr_label: String },
+    Detached,
+    Crashed,
+    Stale { inactive_mins: u64 },
+    Blocked,
+    Running,
+    ReviewPr { pr_label: String },
+    DoneMerged { pr_label: String },
+    Idle {
+        status: TaskStatus,
+        age: String,
+        staleness: Staleness,
+        plan_indicator: &'static str,
+        tag_suffix: &'static str,
+    },
+}
+
+fn classify_card_indicator(
+    task: &Task,
+    status: TaskStatus,
+    app: &App,
+    now: DateTime<Utc>,
+) -> CardIndicator {
+    let has_worktree_no_window = task.worktree.is_some() && task.tmux_window.is_none();
+    let is_detached = has_worktree_no_window
+        && matches!(status, TaskStatus::Running | TaskStatus::Review)
+        && task.sub_status != SubStatus::Conflict;
+
+    if task.sub_status == SubStatus::Conflict {
+        return CardIndicator::Conflict;
+    }
+    if is_detached {
+        if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
+            let pr_label = crate::models::pr_number_from_url(pr_url)
+                .map_or("PR".to_string(), |n| format!("PR #{n}"));
+            return CardIndicator::DetachedReview { pr_label };
+        }
+        return CardIndicator::Detached;
+    }
+    if task.sub_status == SubStatus::Crashed {
+        return CardIndicator::Crashed;
+    }
+    if task.sub_status == SubStatus::Stale {
+        let inactive_mins = app
+            .agents
+            .last_output_change
+            .get(&task.id)
+            .map(|t| t.elapsed().as_secs() / 60)
+            .unwrap_or(0);
+        return CardIndicator::Stale { inactive_mins };
+    }
+    if status == TaskStatus::Running && task.sub_status == SubStatus::NeedsInput {
+        return CardIndicator::Blocked;
+    }
+    if status == TaskStatus::Running {
+        return CardIndicator::Running;
+    }
+    if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
+        let pr_label = crate::models::pr_number_from_url(pr_url)
+            .map_or("PR".to_string(), |n| format!("PR #{n}"));
+        return CardIndicator::ReviewPr { pr_label };
+    }
+    if let (TaskStatus::Done, Some(pr_url)) = (status, task.pr_url.as_deref()) {
+        let pr_label = crate::models::pr_number_from_url(pr_url)
+            .map_or("PR".to_string(), |n| format!("PR #{n}"));
+        return CardIndicator::DoneMerged { pr_label };
+    }
+
+    let age = format_age(task.updated_at, now);
+    let staleness = Staleness::from_age(task.updated_at, now);
+    let plan_indicator = if task.plan.is_some() && status == TaskStatus::Backlog {
+        "▸ "
+    } else {
+        ""
+    };
+    let tag_suffix = match task.tag.as_deref() {
+        Some("bug") => " [bug]",
+        Some("feature") => " [feat]",
+        Some("chore") => " [chore]",
+        Some("epic") => " [epic]",
+        _ => "",
+    };
+    CardIndicator::Idle {
+        status,
+        age,
+        staleness,
+        plan_indicator,
+        tag_suffix,
+    }
+}
+
+fn render_card_indicator(indicator: CardIndicator) -> Line<'static> {
+    let (label, color) = match indicator {
+        CardIndicator::Conflict => ("\u{26a0} rebase conflict".to_string(), Color::Red),
+        CardIndicator::DetachedReview { pr_label } => {
+            (format!("\u{25cb} {pr_label}"), Color::Cyan)
+        }
+        CardIndicator::Detached => ("\u{25cb} detached".to_string(), MUTED),
+        CardIndicator::Crashed => ("\u{26a0} crashed".to_string(), Color::Red),
+        CardIndicator::Stale { inactive_mins } => (
+            format!("\u{25c9} stale \u{00b7} {}m", inactive_mins),
+            Color::Yellow,
+        ),
+        CardIndicator::Blocked => ("\u{25c9} blocked".to_string(), Color::Yellow),
+        CardIndicator::Running => {
+            (format!("{} running", status_icon(TaskStatus::Running)), CYAN)
+        }
+        CardIndicator::ReviewPr { pr_label } => (pr_label, Color::Cyan),
+        CardIndicator::DoneMerged { pr_label } => {
+            (format!("\u{2714} {pr_label} merged"), Color::Green)
+        }
+        CardIndicator::Idle {
+            status,
+            age,
+            staleness,
+            plan_indicator,
+            tag_suffix,
+        } => {
+            let icon = status_icon(status);
+            (
+                format!("{plan_indicator}{icon} {age}{tag_suffix}"),
+                staleness_color(staleness),
+            )
+        }
+    };
+    Line::from(vec![
+        Span::raw("   "),
+        Span::styled(label, Style::default().fg(color)),
+    ])
+}
+
 /// Build a styled two-line ListItem for a task card in a kanban column.
 /// Line 1: stripe + title
 /// Line 2: status icon + age/activity metadata
@@ -375,117 +515,7 @@ fn build_task_list_item<'a>(
         Span::styled(title_text.to_string(), title_style),
     ]);
 
-    // Line 2: metadata
-    let is_conflict = task.sub_status == SubStatus::Conflict;
-    let is_crashed = task.sub_status == SubStatus::Crashed;
-    let is_stale = task.sub_status == SubStatus::Stale;
-    let is_detached = task.worktree.is_some()
-        && task.tmux_window.is_none()
-        && matches!(status, TaskStatus::Running | TaskStatus::Review)
-        && !is_conflict;
-
-    let line2 = if is_conflict {
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled("\u{26a0} rebase conflict", Style::default().fg(Color::Red)),
-        ])
-    } else if is_detached {
-        let (label, color) = match (status, task.pr_url.as_deref()) {
-            (TaskStatus::Review, Some(pr_url)) => {
-                let pr_label = crate::models::pr_number_from_url(pr_url)
-                    .map_or("PR".to_string(), |n| format!("PR #{n}"));
-                (format!("\u{25cb} {pr_label}"), Color::Cyan)
-            }
-            _ => ("\u{25cb} detached".to_string(), MUTED),
-        };
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled(label, Style::default().fg(color)),
-        ])
-    } else if is_crashed {
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled("\u{26a0} crashed", Style::default().fg(Color::Red)),
-        ])
-    } else if is_stale {
-        let mins = app
-            .agents
-            .last_output_change
-            .get(&task.id)
-            .map(|t| t.elapsed().as_secs() / 60)
-            .unwrap_or(0);
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled(
-                format!("\u{25c9} stale \u{00b7} {}m", mins),
-                Style::default().fg(Color::Yellow),
-            ),
-        ])
-    } else if status == TaskStatus::Running && task.sub_status == SubStatus::NeedsInput {
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled("\u{25c9} blocked", Style::default().fg(Color::Yellow)),
-        ])
-    } else if status == TaskStatus::Running && task.tmux_window.is_none() && task.worktree.is_some()
-    {
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled("\u{25cc} detached", Style::default().fg(MUTED_LIGHT)),
-        ])
-    } else if status == TaskStatus::Running {
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled(
-                format!("{} running", status_icon(status)),
-                Style::default().fg(CYAN),
-            ),
-        ])
-    } else if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
-        let pr_label = crate::models::pr_number_from_url(pr_url)
-            .map_or("PR".to_string(), |n| format!("PR #{n}"));
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled(pr_label, Style::default().fg(Color::Cyan)),
-        ])
-    } else if let (TaskStatus::Done, Some(pr_url)) = (status, task.pr_url.as_deref()) {
-        let pr_label = crate::models::pr_number_from_url(pr_url)
-            .map_or("PR".to_string(), |n| format!("PR #{n}"));
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled(
-                format!("\u{2714} {pr_label} merged"),
-                Style::default().fg(Color::Green),
-            ),
-        ])
-    } else {
-        let age = format_age(task.updated_at, now);
-        let staleness = Staleness::from_age(task.updated_at, now);
-        let plan_indicator = if task.plan.is_some() && status == TaskStatus::Backlog {
-            "▸ "
-        } else {
-            ""
-        };
-        let tag_suffix = match task.tag.as_deref() {
-            Some("bug") => " [bug]",
-            Some("feature") => " [feat]",
-            Some("chore") => " [chore]",
-            Some("epic") => " [epic]",
-            _ => "",
-        };
-        Line::from(vec![
-            Span::raw("   "),
-            Span::styled(
-                format!(
-                    "{}{} {}{}",
-                    plan_indicator,
-                    status_icon(status),
-                    age,
-                    tag_suffix
-                ),
-                Style::default().fg(staleness_color(staleness)),
-            ),
-        ])
-    };
+    let line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
 
     // Build two-line ListItem
     let mut item = ListItem::new(vec![line1, line2]);

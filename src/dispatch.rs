@@ -1658,6 +1658,178 @@ mod tests {
         // Should not have a "pull" call
         assert!(!calls.iter().any(|c| c.1.contains(&"pull".to_string())));
     }
+
+    // --- dispatch_review_agent tests ---
+
+    #[test]
+    fn review_agent_returns_early_when_window_exists() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let repo_short = dir.path().file_name().unwrap().to_str().unwrap();
+        let tmux_window = format!("review-{repo_short}-99");
+
+        let mock = MockProcessRunner::new(vec![
+            // has_window: list-windows returns the window name
+            MockProcessRunner::ok_with_stdout(tmux_window.as_bytes()),
+        ]);
+
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1, "only list-windows should be called");
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "list-windows");
+        assert_eq!(result.tmux_window, tmux_window);
+        let expected_worktree = format!("{repo_path}/.worktrees/review-99");
+        assert_eq!(result.worktree_path, expected_worktree);
+    }
+
+    #[test]
+    fn review_agent_skips_worktree_add_when_dir_exists() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        // Pre-create the review worktree directory
+        let worktree_dir = dir.path().join(".worktrees").join("review-99");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
+            MockProcessRunner::ok(),                              // git fetch origin feature-branch
+            // git worktree add is skipped (dir exists)
+            MockProcessRunner::ok(),                              // tmux new-window
+            MockProcessRunner::ok(),                              // tmux send-keys -l
+            MockProcessRunner::ok(),                              // tmux send-keys Enter
+        ]);
+
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "desc", "feature-branch", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        assert!(
+            calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
+            "git worktree add should be skipped when dir exists"
+        );
+        // git fetch should still happen
+        assert_eq!(calls[1].0, "git");
+        assert!(calls[1].1.contains(&"fetch".to_string()));
+        assert!(calls[1].1.contains(&"feature-branch".to_string()));
+        assert_eq!(result.worktree_path, worktree_dir.to_str().unwrap());
+    }
+
+    #[test]
+    fn review_agent_happy_path_writes_prompt_and_launches_claude() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        // Pre-create worktree dir (simulates a previous fetch or existing
+        // worktree — the mock git worktree add can't create dirs on disk)
+        let worktree_dir = dir.path().join(".worktrees").join("review-99");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
+            MockProcessRunner::ok(),                              // git fetch origin feature-branch
+            // git worktree add skipped (dir exists)
+            MockProcessRunner::ok(),                              // tmux new-window
+            MockProcessRunner::ok(),                              // tmux send-keys -l
+            MockProcessRunner::ok(),                              // tmux send-keys Enter
+        ]);
+
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "PR body here", "feature-branch", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        // Verify git fetch
+        assert_eq!(calls[1].0, "git");
+        assert!(calls[1].1.contains(&"fetch".to_string()));
+        assert!(calls[1].1.contains(&"feature-branch".to_string()));
+        // Verify tmux new-window
+        assert_eq!(calls[2].0, "tmux");
+        assert_eq!(calls[2].1[0], "new-window");
+        // Verify send-keys includes claude command
+        assert!(
+            calls[3].1.iter().any(|a| a.contains("claude")),
+            "send-keys should include claude command"
+        );
+
+        // Verify prompt file content
+        let prompt_file = worktree_dir.join(".claude-prompt");
+        let prompt = std::fs::read_to_string(prompt_file).unwrap();
+        assert!(prompt.contains("PR #99"), "prompt should reference PR number");
+        assert!(prompt.contains("Fix it"), "prompt should include PR title");
+        assert!(prompt.contains("PR body here"), "prompt should include PR body");
+        assert!(prompt.contains("gh pr diff 99"), "prompt should instruct reading the diff");
+        assert!(prompt.contains("gh pr review 99"), "prompt should instruct submitting review");
+
+        let repo_short = dir.path().file_name().unwrap().to_str().unwrap();
+        assert_eq!(result.tmux_window, format!("review-{repo_short}-99"));
+    }
+
+    #[test]
+    fn review_agent_calls_worktree_add_when_dir_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        // Do NOT pre-create the review worktree directory
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
+            MockProcessRunner::ok(),                              // git fetch origin feature-branch
+            MockProcessRunner::ok(),                              // git worktree add
+            MockProcessRunner::ok(),                              // tmux new-window
+            // fs::write will fail (mock worktree add doesn't create dir),
+            // but we can still verify the calls made so far
+        ]);
+
+        // The function will error at fs::write since mock doesn't create the dir
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", &mock);
+        assert!(result.is_err());
+
+        let calls = mock.recorded_calls();
+        // Verify git worktree add was called with correct args
+        let wt_call = calls.iter().find(|(prog, args)| prog == "git" && args.contains(&"worktree".to_string()));
+        assert!(wt_call.is_some(), "git worktree add should be called when dir is missing");
+        let (_, args) = wt_call.unwrap();
+        assert!(args.contains(&"add".to_string()));
+        assert!(args.iter().any(|a| a == "origin/feature-branch"));
+    }
+
+    #[test]
+    fn review_agent_fails_when_git_fetch_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"\n"),             // has_window: no match
+            MockProcessRunner::fail("fatal: couldn't find remote ref"), // git fetch fails
+        ]);
+
+        let result = dispatch_review_agent(&repo_path, 99, "Fix it", "body", "nonexistent", &mock);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("git fetch failed"));
+    }
+
+    #[test]
+    fn review_agent_uses_accept_edits_mode() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("review-99");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"\n"),             // has_window: no match
+            MockProcessRunner::ok(),                              // git fetch
+            // worktree exists, skip add
+            MockProcessRunner::ok(),                              // tmux new-window
+            MockProcessRunner::ok(),                              // tmux send-keys -l
+            MockProcessRunner::ok(),                              // tmux send-keys Enter
+        ]);
+
+        dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        assert!(
+            send_keys_arg.contains("--permission-mode acceptEdits"),
+            "review agent should use acceptEdits mode, got: {send_keys_arg}"
+        );
+    }
 }
 
 #[cfg(test)]

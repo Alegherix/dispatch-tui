@@ -6437,6 +6437,33 @@ fn handle_key_normal_jump_to_tmux() {
 }
 
 #[test]
+fn handle_key_normal_open_pr_url() {
+    let mut app = make_app();
+    let task = app.tasks.iter_mut().find(|t| t.id == TaskId(1)).unwrap();
+    task.pr_url = Some("https://github.com/example/repo/pull/42".to_string());
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::OpenInBrowser { url } if url == "https://github.com/example/repo/pull/42"
+    )));
+}
+
+#[test]
+fn handle_key_normal_open_pr_url_missing() {
+    let mut app = make_app();
+    // task 1 has no pr_url by default
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("No PR URL"));
+}
+
+#[test]
 fn handle_key_normal_tab_switches_to_review_board() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Tab));

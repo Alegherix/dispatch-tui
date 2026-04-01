@@ -136,6 +136,18 @@ impl App {
                 }
             }
 
+            KeyCode::Char('p') => {
+                if let Some(task) = self.selected_task() {
+                    if let Some(url) = &task.pr_url {
+                        vec![Command::OpenInBrowser { url: url.clone() }]
+                    } else {
+                        self.update(Message::StatusInfo("No PR URL".to_string()))
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
             KeyCode::Char('a') => self.update(Message::SelectAllColumn),
 
             KeyCode::Char(' ') => {

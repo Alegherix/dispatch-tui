@@ -221,6 +221,24 @@ pub(super) fn tool_definitions() -> Value {
                 }
             },
             {
+                "name": "complete_review",
+                "description": "Save review notes for a GitHub PR and end the review session. Call this when you have finished reviewing a PR.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The GitHub PR URL (e.g. https://github.com/owner/repo/pull/42)"
+                        },
+                        "notes": {
+                            "type": "string",
+                            "description": "Your review summary and findings"
+                        }
+                    },
+                    "required": ["url", "notes"]
+                }
+            },
+            {
                 "name": "report_usage",
                 "description": "Report token usage and cost for a task session. Accumulates across sessions.",
                 "inputSchema": {
@@ -282,6 +300,7 @@ pub async fn handle_mcp(
                 "list_epics" => epics::handle_list_epics(&state, id, args),
                 "update_epic" => epics::handle_update_epic(&state, id, args),
                 "wrap_up" => tasks::handle_wrap_up(&state, id, args).await,
+                "complete_review" => tasks::handle_complete_review(&state, id, args).await,
                 other => JsonRpcResponse::err(id, -32602, format!("Unknown tool: {other}")),
             }
         }

@@ -10,7 +10,7 @@ use crate::mcp::McpState;
 use crate::process::{ProcessRunner, MockProcessRunner};
 
 use super::dispatch::{handle_mcp, tool_definitions};
-use super::tasks::{UpdateTaskArgs, GetTaskArgs, CreateTaskWithEpicArgs, ListTasksArgs, ClaimTaskArgs, WrapUpArgs, ReportUsageArgs};
+use super::tasks::{UpdateTaskArgs, GetTaskArgs, CreateTaskWithEpicArgs, ListTasksArgs, ClaimTaskArgs, WrapUpArgs, ReportUsageArgs, CompleteReviewArgs};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
 use super::types::{JsonRpcRequest, JsonRpcResponse};
 
@@ -884,6 +884,12 @@ fn tool_schemas_match_arg_structs() {
             json!({"task_id": 1, "cost_usd": 0.42, "input_tokens": 1000,
                    "output_tokens": 500, "cache_read_tokens": 100, "cache_write_tokens": 50}),
         ),
+        (
+            "complete_review",
+            BTreeSet::from(["url", "notes"]),
+            BTreeSet::from(["url", "notes"]),
+            json!({"url": "https://github.com/o/r/pull/1", "notes": "LGTM"}),
+        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -917,6 +923,7 @@ fn tool_schemas_match_arg_structs() {
             "list_epics" => {} // no args
             "update_epic" => { serde_json::from_value::<UpdateEpicArgs>(payload.clone()).unwrap(); }
             "wrap_up" => { serde_json::from_value::<WrapUpArgs>(payload.clone()).unwrap(); }
+            "complete_review" => { serde_json::from_value::<CompleteReviewArgs>(payload.clone()).unwrap(); }
             other => panic!("No deserialization check for tool: {other}"),
         }
     }
@@ -1815,4 +1822,59 @@ async fn wrap_up_pr_push_fails_returns_error() {
     let task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Review, "Task should remain Review on push failure");
     assert!(task.pr_url.is_none(), "No PR URL should be set on failure");
+}
+
+// =======================================================================
+// complete_review tool tests
+// =======================================================================
+
+#[tokio::test]
+async fn complete_review_saves_notes_and_returns_ok() {
+    use crate::models::{ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    // Queue one ok() response for the tmux kill-window call
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),
+    ]));
+    let state = Arc::new(McpState { db: db.clone(), notify_tx: None, runner, mcp_port: DEFAULT_PORT });
+
+    // Seed a review PR
+    let pr = ReviewPr {
+        number: 10,
+        title: "Review me".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/10".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 5,
+        deletions: 1,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        tmux_window: Some("review-app-10".to_string()),
+        review_notes: None,
+    };
+    state.db.save_review_prs(&[pr]).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "complete_review",
+            "arguments": {
+                "url": "https://github.com/acme/app/pull/10",
+                "notes": "Looks great! Minor nit on line 42."
+            }
+        })),
+    ).await;
+
+    assert!(resp.error.is_none(), "expected success, got error: {:?}", resp.error);
+
+    // Verify notes saved and window cleared
+    let loaded = state.db.load_review_prs().unwrap();
+    assert_eq!(loaded[0].review_notes.as_deref(), Some("Looks great! Minor nit on line 42."));
+    assert_eq!(loaded[0].tmux_window, None);
 }

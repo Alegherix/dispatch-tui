@@ -89,6 +89,12 @@ pub(super) struct WrapUpArgs {
     pub(super) action: String, // "rebase" | "pr"
 }
 
+#[derive(Deserialize)]
+pub(super) struct CompleteReviewArgs {
+    pub(super) url: String,
+    pub(super) notes: String,
+}
+
 // ---------------------------------------------------------------------------
 // Response formatting
 // ---------------------------------------------------------------------------
@@ -692,6 +698,45 @@ fn auto_dispatch_next(
             );
         }
     }
+}
+
+pub(super) async fn handle_complete_review(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+    let parsed = match parse_args::<CompleteReviewArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    tracing::info!(url = %parsed.url, "MCP complete_review");
+
+    // Load PRs to get the tmux_window before clearing it
+    let prs = match state.db.load_review_prs() {
+        Ok(prs) => prs,
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("DB error: {e}")),
+    };
+    let tmux_window = prs.iter()
+        .find(|p| p.url == parsed.url)
+        .and_then(|p| p.tmux_window.clone());
+
+    // Save notes and clear tmux_window
+    if let Err(e) = state.db.patch_review_pr(
+        &parsed.url,
+        Some(Some(parsed.notes.as_str())),
+        Some(None),
+    ) {
+        return JsonRpcResponse::err(id, -32603, format!("Failed to save review notes: {e}"));
+    }
+
+    // Kill the tmux window
+    if let Some(window) = &tmux_window {
+        if let Err(e) = state.runner.run("tmux", &["kill-window", "-t", window]) {
+            tracing::warn!("Failed to kill review tmux window {window}: {e}");
+        }
+    }
+
+    state.notify();
+
+    JsonRpcResponse::ok(id, json!({
+        "content": [{"type": "text", "text": format!("Review complete for {}", parsed.url)}]
+    }))
 }
 
 pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {

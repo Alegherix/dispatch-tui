@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crate::dispatch;
 use crate::models::{
     self, epic_status, Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus,
-    TaskUsage,
+    TaskUsage, DEFAULT_QUICK_TASK_TITLE,
 };
 
 // ---------------------------------------------------------------------------
@@ -1244,7 +1244,7 @@ impl App {
     ) -> Vec<Command> {
         vec![Command::QuickDispatch {
             draft: TaskDraft {
-                title: "Quick task".to_string(),
+                title: DEFAULT_QUICK_TASK_TITLE.to_string(),
                 description: String::new(),
                 repo_path,
                 tag: None,

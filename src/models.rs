@@ -562,6 +562,8 @@ pub struct ReviewPr {
 // Task
 // ---------------------------------------------------------------------------
 
+pub const DEFAULT_QUICK_TASK_TITLE: &str = "Quick task";
+
 #[derive(Debug, Clone)]
 pub struct Task {
     pub id: TaskId,

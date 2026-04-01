@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::dispatch;
-use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, SubStatus, TaskId, TaskStatus, DEFAULT_QUICK_TASK_TITLE};
 
 /// Check whether a rendered buffer contains the given text anywhere.
 fn buffer_contains(buf: &Buffer, text: &str) -> bool {
@@ -1002,7 +1002,7 @@ fn quick_dispatch_message_emits_command() {
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::QuickDispatch { ref draft, epic_id: None }
-        if draft.title == "Quick task" && draft.repo_path == "/my/repo")
+        if draft.title == DEFAULT_QUICK_TASK_TITLE && draft.repo_path == "/my/repo")
     );
 }
 

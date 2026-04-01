@@ -7338,3 +7338,41 @@ fn my_prs_loaded_updates_state() {
     assert_eq!(app.my_prs()[0].number, 101);
     assert!(!app.my_prs_loading());
 }
+
+#[test]
+fn shift_tab_toggles_review_board_mode() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => assert_eq!(*mode, ReviewBoardMode::Reviewer),
+        _ => panic!("expected ReviewBoard"),
+    }
+    // Toggle to Author
+    app.update(Message::ToggleReviewBoardMode);
+    match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => assert_eq!(*mode, ReviewBoardMode::Author),
+        _ => panic!("expected ReviewBoard"),
+    }
+    // Toggle back to Reviewer
+    app.update(Message::ToggleReviewBoardMode);
+    match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => assert_eq!(*mode, ReviewBoardMode::Reviewer),
+        _ => panic!("expected ReviewBoard"),
+    }
+}
+
+#[test]
+fn toggle_to_author_fetches_my_prs() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let cmds = app.update(Message::ToggleReviewBoardMode);
+    assert!(cmds.iter().any(|c| matches!(c, Command::FetchMyPrs)));
+}
+
+#[test]
+fn toggle_review_board_mode_outside_review_board_is_noop() {
+    let mut app = make_app();
+    let cmds = app.update(Message::ToggleReviewBoardMode);
+    assert!(cmds.is_empty());
+    assert!(matches!(app.view_mode(), ViewMode::Board(_)));
+}

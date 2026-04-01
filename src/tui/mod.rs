@@ -518,6 +518,7 @@ impl App {
             // Review board
             Message::SwitchToReviewBoard => self.handle_switch_to_review_board(),
             Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
+            Message::ToggleReviewBoardMode => self.handle_toggle_review_board_mode(),
             Message::ReviewPrsLoaded(prs) => self.handle_review_prs_loaded(prs),
             Message::ReviewPrsFetchFailed(err) => self.handle_review_prs_fetch_failed(err),
             Message::MyPrsLoaded(prs) => self.handle_my_prs_loaded(prs),
@@ -2036,6 +2037,44 @@ impl App {
             self.view_mode = ViewMode::Board(saved_board.clone());
         }
         vec![]
+    }
+
+    fn handle_toggle_review_board_mode(&mut self) -> Vec<Command> {
+        let ViewMode::ReviewBoard { mode, .. } = &mut self.view_mode else {
+            return vec![];
+        };
+        *mode = match mode {
+            ReviewBoardMode::Reviewer => ReviewBoardMode::Author,
+            ReviewBoardMode::Author => ReviewBoardMode::Reviewer,
+        };
+        self.clamp_review_selection();
+        let mut cmds = vec![];
+        match &self.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => match mode {
+                ReviewBoardMode::Author => {
+                    let needs_fetch = self
+                        .last_my_prs_fetch
+                        .map(|t| t.elapsed() > Duration::from_secs(30))
+                        .unwrap_or(true);
+                    if needs_fetch && !self.my_prs_loading {
+                        self.my_prs_loading = true;
+                        cmds.push(Command::FetchMyPrs);
+                    }
+                }
+                ReviewBoardMode::Reviewer => {
+                    let needs_fetch = self
+                        .last_review_fetch
+                        .map(|t| t.elapsed() > Duration::from_secs(30))
+                        .unwrap_or(true);
+                    if needs_fetch && !self.review_board_loading {
+                        self.review_board_loading = true;
+                        cmds.push(Command::FetchReviewPrs);
+                    }
+                }
+            },
+            _ => {}
+        }
+        cmds
     }
 
     fn handle_review_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {

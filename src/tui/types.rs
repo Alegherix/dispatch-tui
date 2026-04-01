@@ -118,6 +118,7 @@ pub enum Message {
     // Review board
     SwitchToReviewBoard,
     SwitchToTaskBoard,
+    ToggleReviewBoardMode,
     ReviewPrsLoaded(Vec<crate::models::ReviewPr>),
     ReviewPrsFetchFailed(String),
     MyPrsLoaded(Vec<crate::models::ReviewPr>),

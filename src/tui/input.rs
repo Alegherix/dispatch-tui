@@ -787,6 +787,8 @@ impl App {
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
+            KeyCode::BackTab => self.update(Message::ToggleReviewBoardMode),
+
             _ => vec![],
         }
     }

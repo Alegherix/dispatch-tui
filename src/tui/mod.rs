@@ -991,11 +991,12 @@ impl App {
                 let was_review = old_task.is_some_and(|t| t.status == TaskStatus::Review);
 
                 // Detect NeedsInput transition (running tasks only)
-                // TODO: Task 5 will add proper notification dedup for sub_status
                 if new_task.sub_status == SubStatus::NeedsInput
                     && !was_needs_input
                     && new_task.status == TaskStatus::Running
+                    && !self.agents.notified_needs_input.contains(&new_task.id)
                 {
+                    self.agents.notified_needs_input.insert(new_task.id);
                     cmds.push(Command::SendNotification {
                         title: format!("Task #{}: {}", new_task.id.0, new_task.title),
                         body: "Agent needs your input".to_string(),
@@ -1022,6 +1023,9 @@ impl App {
             // suppressing notifications after re-enabling.
             if new_task.status != TaskStatus::Review {
                 self.agents.notified_review.remove(&new_task.id);
+            }
+            if new_task.sub_status != SubStatus::NeedsInput {
+                self.agents.notified_needs_input.remove(&new_task.id);
             }
         }
 

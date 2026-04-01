@@ -364,6 +364,7 @@ pub struct AgentTracking {
     pub last_activity: HashMap<TaskId, u64>,
     pub inactivity_timeout: Duration,
     pub notified_review: HashSet<TaskId>,
+    pub notified_needs_input: HashSet<TaskId>,
     pub last_pr_poll: HashMap<TaskId, Instant>,
 }
 
@@ -375,6 +376,7 @@ impl AgentTracking {
             last_activity: HashMap::new(),
             inactivity_timeout,
             notified_review: HashSet::new(),
+            notified_needs_input: HashSet::new(),
             last_pr_poll: HashMap::new(),
         }
     }
@@ -385,6 +387,7 @@ impl AgentTracking {
         self.last_activity.remove(&id);
         self.tmux_outputs.remove(&id);
         self.notified_review.remove(&id);
+        self.notified_needs_input.remove(&id);
         self.last_pr_poll.remove(&id);
     }
 }

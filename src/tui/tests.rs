@@ -5221,6 +5221,52 @@ fn refresh_tasks_does_not_duplicate_notifications() {
 }
 
 #[test]
+fn refresh_tasks_does_not_duplicate_needs_input_notifications() {
+    let mut app = make_app();
+
+    let mut updated = app.tasks().to_vec();
+    updated[2].sub_status = SubStatus::NeedsInput;
+    app.update(Message::RefreshTasks(updated.clone()));
+    // Second refresh with same state should not re-notify
+    let cmds = app.update(Message::RefreshTasks(updated));
+    let notif_cmds: Vec<_> = cmds
+        .iter()
+        .filter(|c| matches!(c, Command::SendNotification { .. }))
+        .collect();
+    assert_eq!(notif_cmds.len(), 0);
+}
+
+#[test]
+fn refresh_tasks_renotifies_needs_input_after_clearing() {
+    let mut app = make_app();
+
+    // First transition to NeedsInput
+    let mut updated = app.tasks().to_vec();
+    updated[2].sub_status = SubStatus::NeedsInput;
+    let cmds = app.update(Message::RefreshTasks(updated.clone()));
+    assert_eq!(
+        cmds.iter()
+            .filter(|c| matches!(c, Command::SendNotification { .. }))
+            .count(),
+        1
+    );
+
+    // Clear NeedsInput (agent resumes)
+    updated[2].sub_status = SubStatus::Active;
+    app.update(Message::RefreshTasks(updated.clone()));
+
+    // Second transition to NeedsInput should re-notify
+    updated[2].sub_status = SubStatus::NeedsInput;
+    let cmds = app.update(Message::RefreshTasks(updated));
+    assert_eq!(
+        cmds.iter()
+            .filter(|c| matches!(c, Command::SendNotification { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn refresh_tasks_skips_notification_when_disabled() {
     let mut app = make_app();
     app.update(Message::ToggleNotifications); // disable

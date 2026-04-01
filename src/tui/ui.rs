@@ -369,11 +369,28 @@ fn build_task_list_item<'a>(
     let is_conflict = task.sub_status == SubStatus::Conflict;
     let is_crashed = task.sub_status == SubStatus::Crashed;
     let is_stale = task.sub_status == SubStatus::Stale;
+    let is_detached = task.worktree.is_some()
+        && task.tmux_window.is_none()
+        && matches!(status, TaskStatus::Running | TaskStatus::Review)
+        && !is_conflict;
 
     let line2 = if is_conflict {
         Line::from(vec![
             Span::raw("   "),
             Span::styled("\u{26a0} rebase conflict", Style::default().fg(Color::Red)),
+        ])
+    } else if is_detached {
+        let (label, color) = match (status, task.pr_url.as_deref()) {
+            (TaskStatus::Review, Some(pr_url)) => {
+                let pr_label = crate::models::pr_number_from_url(pr_url)
+                    .map_or("PR".to_string(), |n| format!("PR #{n}"));
+                (format!("\u{25cb} {pr_label}"), Color::Cyan)
+            }
+            _ => ("\u{25cb} detached".to_string(), MUTED),
+        };
+        Line::from(vec![
+            Span::raw("   "),
+            Span::styled(label, Style::default().fg(color)),
         ])
     } else if is_crashed {
         Line::from(vec![

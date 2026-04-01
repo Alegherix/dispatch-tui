@@ -2203,6 +2203,69 @@ fn render_stale_task_shows_label() {
     assert!(buffer_contains(&buf, "stale"));
 }
 
+// ---------------------------------------------------------------------------
+// ui.rs — detached indicator
+// ---------------------------------------------------------------------------
+
+#[test]
+fn running_card_with_worktree_no_window_shows_detached() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None;
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "○ detached"), "expected '○ detached'");
+}
+
+#[test]
+fn running_card_with_window_shows_running_not_detached() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = Some("1-fix".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "◉ running"), "expected '◉ running'");
+    assert!(!buffer_contains(&buf, "detached"), "should not show detached");
+}
+
+#[test]
+fn crashed_card_with_no_window_shows_detached_not_crashed() {
+    // Detached out-prioritizes Crashed when tmux_window is None
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Crashed;
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None;
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "○ detached"), "expected '○ detached'");
+    assert!(!buffer_contains(&buf, "\u{26a0} crashed"), "should not show ⚠ crashed");
+}
+
+#[test]
+fn review_card_with_pr_detached_shows_circle_prefix() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.sub_status = SubStatus::AwaitingReview;
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None;
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "○ PR #42"), "expected '○ PR #42'");
+}
+
+#[test]
+fn review_card_with_pr_not_detached_shows_no_prefix() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.sub_status = SubStatus::AwaitingReview;
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = Some("1-fix".to_string());
+    let mut app = App::new(vec![task], Duration::from_secs(300));
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(buffer_contains(&buf, "PR #42"), "expected 'PR #42'");
+    assert!(!buffer_contains(&buf, "○ PR"), "should not show circle prefix");
+}
+
 #[test]
 fn render_does_not_panic_on_small_terminal() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], Duration::from_secs(300));

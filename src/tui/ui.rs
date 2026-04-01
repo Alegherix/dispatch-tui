@@ -1237,7 +1237,8 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("  x", key), Span::styled(" archive    ", desc),
             Span::styled("D", key), Span::styled(" quick dsp  ", desc),
-            Span::styled("g", key), Span::styled(" go to tmux", desc),
+            Span::styled("g", key), Span::styled(" go to tmux  ", desc),
+            Span::styled("p", key), Span::styled(" open PR", desc),
         ]),
         Line::from(vec![
             Span::styled("  H", key), Span::styled(" history    ", desc),

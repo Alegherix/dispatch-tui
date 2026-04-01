@@ -39,19 +39,16 @@ fn classify_review_decision(node: &serde_json::Value, viewer_login: &str) -> Rev
         .filter_map(|c| c["createdAt"].as_str()?.parse::<DateTime<Utc>>().ok())
         .max();
 
-    // Viewer's last COMMENTED review
-    let viewer_last_commented_review = node["reviews"]["nodes"]
+    // Viewer's last review (any state: APPROVED, CHANGES_REQUESTED, COMMENTED)
+    let viewer_last_review = node["reviews"]["nodes"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|r| {
-            r["author"]["login"].as_str() == Some(viewer_login)
-                && r["state"].as_str() == Some("COMMENTED")
-        })
+        .filter(|r| r["author"]["login"].as_str() == Some(viewer_login))
         .filter_map(|r| r["submittedAt"].as_str()?.parse::<DateTime<Utc>>().ok())
         .max();
 
-    let viewer_last_interaction = viewer_last_comment.max(viewer_last_commented_review);
+    let viewer_last_interaction = viewer_last_comment.max(viewer_last_review);
 
     let Some(interaction_at) = viewer_last_interaction else {
         return ReviewDecision::ReviewRequired;
@@ -120,10 +117,10 @@ fn parse_reviewers(node: &serde_json::Value) -> Vec<Reviewer> {
 
 /// Parse the JSON response from `gh api graphql` into a list of ReviewPr.
 ///
-/// The response is expected to contain two aliased search results:
-/// `data.requestedReview.nodes` and `data.alreadyReviewed.nodes`.
-/// Nodes are deduplicated by URL so PRs appearing in both lists are only
-/// included once.
+/// The response is expected to contain three aliased search results:
+/// `data.requestedReview.nodes`, `data.alreadyReviewed.nodes`, and
+/// `data.commented.nodes`. Nodes are deduplicated by URL so PRs appearing
+/// in multiple lists are only included once.
 fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
     let root: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
@@ -136,7 +133,7 @@ fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
     // Collect unique nodes from both aliased searches, deduplicating by URL.
     let mut seen_urls = std::collections::HashSet::new();
     let mut all_nodes: Vec<serde_json::Value> = Vec::new();
-    for alias in &["requestedReview", "alreadyReviewed"] {
+    for alias in &["requestedReview", "alreadyReviewed", "commented"] {
         let path = format!("/data/{alias}/nodes");
         if let Some(nodes) = root.pointer(&path).and_then(|v| v.as_array()) {
             for node in nodes {
@@ -318,13 +315,13 @@ const PR_FIELDS: &str = r#"... on PullRequest {
 
 /// Fetch open PRs where the current user is a requested or past reviewer.
 ///
-/// Uses two aliased GraphQL searches in one request:
+/// Uses three aliased GraphQL searches in one request:
 /// - `requestedReview`: PRs where `review-requested:@me` (pending review)
 /// - `alreadyReviewed`: PRs where `reviewed-by:@me` (already reviewed, may need re-review)
+/// - `commented`: PRs where `commenter:@me` (left comments but no formal review)
 ///
-/// The two result sets are merged and deduplicated by URL client-side.
-/// Uses `gh api graphql` via the provided ProcessRunner.
-/// Bot authors (dependabot, renovate) are excluded server-side.
+/// The three result sets are merged and deduplicated by URL client-side.
+/// Own PRs (`-author:@me`) and bot authors are excluded server-side.
 pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, String> {
     let query = format!(
         r#"{{
@@ -334,7 +331,12 @@ pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, Str
       {PR_FIELDS}
     }}
   }}
-  alreadyReviewed: search(query: "is:pr is:open reviewed-by:@me -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {{
+  alreadyReviewed: search(query: "is:pr is:open reviewed-by:@me -author:@me -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {{
+    nodes {{
+      {PR_FIELDS}
+    }}
+  }}
+  commented: search(query: "is:pr is:open commenter:@me -author:@me -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {{
     nodes {{
       {PR_FIELDS}
     }}
@@ -390,7 +392,8 @@ mod tests {
     use crate::process::MockProcessRunner;
 
     // PR #42 is in requestedReview (pending review), PR #99 is a draft (filtered),
-    // PR #50 is in alreadyReviewed (already reviewed, approved).
+    // PR #50 is in alreadyReviewed (already reviewed, approved),
+    // PR #60 is in commented (only left comments, no formal review).
     const SAMPLE_RESPONSE: &str = r#"{
         "data": {
             "viewer": {"login": "me"},
@@ -452,6 +455,29 @@ mod tests {
                         "commits": {"nodes": [{"commit": {"committedDate": "2026-03-25T12:00:00Z"}}]}
                     }
                 ]
+            },
+            "commented": {
+                "nodes": [
+                    {
+                        "number": 60,
+                        "title": "Add logging to auth",
+                        "url": "https://github.com/acme/backend/pull/60",
+                        "isDraft": false,
+                        "createdAt": "2026-03-26T08:00:00Z",
+                        "updatedAt": "2026-03-29T10:00:00Z",
+                        "additions": 30,
+                        "deletions": 5,
+                        "reviewDecision": "REVIEW_REQUIRED",
+                        "author": {"login": "carol"},
+                        "repository": {"nameWithOwner": "acme/backend"},
+                        "labels": {"nodes": []},
+                        "comments": {"nodes": [
+                            {"author": {"login": "me"}, "createdAt": "2026-03-27T10:00:00Z"}
+                        ]},
+                        "reviews": {"nodes": []},
+                        "commits": {"nodes": [{"commit": {"committedDate": "2026-03-26T08:00:00Z"}}]}
+                    }
+                ]
             }
         }
     }"#;
@@ -459,8 +485,8 @@ mod tests {
     #[test]
     fn parse_review_prs_extracts_all_fields() {
         let prs = parse_review_prs(SAMPLE_RESPONSE).unwrap();
-        // Draft PR #99 is filtered out, leaving 2
-        assert_eq!(prs.len(), 2);
+        // Draft PR #99 is filtered out, leaving 3
+        assert_eq!(prs.len(), 3);
 
         let pr = &prs[0];
         assert_eq!(pr.number, 42);
@@ -479,13 +505,13 @@ mod tests {
     fn parse_review_prs_filters_drafts_and_handles_approved() {
         let prs = parse_review_prs(SAMPLE_RESPONSE).unwrap();
         // Draft PR #99 excluded; #50 (approved) is now index 1
-        assert_eq!(prs.len(), 2);
+        assert_eq!(prs.len(), 3);
         assert_eq!(prs[1].review_decision, ReviewDecision::Approved);
     }
 
     #[test]
     fn parse_review_prs_empty_nodes() {
-        let json = r#"{"data":{"viewer":{"login":"me"},"requestedReview":{"nodes":[]},"alreadyReviewed":{"nodes":[]}}}"#;
+        let json = r#"{"data":{"viewer":{"login":"me"},"requestedReview":{"nodes":[]},"alreadyReviewed":{"nodes":[]},"commented":{"nodes":[]}}}"#;
         let prs = parse_review_prs(json).unwrap();
         assert!(prs.is_empty());
     }
@@ -508,7 +534,7 @@ mod tests {
             "comments": {"nodes": []},
             "reviews": {"nodes": []},
             "commits": {"nodes": []}
-        }]},"alreadyReviewed":{"nodes":[]}}}"#;
+        }]},"alreadyReviewed":{"nodes":[]},"commented":{"nodes":[]}}}"#;
         let prs = parse_review_prs(json).unwrap();
         assert_eq!(prs[0].review_decision, ReviewDecision::ReviewRequired);
     }
@@ -519,7 +545,7 @@ mod tests {
             SAMPLE_RESPONSE.as_bytes(),
         )]);
         let prs = fetch_review_prs(&runner).unwrap();
-        assert_eq!(prs.len(), 2); // draft filtered out
+        assert_eq!(prs.len(), 3); // draft filtered out
 
         let calls = runner.recorded_calls();
         assert_eq!(calls.len(), 1);
@@ -536,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_review_prs_query_includes_both_searches() {
+    fn fetch_review_prs_query_includes_all_searches() {
         let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
             SAMPLE_RESPONSE.as_bytes(),
         )]);
@@ -551,16 +577,19 @@ mod tests {
             query_arg.contains("reviewed-by:@me"),
             "missing reviewed-by qualifier"
         );
+        assert!(
+            query_arg.contains("commenter:@me"),
+            "missing commenter qualifier"
+        );
         assert!(query_arg.contains("-is:draft"));
         assert!(query_arg.contains("-author:app/dependabot"));
         assert!(query_arg.contains("-author:app/renovate"));
-        assert!(query_arg.contains("review-requested:@me"));
-        assert!(query_arg.contains("reviewed-by:@me"));
+        assert!(query_arg.contains("-author:@me"));
     }
 
     #[test]
     fn parse_review_prs_deduplicates_across_aliases() {
-        // PR #42 appears in both aliases — should only be counted once.
+        // PR #42 appears in all three aliases — should only be counted once.
         let json = r#"{
             "data": {
                 "viewer": {"login": "me"},
@@ -576,6 +605,17 @@ mod tests {
                     "reviews": {"nodes": []}, "commits": {"nodes": []}
                 }]},
                 "alreadyReviewed": {"nodes": [{
+                    "number": 42, "title": "Fix login flow",
+                    "url": "https://github.com/acme/app/pull/42",
+                    "isDraft": false,
+                    "createdAt": "2026-03-28T10:00:00Z", "updatedAt": "2026-03-28T10:00:00Z",
+                    "additions": 15, "deletions": 3,
+                    "reviewDecision": "REVIEW_REQUIRED",
+                    "author": {"login": "alice"}, "repository": {"nameWithOwner": "acme/app"},
+                    "labels": {"nodes": []}, "comments": {"nodes": []},
+                    "reviews": {"nodes": []}, "commits": {"nodes": []}
+                }]},
+                "commented": {"nodes": [{
                     "number": 42, "title": "Fix login flow",
                     "url": "https://github.com/acme/app/pull/42",
                     "isDraft": false,
@@ -695,6 +735,26 @@ mod tests {
     }
 
     #[test]
+    fn classify_viewer_approved_review_no_response() {
+        // Viewer approved but overall PR still needs other reviews.
+        let node = make_pr_node(
+            r#"{
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": {"login": "alice"},
+            "comments": {"nodes": []},
+            "reviews": {"nodes": [
+                {"state": "APPROVED", "author": {"login": "me"}, "submittedAt": "2026-03-28T12:00:00Z"}
+            ]},
+            "commits": {"nodes": [{"commit": {"committedDate": "2026-03-27T10:00:00Z"}}]}
+        }"#,
+        );
+        assert_eq!(
+            classify_review_decision(&node, "me"),
+            ReviewDecision::WaitingForResponse,
+        );
+    }
+
+    #[test]
     fn classify_author_comment_after_viewer() {
         let node = make_pr_node(
             r#"{
@@ -774,7 +834,7 @@ mod tests {
             "headRefName": "fix-auth-bug",
             "commits": {"nodes": [{"commit": {"committedDate": "2026-03-28T10:00:00Z", "statusCheckRollup": {"state": "SUCCESS"}}}]},
             "reviewRequests": {"nodes": []}
-        }]},"alreadyReviewed":{"nodes":[]}}}"#;
+        }]},"alreadyReviewed":{"nodes":[]},"commented":{"nodes":[]}}}"#;
         let prs = parse_review_prs(json).unwrap();
         assert_eq!(prs.len(), 1);
         let pr = &prs[0];
@@ -848,7 +908,7 @@ mod tests {
             "comments": {"nodes": []},
             "reviews": {"nodes": []},
             "commits": {"nodes": []}
-        }]},"alreadyReviewed":{"nodes":[]}}}"#;
+        }]},"alreadyReviewed":{"nodes":[]},"commented":{"nodes":[]}}}"#;
         let prs = parse_review_prs(json).unwrap();
         assert!(prs.is_empty());
     }

@@ -1716,7 +1716,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(": save preset  ", note_style),
                 Span::styled("x", key_style),
                 Span::styled(": del preset  ", note_style),
-                Span::styled("Enter/Esc", key_style),
+                Span::styled("q/Enter/Esc", key_style),
                 Span::styled(": close", note_style),
             ]));
         }
@@ -1928,7 +1928,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::RepoFilter => {
-            let bar = Paragraph::new("Filter repos: 1-9 toggle, (a)ll, Enter/Esc close")
+            let bar = Paragraph::new("Filter repos: 1-9 toggle, (a)ll, q/Enter/Esc close")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }

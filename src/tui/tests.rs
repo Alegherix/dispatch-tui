@@ -7424,6 +7424,14 @@ fn handle_key_repo_filter_close_esc() {
 }
 
 #[test]
+fn handle_key_repo_filter_close_q() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert_eq!(*app.mode(), InputMode::Normal);
+}
+
+#[test]
 fn handle_key_normal_dispatch_backlog_task() {
     let mut app = make_app();
     // Select task 1 (backlog)

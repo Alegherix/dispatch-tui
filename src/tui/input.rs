@@ -654,7 +654,9 @@ impl App {
 
     fn handle_key_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseRepoFilter),
+            KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
+                self.update(Message::CloseRepoFilter)
+            }
             KeyCode::Char('a') => self.update(Message::ToggleAllRepoFilter),
             KeyCode::Char('j') | KeyCode::Down => self.update(Message::MoveRepoCursor(1)),
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::MoveRepoCursor(-1)),

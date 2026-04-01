@@ -630,6 +630,35 @@ pub struct Task {
 }
 
 // ---------------------------------------------------------------------------
+// DispatchMode
+// ---------------------------------------------------------------------------
+
+/// Determines how a backlog task should be dispatched based on whether it has
+/// a plan and its tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchMode {
+    Dispatch,
+    Brainstorm,
+    Plan,
+}
+
+impl DispatchMode {
+    /// Select the dispatch mode for a task: tasks with a plan always get
+    /// `Dispatch`; otherwise the tag drives the choice.
+    pub fn for_task(task: &Task) -> Self {
+        if task.plan.is_some() {
+            DispatchMode::Dispatch
+        } else {
+            match task.tag.as_deref() {
+                Some("epic") => DispatchMode::Brainstorm,
+                Some("feature") => DispatchMode::Plan,
+                _ => DispatchMode::Dispatch,
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // DispatchResult
 // ---------------------------------------------------------------------------
 
@@ -1560,4 +1589,62 @@ mod tests {
         assert_eq!(epic_substatus(&epic, &[], None), EpicSubstatus::Done);
     }
 
+    // --- DispatchMode ---
+
+    fn make_task_with(plan: Option<&str>, tag: Option<&str>) -> Task {
+        let now = chrono::Utc::now();
+        Task {
+            id: TaskId(1),
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan: plan.map(String::from),
+            epic_id: None,
+            sub_status: SubStatus::None,
+            pr_url: None,
+            tag: tag.map(String::from),
+            sort_order: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn dispatch_mode_with_plan_always_dispatches() {
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(Some("a plan"), None)),
+            DispatchMode::Dispatch
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(Some("a plan"), Some("epic"))),
+            DispatchMode::Dispatch
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(Some("a plan"), Some("feature"))),
+            DispatchMode::Dispatch
+        );
+    }
+
+    #[test]
+    fn dispatch_mode_without_plan_uses_tag() {
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, Some("epic"))),
+            DispatchMode::Brainstorm
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, Some("feature"))),
+            DispatchMode::Plan
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, Some("chore"))),
+            DispatchMode::Dispatch
+        );
+        assert_eq!(
+            DispatchMode::for_task(&make_task_with(None, None)),
+            DispatchMode::Dispatch
+        );
+    }
 }

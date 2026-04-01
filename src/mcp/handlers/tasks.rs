@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
-use crate::models::{EpicId, SubStatus, Task, TaskId, TaskStatus, UsageReport};
+use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskId, TaskStatus, UsageReport};
 
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, JsonRpcResponse,
@@ -786,14 +786,10 @@ fn auto_dispatch_next(
         "auto-dispatching next epic subtask"
     );
 
-    let result = if next_task.plan.is_some() {
-        dispatch::dispatch_chained_agent(&next_task, runner)
-    } else {
-        match next_task.tag.as_deref() {
-            Some("epic") => dispatch::brainstorm_chained_agent(&next_task, runner),
-            Some("feature") => dispatch::plan_chained_agent(&next_task, runner),
-            _ => dispatch::dispatch_chained_agent(&next_task, runner),
-        }
+    let result = match DispatchMode::for_task(&next_task) {
+        DispatchMode::Dispatch => dispatch::dispatch_chained_agent(&next_task, runner),
+        DispatchMode::Brainstorm => dispatch::brainstorm_chained_agent(&next_task, runner),
+        DispatchMode::Plan => dispatch::plan_chained_agent(&next_task, runner),
     };
 
     match result {

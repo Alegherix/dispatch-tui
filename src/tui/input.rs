@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
-use crate::models::{ReviewDecision, SubStatus, TaskId, TaskStatus};
+use crate::models::{DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus};
 
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
@@ -320,22 +320,18 @@ impl App {
                 let status = task.status;
                 let has_window = task.tmux_window.is_some();
                 let has_worktree = task.worktree.is_some();
-                let has_plan = task.plan.is_some();
-                let tag = task.tag.as_deref();
-                let is_problematic = self.find_task(id)
-                    .is_some_and(|t| t.sub_status == SubStatus::Stale || t.sub_status == SubStatus::Crashed);
+                let is_problematic = self.find_task(id).is_some_and(|t| {
+                    t.sub_status == SubStatus::Stale || t.sub_status == SubStatus::Crashed
+                });
 
                 match status {
                     TaskStatus::Backlog => {
-                        if has_plan {
-                            self.update(Message::DispatchTask(id))
-                        } else {
-                            match tag {
-                                Some("epic") => self.update(Message::BrainstormTask(id)),
-                                Some("feature") => self.update(Message::PlanTask(id)),
-                                _ => self.update(Message::DispatchTask(id)),
-                            }
-                        }
+                        let msg = match DispatchMode::for_task(task) {
+                            DispatchMode::Dispatch => Message::DispatchTask(id),
+                            DispatchMode::Brainstorm => Message::BrainstormTask(id),
+                            DispatchMode::Plan => Message::PlanTask(id),
+                        };
+                        self.update(msg)
                     }
                     TaskStatus::Running | TaskStatus::Review => {
                         if is_problematic {

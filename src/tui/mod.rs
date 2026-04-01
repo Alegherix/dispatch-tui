@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    epic_status, epic_substatus, Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId,
-    TaskStatus, TaskUsage, VisualColumn, DEFAULT_QUICK_TASK_TITLE,
+    epic_status, epic_substatus, DispatchMode, Epic, EpicId, ReviewDecision, SubStatus, Task,
+    TaskId, TaskStatus, TaskUsage, VisualColumn, DEFAULT_QUICK_TASK_TITLE,
 };
 
 // ---------------------------------------------------------------------------
@@ -2174,15 +2174,19 @@ impl App {
             backlog_subtasks.sort_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0));
 
             match backlog_subtasks.first() {
-                Some(task) if task.plan.is_some() => {
-                    vec![Command::Dispatch { task: (*task).clone() }]
-                }
                 Some(task) => {
-                    match task.tag.as_deref() {
-                        Some("epic") => vec![Command::Brainstorm { task: (*task).clone() }],
-                        Some("feature") => vec![Command::Plan { task: (*task).clone() }],
-                        _ => vec![Command::Dispatch { task: (*task).clone() }],
-                    }
+                    let cmd = match DispatchMode::for_task(task) {
+                        DispatchMode::Dispatch => Command::Dispatch {
+                            task: (*task).clone(),
+                        },
+                        DispatchMode::Brainstorm => Command::Brainstorm {
+                            task: (*task).clone(),
+                        },
+                        DispatchMode::Plan => Command::Plan {
+                            task: (*task).clone(),
+                        },
+                    };
+                    vec![cmd]
                 }
                 None => {
                     vec![Command::DispatchEpic { epic: epic.clone() }]

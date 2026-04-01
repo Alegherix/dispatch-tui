@@ -6982,3 +6982,25 @@ fn review_board_e_shows_detail() {
     app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
     assert!(app.review_detail_visible());
 }
+
+#[test]
+fn review_board_d_shows_status_when_review_complete() {
+    use crate::models::{ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let mut app = make_app();
+    let pr = ReviewPr {
+        number: 4, title: "T".to_string(), author: "a".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/4".to_string(),
+        is_draft: false, created_at: Utc::now(), updated_at: Utc::now(),
+        additions: 0, deletions: 0, review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![], tmux_window: None, review_notes: Some("LGTM".to_string()),
+    };
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    // Should NOT dispatch a new agent when review is complete
+    assert!(!cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+}

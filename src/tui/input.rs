@@ -710,6 +710,11 @@ impl App {
                             "Agent running, press g to jump".to_string(),
                         ));
                     }
+                    if pr.review_notes.is_some() {
+                        return self.update(Message::StatusInfo(
+                            "Review complete — press e to view notes, or any other key to dismiss".to_string(),
+                        ));
+                    }
                     vec![Command::DispatchReviewAgent(pr)]
                 } else {
                     vec![]

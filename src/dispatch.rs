@@ -426,7 +426,7 @@ pub fn dispatch_review_agent(
     tmux::set_after_split_hook(&tmux_window, &worktree_path, runner)
         .context("failed to set tmux split hook")?;
 
-    let prompt = build_review_prompt(pr, 0);
+    let prompt = build_review_prompt(pr);
     tmux::send_keys(&tmux_window, &format!("claude \"{prompt}\""), runner)
         .context("failed to send keys to review tmux window")?;
 
@@ -471,7 +471,7 @@ fn build_review_tmux_window_name(repo: &str, number: i64) -> String {
     format!("review-{repo_short}-{number}")
 }
 
-fn build_review_prompt(pr: &crate::models::ReviewPr, _mcp_port: u16) -> String {
+fn build_review_prompt(pr: &crate::models::ReviewPr) -> String {
     format!(
         "You are reviewing PR {repo}#{number}: {title}\n\
          URL: {url}\n\n\

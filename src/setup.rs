@@ -56,6 +56,7 @@ const MCP_PERMISSIONS: &[&str] = &[
     "mcp__dispatch__get_task",
     "mcp__dispatch__create_task",
     "mcp__dispatch__report_usage",
+    "mcp__dispatch__complete_review",
 ];
 
 pub struct PermissionsMergeResult {
@@ -300,7 +301,8 @@ mod tests {
         assert!(allow.contains(&json!("mcp__dispatch__get_task")));
         assert!(allow.contains(&json!("mcp__dispatch__create_task")));
         assert!(allow.contains(&json!("mcp__dispatch__report_usage")));
-        assert_eq!(result.added_count, 4);
+        assert!(allow.contains(&json!("mcp__dispatch__complete_review")));
+        assert_eq!(result.added_count, 5);
     }
 
     #[test]
@@ -317,7 +319,7 @@ mod tests {
         assert!(allow.contains(&json!("Bash(git:*)")));
         assert!(allow.contains(&json!("Read")));
         assert!(allow.contains(&json!("mcp__dispatch__update_task")));
-        assert_eq!(result.added_count, 4);
+        assert_eq!(result.added_count, 5);
         assert_eq!(result.value["permissions"]["defaultMode"], "acceptEdits");
         assert!(result.value["hooks"]["Stop"].is_array());
     }
@@ -330,7 +332,8 @@ mod tests {
                     "mcp__dispatch__update_task",
                     "mcp__dispatch__get_task",
                     "mcp__dispatch__create_task",
-                    "mcp__dispatch__report_usage"
+                    "mcp__dispatch__report_usage",
+                    "mcp__dispatch__complete_review"
                 ]
             }
         }));

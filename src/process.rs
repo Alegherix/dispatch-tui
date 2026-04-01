@@ -77,15 +77,17 @@ impl MockProcessRunner {
 
 impl ProcessRunner for MockProcessRunner {
     fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((program.to_string(), args.iter().map(|s| s.to_string()).collect()));
+        self.calls.lock().unwrap().push((
+            program.to_string(),
+            args.iter().map(|s| s.to_string()).collect(),
+        ));
         self.responses
             .lock()
             .unwrap()
             .pop_front()
-            .unwrap_or_else(|| panic!("MockProcessRunner: no response queued for {program} {args:?}"))
+            .unwrap_or_else(|| {
+                panic!("MockProcessRunner: no response queued for {program} {args:?}")
+            })
     }
 }
 

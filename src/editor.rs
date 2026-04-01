@@ -151,7 +151,13 @@ mod tests {
         assert_eq!(fields.repo_path, "");
     }
 
-    fn make_task(title: &str, description: &str, repo_path: &str, status: TaskStatus, plan: Option<&str>) -> Task {
+    fn make_task(
+        title: &str,
+        description: &str,
+        repo_path: &str,
+        status: TaskStatus,
+        plan: Option<&str>,
+    ) -> Task {
         Task {
             id: TaskId(1),
             title: title.to_string(),
@@ -173,7 +179,13 @@ mod tests {
 
     #[test]
     fn editor_roundtrip_basic() {
-        let task = make_task("My Task", "A description", "/repo", TaskStatus::Backlog, Some("docs/plan.md"));
+        let task = make_task(
+            "My Task",
+            "A description",
+            "/repo",
+            TaskStatus::Backlog,
+            Some("docs/plan.md"),
+        );
         let content = format_editor_content(&task);
         let fields = parse_editor_content(&content);
         assert_eq!(fields.title, "My Task");
@@ -193,7 +205,13 @@ mod tests {
 
     #[test]
     fn editor_roundtrip_colons_in_description() {
-        let task = make_task("Title", "Step 1: do this\nStep 2: do that", "/repo", TaskStatus::Backlog, None);
+        let task = make_task(
+            "Title",
+            "Step 1: do this\nStep 2: do that",
+            "/repo",
+            TaskStatus::Backlog,
+            None,
+        );
         let content = format_editor_content(&task);
         let fields = parse_editor_content(&content);
         assert_eq!(fields.description, "Step 1: do this\nStep 2: do that");
@@ -201,7 +219,13 @@ mod tests {
 
     #[test]
     fn editor_multiline_description() {
-        let task = make_task("Title", "Line 1\nLine 2\nLine 3", "/repo", TaskStatus::Done, None);
+        let task = make_task(
+            "Title",
+            "Line 1\nLine 2\nLine 3",
+            "/repo",
+            TaskStatus::Done,
+            None,
+        );
         let content = format_editor_content(&task);
         let fields = parse_editor_content(&content);
         assert_eq!(fields.description, "Line 1\nLine 2\nLine 3");

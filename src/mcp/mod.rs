@@ -2,7 +2,7 @@ pub mod handlers;
 
 use std::sync::Arc;
 
-use axum::{Router, routing::post};
+use axum::{routing::post, Router};
 use tokio::sync::mpsc;
 
 use crate::db;
@@ -29,7 +29,11 @@ pub fn router(
     notify_tx: Option<mpsc::UnboundedSender<()>>,
     runner: Arc<dyn ProcessRunner>,
 ) -> Router {
-    let state = Arc::new(McpState { db, notify_tx, runner });
+    let state = Arc::new(McpState {
+        db,
+        notify_tx,
+        runner,
+    });
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
         .with_state(state)

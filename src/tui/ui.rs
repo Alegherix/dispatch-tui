@@ -1,15 +1,17 @@
 use chrono::{DateTime, Utc};
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    Frame,
 };
 
-use crate::dispatch;
-use crate::models::{Epic, ReviewDecision, ReviewPr, SubStatus, Task, TaskStatus, TaskUsage, Staleness, format_age};
 use super::{App, ColumnItem, InputMode, ViewMode};
+use crate::dispatch;
+use crate::models::{
+    format_age, Epic, ReviewDecision, ReviewPr, Staleness, SubStatus, Task, TaskStatus, TaskUsage,
+};
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
 const MUTED: Color = Color::Rgb(86, 95, 137);
@@ -57,7 +59,6 @@ fn column_bg_color(status: TaskStatus) -> Color {
         TaskStatus::Archived => Color::Rgb(28, 30, 44),
     }
 }
-
 
 /// Unicode status icon for the metadata line of each card.
 fn status_icon(status: TaskStatus) -> &'static str {
@@ -143,20 +144,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints(if has_banner {
             vec![
-                Constraint::Length(1),        // tab bar
-                Constraint::Length(1),        // summary row
-                Constraint::Length(4),        // epic banner
-                Constraint::Min(6),           // kanban board
-                Constraint::Length(panel_h),  // detail panel
-                Constraint::Length(1),        // status bar
+                Constraint::Length(1),       // tab bar
+                Constraint::Length(1),       // summary row
+                Constraint::Length(4),       // epic banner
+                Constraint::Min(6),          // kanban board
+                Constraint::Length(panel_h), // detail panel
+                Constraint::Length(1),       // status bar
             ]
         } else {
             vec![
-                Constraint::Length(1),        // tab bar
-                Constraint::Length(1),        // summary row
-                Constraint::Min(6),           // kanban board
-                Constraint::Length(panel_h),  // detail panel
-                Constraint::Length(1),        // status bar
+                Constraint::Length(1),       // tab bar
+                Constraint::Length(1),       // summary row
+                Constraint::Min(6),          // kanban board
+                Constraint::Length(panel_h), // detail panel
+                Constraint::Length(1),       // status bar
             ]
         })
         .split(area);
@@ -192,7 +193,9 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     match app.view_mode() {
         ViewMode::Epic { epic_id, .. } => {
-            let epic_title = app.epics().iter()
+            let epic_title = app
+                .epics()
+                .iter()
                 .find(|e| e.id == *epic_id)
                 .map(|e| truncate(&e.title, 30))
                 .unwrap_or_else(|| "Epic".to_string());
@@ -219,7 +222,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
             let review_count = app.review_prs().len();
             if review_count > 0 {
                 spans.push(Span::styled(
-                    format!(" Reviews ({review_count}) ", ),
+                    format!(" Reviews ({review_count}) ",),
                     inactive_style,
                 ));
             } else {
@@ -241,7 +244,10 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    spans.push(Span::styled("  [Tab]", hint_style.add_modifier(Modifier::BOLD)));
+    spans.push(Span::styled(
+        "  [Tab]",
+        hint_style.add_modifier(Modifier::BOLD),
+    ));
 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
@@ -258,7 +264,10 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
     if app.notifications_enabled() {
-        right_parts.push(Span::styled("\u{1F514}", Style::default().fg(Color::Yellow)));
+        right_parts.push(Span::styled(
+            "\u{1F514}",
+            Style::default().fg(Color::Yellow),
+        ));
     } else {
         right_parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(MUTED)));
     }
@@ -273,7 +282,7 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
     let col_segments = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
-            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
+            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT],
         )
         .split(area);
 
@@ -283,10 +292,13 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
         let color = column_color(status);
 
         let (prefix, label_style) = if is_focused {
-            ("\u{25b8} ", Style::default()
-                .fg(color)
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::UNDERLINED))
+            (
+                "\u{25b8} ",
+                Style::default()
+                    .fg(color)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            )
         } else {
             ("\u{25e6} ", Style::default().fg(MUTED))
         };
@@ -319,11 +331,9 @@ fn render_summary(frame: &mut Frame, app: &App, area: Rect) {
             vec![Span::styled(label, label_style)]
         };
 
-        let paragraph = Paragraph::new(Line::from(spans))
-            .alignment(Alignment::Center);
+        let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
         frame.render_widget(paragraph, col_segments[col_idx]);
     }
-
 }
 
 /// Format the title text for a task card (line 1 only — status annotations are on line 2).
@@ -397,7 +407,10 @@ fn build_task_list_item<'a>(
             Span::styled("\u{26a0} crashed", Style::default().fg(Color::Red)),
         ])
     } else if is_stale {
-        let mins = app.agents.last_output_change.get(&task.id)
+        let mins = app
+            .agents
+            .last_output_change
+            .get(&task.id)
             .map(|t| t.elapsed().as_secs() / 60)
             .unwrap_or(0);
         Line::from(vec![
@@ -410,21 +423,13 @@ fn build_task_list_item<'a>(
     } else if status == TaskStatus::Running && task.sub_status == SubStatus::NeedsInput {
         Line::from(vec![
             Span::raw("   "),
-            Span::styled(
-                "\u{25c9} blocked",
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled("\u{25c9} blocked", Style::default().fg(Color::Yellow)),
         ])
-    } else if status == TaskStatus::Running
-        && task.tmux_window.is_none()
-        && task.worktree.is_some()
+    } else if status == TaskStatus::Running && task.tmux_window.is_none() && task.worktree.is_some()
     {
         Line::from(vec![
             Span::raw("   "),
-            Span::styled(
-                "\u{25cc} detached",
-                Style::default().fg(MUTED_LIGHT),
-            ),
+            Span::styled("\u{25cc} detached", Style::default().fg(MUTED_LIGHT)),
         ])
     } else if status == TaskStatus::Running {
         Line::from(vec![
@@ -439,10 +444,7 @@ fn build_task_list_item<'a>(
             .map_or("PR".to_string(), |n| format!("PR #{n}"));
         Line::from(vec![
             Span::raw("   "),
-            Span::styled(
-                pr_label,
-                Style::default().fg(Color::Cyan),
-            ),
+            Span::styled(pr_label, Style::default().fg(Color::Cyan)),
         ])
     } else if let (TaskStatus::Done, Some(pr_url)) = (status, task.pr_url.as_deref()) {
         let pr_label = crate::models::pr_number_from_url(pr_url)
@@ -472,7 +474,13 @@ fn build_task_list_item<'a>(
         Line::from(vec![
             Span::raw("   "),
             Span::styled(
-                format!("{}{} {}{}", plan_indicator, status_icon(status), age, tag_suffix),
+                format!(
+                    "{}{} {}{}",
+                    plan_indicator,
+                    status_icon(status),
+                    age,
+                    tag_suffix
+                ),
                 Style::default().fg(staleness_color(staleness)),
             ),
         ])
@@ -506,7 +514,7 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
     let column_areas = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
-            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT]
+            [Constraint::Ratio(1, TaskStatus::COLUMN_COUNT as u32); TaskStatus::COLUMN_COUNT],
         )
         .split(area);
 
@@ -546,7 +554,9 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
 
             let is_cursor = is_focused && !app.on_select_all() && item_idx == selected_row;
             list_items.push(match item {
-                ColumnItem::Task(task) => build_task_list_item(task, status, app, now, is_cursor, color),
+                ColumnItem::Task(task) => {
+                    build_task_list_item(task, status, app, now, is_cursor, color)
+                }
                 ColumnItem::Epic(epic) => render_epic_item(epic, is_cursor, app, status),
             });
         }
@@ -554,18 +564,28 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
         let on_select_all = app.on_select_all();
         let sel = app.selection_mut();
         if is_focused {
-            *sel.list_states[col_idx].selected_mut() =
-                if on_select_all { None } else { list_selection_idx };
+            *sel.list_states[col_idx].selected_mut() = if on_select_all {
+                None
+            } else {
+                list_selection_idx
+            };
         }
 
         if is_focused {
-            let block = Block::default()
-                .style(Style::default().bg(column_bg_color(status)));
+            let block = Block::default().style(Style::default().bg(column_bg_color(status)));
             let inner = block.inner(col_area);
             frame.render_widget(block, col_area);
-            frame.render_stateful_widget(List::new(list_items), inner, &mut sel.list_states[col_idx]);
+            frame.render_stateful_widget(
+                List::new(list_items),
+                inner,
+                &mut sel.list_states[col_idx],
+            );
         } else {
-            frame.render_stateful_widget(List::new(list_items), col_area, &mut sel.list_states[col_idx]);
+            frame.render_stateful_widget(
+                List::new(list_items),
+                col_area,
+                &mut sel.list_states[col_idx],
+            );
         }
     }
 }
@@ -576,15 +596,25 @@ fn render_epic_item(
     app: &App,
     status: TaskStatus,
 ) -> ListItem<'static> {
-    let subtask_statuses: Vec<TaskStatus> = app.tasks()
+    let subtask_statuses: Vec<TaskStatus> = app
+        .tasks()
         .iter()
         .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
         .map(|t| t.status)
         .collect();
 
-    let done_count = subtask_statuses.iter().filter(|s| **s == TaskStatus::Done).count();
-    let running_count = subtask_statuses.iter().filter(|s| **s == TaskStatus::Running).count();
-    let review_count = subtask_statuses.iter().filter(|s| **s == TaskStatus::Review).count();
+    let done_count = subtask_statuses
+        .iter()
+        .filter(|s| **s == TaskStatus::Done)
+        .count();
+    let running_count = subtask_statuses
+        .iter()
+        .filter(|s| **s == TaskStatus::Running)
+        .count();
+    let review_count = subtask_statuses
+        .iter()
+        .filter(|s| **s == TaskStatus::Review)
+        .count();
     let pending_count = subtask_statuses.len() - done_count - running_count - review_count;
 
     let title_text = truncate(&epic.title, 28);
@@ -604,10 +634,7 @@ fn render_epic_item(
         Span::raw(select_prefix.to_string()),
         Span::styled(stripe_char, Style::default().fg(PURPLE)),
         Span::styled(format!(" #{} ", epic.id), Style::default().fg(MUTED)),
-        Span::styled(
-            format!("{title_text}{plan_indicator}"),
-            title_style,
-        ),
+        Span::styled(format!("{title_text}{plan_indicator}"), title_style),
     ]);
 
     // Line 2: color-coded subtask counts (● pending ● running ● done)
@@ -661,27 +688,38 @@ fn render_epic_banner(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    let subtask_statuses: Vec<TaskStatus> = app.tasks()
+    let subtask_statuses: Vec<TaskStatus> = app
+        .tasks()
         .iter()
         .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
         .map(|t| t.status)
         .collect();
     let total = subtask_statuses.len();
-    let done = subtask_statuses.iter().filter(|s| **s == TaskStatus::Done).count();
+    let done = subtask_statuses
+        .iter()
+        .filter(|s| **s == TaskStatus::Done)
+        .count();
 
     let block = Block::default()
         .title(format!(" Epic: {} ", epic.title))
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Color::Magenta))
-        .title_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let desc = truncate(&epic.description, 60);
     let progress = format!("{done}/{total} done");
     let lines = vec![
         Line::from(vec![
             Span::styled(desc, Style::default().fg(Color::Gray)),
-            Span::styled(format!("  {progress}"), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("  {progress}"),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]),
         Line::from(Span::styled(
             "Esc to return to board",
@@ -712,7 +750,11 @@ fn render_archive_overlay(frame: &mut Frame, app: &mut App, area: Rect, now: Dat
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Color::DarkGray))
-        .title_style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let items: Vec<ListItem> = archived
         .iter()
@@ -784,13 +826,26 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
         let mut line1_spans = vec![
             Span::styled(
                 task.title.clone(),
-                Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 if task.sub_status != SubStatus::None {
-                    format!(" \u{00b7} #{} \u{00b7} {} ({}) \u{00b7} {}", task.id, task.status.as_str(), task.sub_status.as_str(), task.repo_path)
+                    format!(
+                        " \u{00b7} #{} \u{00b7} {} ({}) \u{00b7} {}",
+                        task.id,
+                        task.status.as_str(),
+                        task.sub_status.as_str(),
+                        task.repo_path
+                    )
                 } else {
-                    format!(" \u{00b7} #{} \u{00b7} {} \u{00b7} {}", task.id, task.status.as_str(), task.repo_path)
+                    format!(
+                        " \u{00b7} #{} \u{00b7} {} \u{00b7} {}",
+                        task.id,
+                        task.status.as_str(),
+                        task.repo_path
+                    )
                 },
                 Style::default().fg(MUTED),
             ),
@@ -803,7 +858,10 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
         } else if app.is_stale(task.id) {
-            let mins = app.agents.last_output_change.get(&task.id)
+            let mins = app
+                .agents
+                .last_output_change
+                .get(&task.id)
                 .map(|t| t.elapsed().as_secs() / 60)
                 .unwrap_or(0);
             line1_spans.push(Span::styled(
@@ -845,7 +903,9 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
         let line1 = Line::from(vec![
             Span::styled(
                 epic.title.clone(),
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" \u{00b7} #{} \u{00b7} {}", epic.id, epic.repo_path),
@@ -865,7 +925,8 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
         }
 
         // Subtask status list
-        let mut subtasks: Vec<&Task> = app.tasks()
+        let mut subtasks: Vec<&Task> = app
+            .tasks()
             .iter()
             .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
             .collect();
@@ -877,10 +938,7 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
                 let icon = status_icon(task.status);
                 let icon_color = column_color(task.status);
                 let mut spans = vec![
-                    Span::styled(
-                        format!("  {icon} "),
-                        Style::default().fg(icon_color),
-                    ),
+                    Span::styled(format!("  {icon} "), Style::default().fg(icon_color)),
                     Span::styled(
                         truncate_for_detail(&task.title, 40),
                         Style::default().fg(Color::Rgb(180, 184, 200)),
@@ -927,7 +985,9 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
 /// Renders the input form in the detail panel area. Returns true if it rendered.
 fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     let completed = Style::default().fg(Color::White);
-    let active = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let active = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
     let hint = Style::default().fg(Color::DarkGray);
 
     let lines: Vec<Line> = match &app.input.mode {
@@ -942,7 +1002,12 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             ]
         }
         InputMode::InputTag => {
-            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+            let title = app
+                .input
+                .task_draft
+                .as_ref()
+                .map(|d| d.title.as_str())
+                .unwrap_or("");
             vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -950,11 +1015,19 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                     active,
                 )),
                 Line::from(""),
-                Line::from(Span::styled("  Select a tag or Enter to skip, Esc to cancel", hint)),
+                Line::from(Span::styled(
+                    "  Select a tag or Enter to skip, Esc to cancel",
+                    hint,
+                )),
             ]
         }
         InputMode::InputDescription => {
-            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+            let title = app
+                .input
+                .task_draft
+                .as_ref()
+                .map(|d| d.title.as_str())
+                .unwrap_or("");
             vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -966,8 +1039,18 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             ]
         }
         InputMode::InputRepoPath => {
-            let title = app.input.task_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            let description = app.input.task_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
+            let title = app
+                .input
+                .task_draft
+                .as_ref()
+                .map(|d| d.title.as_str())
+                .unwrap_or("");
+            let description = app
+                .input
+                .task_draft
+                .as_ref()
+                .map(|d| d.description.as_str())
+                .unwrap_or("");
             let mut lines = vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -989,10 +1072,20 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                 let scroll = if repo_count <= visible_repos {
                     0
                 } else {
-                    cursor.saturating_sub(visible_repos - 1).min(repo_count - visible_repos)
+                    cursor
+                        .saturating_sub(visible_repos - 1)
+                        .min(repo_count - visible_repos)
                 };
-                let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-                for (i, path) in app.repo_paths.iter().enumerate().skip(scroll).take(visible_repos) {
+                let cursor_style = Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD);
+                for (i, path) in app
+                    .repo_paths
+                    .iter()
+                    .enumerate()
+                    .skip(scroll)
+                    .take(visible_repos)
+                {
                     if i == cursor {
                         lines.push(Line::from(vec![
                             Span::styled("  ► ", cursor_style),
@@ -1019,15 +1112,25 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             let scroll = if repo_count <= visible_repos {
                 0
             } else {
-                cursor.saturating_sub(visible_repos - 1).min(repo_count - visible_repos)
+                cursor
+                    .saturating_sub(visible_repos - 1)
+                    .min(repo_count - visible_repos)
             };
 
-            let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+            let cursor_style = Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD);
             let mut lines = vec![
                 Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
                 Line::from(""),
             ];
-            for (i, path) in app.repo_paths.iter().enumerate().skip(scroll).take(visible_repos) {
+            for (i, path) in app
+                .repo_paths
+                .iter()
+                .enumerate()
+                .skip(scroll)
+                .take(visible_repos)
+            {
                 if i == cursor {
                     lines.push(Line::from(vec![
                         Span::styled("  ► ", cursor_style),
@@ -1058,8 +1161,14 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                     warning,
                 )),
                 Line::from(""),
-                Line::from(Span::styled("  [r] Resume (--continue in existing worktree)", hint)),
-                Line::from(Span::styled("  [f] Fresh start (clean worktree + new dispatch)", hint)),
+                Line::from(Span::styled(
+                    "  [r] Resume (--continue in existing worktree)",
+                    hint,
+                )),
+                Line::from(Span::styled(
+                    "  [f] Fresh start (clean worktree + new dispatch)",
+                    hint,
+                )),
                 Line::from(Span::styled("  [Esc] Cancel", hint)),
             ]
         }
@@ -1074,7 +1183,12 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             ]
         }
         InputMode::InputEpicDescription => {
-            let title = app.input.epic_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
+            let title = app
+                .input
+                .epic_draft
+                .as_ref()
+                .map(|d| d.title.as_str())
+                .unwrap_or("");
             vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -1086,8 +1200,18 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             ]
         }
         InputMode::InputEpicRepoPath => {
-            let title = app.input.epic_draft.as_ref().map(|d| d.title.as_str()).unwrap_or("");
-            let description = app.input.epic_draft.as_ref().map(|d| d.description.as_str()).unwrap_or("");
+            let title = app
+                .input
+                .epic_draft
+                .as_ref()
+                .map(|d| d.title.as_str())
+                .unwrap_or("");
+            let description = app
+                .input
+                .epic_draft
+                .as_ref()
+                .map(|d| d.description.as_str())
+                .unwrap_or("");
             let mut lines = vec![
                 Line::from(Span::styled(format!("  Title: {title}"), completed)),
                 Line::from(Span::styled(
@@ -1107,10 +1231,20 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                 let scroll = if repo_count <= visible_repos {
                     0
                 } else {
-                    cursor.saturating_sub(visible_repos - 1).min(repo_count - visible_repos)
+                    cursor
+                        .saturating_sub(visible_repos - 1)
+                        .min(repo_count - visible_repos)
                 };
-                let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-                for (i, path) in app.repo_paths.iter().enumerate().skip(scroll).take(visible_repos) {
+                let cursor_style = Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD);
+                for (i, path) in app
+                    .repo_paths
+                    .iter()
+                    .enumerate()
+                    .skip(scroll)
+                    .take(visible_repos)
+                {
                     if i == cursor {
                         lines.push(Line::from(vec![
                             Span::styled("  ► ", cursor_style),
@@ -1154,7 +1288,9 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
 
-    let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);
     true
 }
@@ -1218,10 +1354,18 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Color::Cyan))
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
 
-    let header = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-    let key = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let header = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let key = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let desc = Style::default().fg(Color::Gray);
     let note = Style::default().fg(Color::DarkGray);
 
@@ -1230,29 +1374,38 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  Review Board", header)),
             Line::from(vec![
-                Span::styled("  h/\u{2190}", key), Span::styled(" previous column   ", desc),
-                Span::styled("l/\u{2192}", key), Span::styled(" next column", desc),
+                Span::styled("  h/\u{2190}", key),
+                Span::styled(" previous column   ", desc),
+                Span::styled("l/\u{2192}", key),
+                Span::styled(" next column", desc),
             ]),
             Line::from(vec![
-                Span::styled("  j/\u{2193}", key), Span::styled(" next PR           ", desc),
-                Span::styled("k/\u{2191}", key), Span::styled(" previous PR", desc),
+                Span::styled("  j/\u{2193}", key),
+                Span::styled(" next PR           ", desc),
+                Span::styled("k/\u{2191}", key),
+                Span::styled(" previous PR", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Enter", key), Span::styled(" open PR in browser", desc),
+                Span::styled("  Enter", key),
+                Span::styled(" open PR in browser", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Actions", header)),
             Line::from(vec![
-                Span::styled("  r", key), Span::styled(" refresh from GitHub", desc),
+                Span::styled("  r", key),
+                Span::styled(" refresh from GitHub", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  General", header)),
             Line::from(vec![
-                Span::styled("  Tab/Esc", key), Span::styled(" back to Task Board  ", desc),
-                Span::styled("q", key), Span::styled(" quit", desc),
+                Span::styled("  Tab/Esc", key),
+                Span::styled(" back to Task Board  ", desc),
+                Span::styled("q", key),
+                Span::styled(" quit", desc),
             ]),
             Line::from(vec![
-                Span::styled("  ?", key), Span::styled(" close this help", desc),
+                Span::styled("  ?", key),
+                Span::styled(" close this help", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Press ? or Esc to close", note)),
@@ -1262,71 +1415,112 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  Navigation", header)),
             Line::from(vec![
-                Span::styled("  h/\u{2190}", key), Span::styled(" previous column   ", desc),
-                Span::styled("j/\u{2193}", key), Span::styled(" next task", desc),
+                Span::styled("  h/\u{2190}", key),
+                Span::styled(" previous column   ", desc),
+                Span::styled("j/\u{2193}", key),
+                Span::styled(" next task", desc),
             ]),
             Line::from(vec![
-                Span::styled("  l/\u{2192}", key), Span::styled(" next column       ", desc),
-                Span::styled("k/\u{2191}", key), Span::styled(" previous task", desc),
+                Span::styled("  l/\u{2192}", key),
+                Span::styled(" next column       ", desc),
+                Span::styled("k/\u{2191}", key),
+                Span::styled(" previous task", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Enter", key), Span::styled(" detail panel       ", desc),
-                Span::styled("e", key), Span::styled(" edit / enter epic", desc),
+                Span::styled("  Enter", key),
+                Span::styled(" detail panel       ", desc),
+                Span::styled("e", key),
+                Span::styled(" edit / enter epic", desc),
             ]),
             Line::from(vec![
-                Span::styled("  q", key), Span::styled(" exit epic (in epic view)   ", desc),
-                Span::styled("Esc", key), Span::styled(" clear selection", desc),
+                Span::styled("  q", key),
+                Span::styled(" exit epic (in epic view)   ", desc),
+                Span::styled("Esc", key),
+                Span::styled(" clear selection", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Actions", header)),
             Line::from(vec![
-                Span::styled("  n", key), Span::styled(" new task   ", desc),
-                Span::styled("E", key), Span::styled(" new epic   ", desc),
-                Span::styled("N", key), Span::styled(" notifications", desc),
+                Span::styled("  n", key),
+                Span::styled(" new task   ", desc),
+                Span::styled("E", key),
+                Span::styled(" new epic   ", desc),
+                Span::styled("N", key),
+                Span::styled(" notifications", desc),
             ]),
             Line::from(vec![
-                Span::styled("  d", key), Span::styled(" dispatch*  ", desc),
-                Span::styled("m", key), Span::styled(" move fwd   ", desc),
-                Span::styled("M", key), Span::styled(" move back", desc),
+                Span::styled("  d", key),
+                Span::styled(" dispatch*  ", desc),
+                Span::styled("m", key),
+                Span::styled(" move fwd   ", desc),
+                Span::styled("M", key),
+                Span::styled(" move back", desc),
             ]),
             Line::from(vec![
-                Span::styled("  x", key), Span::styled(" archive    ", desc),
-                Span::styled("D", key), Span::styled(" quick dsp  ", desc),
-                Span::styled("g", key), Span::styled(" go to tmux", desc),
+                Span::styled("  x", key),
+                Span::styled(" archive    ", desc),
+                Span::styled("D", key),
+                Span::styled(" quick dsp  ", desc),
+                Span::styled("g", key),
+                Span::styled(" go to tmux", desc),
             ]),
             Line::from(vec![
-                Span::styled("  H", key), Span::styled(" history    ", desc),
-                Span::styled("V", key), Span::styled(" epic done  ", desc),
-                Span::styled("a", key), Span::styled(" select all", desc),
+                Span::styled("  H", key),
+                Span::styled(" history    ", desc),
+                Span::styled("V", key),
+                Span::styled(" epic done  ", desc),
+                Span::styled("a", key),
+                Span::styled(" select all", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Space", key), Span::styled(" select  ", desc),
-                Span::styled("f", key), Span::styled(" filter repos  ", desc),
-                Span::styled("W", key), Span::styled(" wrap up    ", desc),
+                Span::styled("  Space", key),
+                Span::styled(" select  ", desc),
+                Span::styled("f", key),
+                Span::styled(" filter repos  ", desc),
+                Span::styled("W", key),
+                Span::styled(" wrap up    ", desc),
                 Span::styled("(task: rebase/PR, epic: batch)", note),
             ]),
             Line::from(vec![
-                Span::styled("  T", key), Span::styled(" detach tmux panel  ", desc),
+                Span::styled("  T", key),
+                Span::styled(" detach tmux panel  ", desc),
                 Span::styled("(Review tasks, supports batch)", note),
             ]),
             Line::from(vec![
-                Span::styled("  J/K", key), Span::styled(" reorder item up/down in column", desc),
+                Span::styled("  J/K", key),
+                Span::styled(" reorder item up/down in column", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  * d is context-dependent:", note)),
-            Line::from(Span::styled("    Backlog (no plan) \u{2192} brainstorm", note)),
-            Line::from(Span::styled("    Backlog (has plan) \u{2192} dispatch", note)),
-            Line::from(Span::styled("    Running \u{2192} resume (if window gone)", note)),
-            Line::from(Span::styled("    Epic \u{2192} dispatch next backlog subtask", note)),
+            Line::from(Span::styled(
+                "    Backlog (no plan) \u{2192} brainstorm",
+                note,
+            )),
+            Line::from(Span::styled(
+                "    Backlog (has plan) \u{2192} dispatch",
+                note,
+            )),
+            Line::from(Span::styled(
+                "    Running \u{2192} resume (if window gone)",
+                note,
+            )),
+            Line::from(Span::styled(
+                "    Epic \u{2192} dispatch next backlog subtask",
+                note,
+            )),
             Line::from(""),
             Line::from(Span::styled("  General", header)),
             Line::from(vec![
-                Span::styled("  ?", key), Span::styled(" this help  ", desc),
-                Span::styled("N", key), Span::styled(" notify on/off  ", desc),
-                Span::styled("q", key), Span::styled(" quit (or exit epic)", desc),
+                Span::styled("  ?", key),
+                Span::styled(" this help  ", desc),
+                Span::styled("N", key),
+                Span::styled(" notify on/off  ", desc),
+                Span::styled("q", key),
+                Span::styled(" quit (or exit epic)", desc),
             ]),
             Line::from(vec![
-                Span::styled("  Tab", key), Span::styled(" switch to Review Board", desc),
+                Span::styled("  Tab", key),
+                Span::styled(" switch to Review Board", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Press ? or Esc to close", note)),
@@ -1348,8 +1542,16 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     let repo_count = app.repo_paths().len();
     let preset_count = app.filter_presets().len();
-    let preset_lines = if preset_count > 0 { preset_count + 2 } else { 0 }; // header + presets + blank line
-    let input_line = if matches!(app.mode(), InputMode::InputPresetName) { 1 } else { 0 };
+    let preset_lines = if preset_count > 0 {
+        preset_count + 2
+    } else {
+        0
+    }; // header + presets + blank line
+    let input_line = if matches!(app.mode(), InputMode::InputPresetName) {
+        1
+    } else {
+        0
+    };
     // Cap popup height to screen minus 4; repos may scroll if they don't fit
     // +6: blank(1) + preset_lines + blank(1) + 2_help_lines(2) + borders(2)
     let popup_height = (repo_count as u16 + preset_lines as u16 + input_line as u16 + 6)
@@ -1369,7 +1571,9 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let scroll = if repo_count <= visible_repos {
         0
     } else {
-        cursor.saturating_sub(visible_repos - 1).min(repo_count - visible_repos)
+        cursor
+            .saturating_sub(visible_repos - 1)
+            .min(repo_count - visible_repos)
     };
 
     frame.render_widget(Clear, popup_area);
@@ -1379,20 +1583,31 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Color::Cyan))
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
 
-    let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(Color::Gray);
     let note_style = Style::default().fg(Color::DarkGray);
-    let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let cursor_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
 
     let mut lines = vec![Line::from("")];
 
     // Presets section
     if !app.filter_presets().is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("  Presets:", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "  Presets:",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )]));
         for (i, (name, _)) in app.filter_presets().iter().enumerate() {
             let letter = (b'A' + i as u8) as char;
             lines.push(Line::from(vec![
@@ -1405,10 +1620,23 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     // Repo list (scrollable)
     if scroll > 0 {
-        lines.push(Line::from(Span::styled(format!("  ↑ {} more", scroll), note_style)));
+        lines.push(Line::from(Span::styled(
+            format!("  ↑ {} more", scroll),
+            note_style,
+        )));
     }
-    for (i, path) in app.repo_paths().iter().enumerate().skip(scroll).take(visible_repos) {
-        let checked = if app.repo_filter().contains(path) { "x" } else { " " };
+    for (i, path) in app
+        .repo_paths()
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(visible_repos)
+    {
+        let checked = if app.repo_filter().contains(path) {
+            "x"
+        } else {
+            " "
+        };
         if i == cursor {
             lines.push(Line::from(vec![
                 Span::styled("  ►", cursor_style),
@@ -1424,7 +1652,10 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     }
     let remaining = repo_count.saturating_sub(scroll + visible_repos);
     if remaining > 0 {
-        lines.push(Line::from(Span::styled(format!("  ↓ {} more", remaining), note_style)));
+        lines.push(Line::from(Span::styled(
+            format!("  ↓ {} more", remaining),
+            note_style,
+        )));
     }
 
     lines.push(Line::from(""));
@@ -1440,7 +1671,11 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     // Help text
     let all_selected = app.repo_filter().len() == app.repo_paths().len();
-    let a_label = if all_selected { "clear all" } else { "select all" };
+    let a_label = if all_selected {
+        "clear all"
+    } else {
+        "select all"
+    };
     match app.mode() {
         InputMode::InputPresetName => {
             lines.push(Line::from(vec![
@@ -1484,8 +1719,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     if let Some(msg) = &app.status_message {
-        let bar = Paragraph::new(msg.as_str())
-            .style(Style::default().fg(Color::Yellow));
+        let bar = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(bar, area);
         return;
     }
@@ -1495,13 +1729,25 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         let key_color = MUTED;
         let label_style = Style::default().fg(MUTED);
         let spans = vec![
-            Span::styled("x", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "x",
+                Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" delete  ", label_style),
-            Span::styled("e", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "e",
+                Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" edit  ", label_style),
-            Span::styled("H", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "H",
+                Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" close  ", label_style),
-            Span::styled("q", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "q",
+                Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" quit  ", label_style),
         ];
         let bar = Paragraph::new(Line::from(spans));
@@ -1542,16 +1788,16 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::InputTag => {
-            let text = app.status_message.as_deref()
+            let text = app
+                .status_message
+                .as_deref()
                 .unwrap_or("Tag: (b)ug (f)eature (c)hore (e)pic (Enter=none)");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow));
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDelete => {
             let text = app.status_message.as_deref().unwrap_or("Delete? (y/n)");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Red));
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
             frame.render_widget(bar, area);
         }
         InputMode::QuickDispatch => {
@@ -1565,14 +1811,16 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmArchive => {
-            let bar = Paragraph::new("Archive task? (y/n)")
-                .style(Style::default().fg(Color::Yellow));
+            let bar =
+                Paragraph::new("Archive task? (y/n)").style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDone(_) => {
-            let text = app.status_message.as_deref().unwrap_or("Move to Done? (y/n)");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow));
+            let text = app
+                .status_message
+                .as_deref()
+                .unwrap_or("Move to Done? (y/n)");
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::InputEpicTitle => {
@@ -1591,9 +1839,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDeleteEpic => {
-            let text = app.status_message.as_deref().unwrap_or("Delete epic and subtasks? (y/n)");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Red));
+            let text = app
+                .status_message
+                .as_deref()
+                .unwrap_or("Delete epic and subtasks? (y/n)");
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmArchiveEpic => {
@@ -1602,9 +1852,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmEpicDone(_) => {
-            let text = app.status_message.as_deref().unwrap_or("Move epic to Done? (y/n)");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow));
+            let text = app
+                .status_message
+                .as_deref()
+                .unwrap_or("Move epic to Done? (y/n)");
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::Help => {
@@ -1618,10 +1870,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmWrapUp(_) => {
-            let text = app.status_message.as_deref()
+            let text = app
+                .status_message
+                .as_deref()
                 .unwrap_or("Wrap up: (r) rebase  (p) create PR  (Esc) cancel");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow));
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::InputPresetName => {
@@ -1635,17 +1888,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmEpicWrapUp(_) => {
-            let text = app.status_message.as_deref()
+            let text = app
+                .status_message
+                .as_deref()
                 .unwrap_or("Epic wrap up: (r) rebase all  (p) PR all  (Esc) cancel");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow));
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDetachTmux(_) => {
-            let text = app.status_message.as_deref()
+            let text = app
+                .status_message
+                .as_deref()
                 .unwrap_or("Detach tmux panel? (y/n)");
-            let bar = Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow));
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
     }
@@ -1659,14 +1914,21 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(key, Style::default().fg(key_color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            key,
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
     };
 
     if let Some(task) = task {
         match task.status {
             TaskStatus::Backlog => {
-                let d_label = if task.plan.is_some() { "dispatch" } else { "brainstorm" };
+                let d_label = if task.plan.is_some() {
+                    "dispatch"
+                } else {
+                    "brainstorm"
+                };
                 push_hint("d", d_label);
                 push_hint("e", "edit");
                 push_hint("m", "move");
@@ -1769,7 +2031,10 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
     spans.push(Span::styled(format!("{count} selected  "), count_style));
 
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(key, Style::default().fg(key_color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            key,
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
     };
 
@@ -1793,7 +2058,10 @@ fn review_action_hints(has_pr: bool) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(key, Style::default().fg(key_color).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            key,
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
         spans.push(Span::styled(format!(" {label}  "), label_style));
     };
     if has_pr {
@@ -1864,12 +2132,10 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Status bar: transient message takes priority; fall back to persistent error
     if let Some(msg) = app.status_message() {
-        let status = Paragraph::new(msg.to_string())
-            .style(Style::default().fg(Color::Yellow));
+        let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[3]);
     } else if let Some(err) = app.last_review_error() {
-        let status = Paragraph::new(format!("Error: {err}"))
-            .style(Style::default().fg(Color::Red));
+        let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
         frame.render_widget(status, chunks[3]);
     } else {
         let has_pr = app.selected_review_pr().is_some();
@@ -1885,12 +2151,15 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     let segments = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
-            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32); ReviewDecision::COLUMN_COUNT]
+            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32);
+                ReviewDecision::COLUMN_COUNT],
         )
         .split(area);
 
     for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
-        let count = app.review_prs().iter()
+        let count = app
+            .review_prs()
+            .iter()
             .filter(|pr| pr.review_decision == *decision)
             .count();
         let is_focused = i == selected_col;
@@ -1915,20 +2184,25 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
-            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32); ReviewDecision::COLUMN_COUNT]
+            [Constraint::Ratio(1, ReviewDecision::COLUMN_COUNT as u32);
+                ReviewDecision::COLUMN_COUNT],
         )
         .split(area);
 
     for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
         let is_focused = i == sel_col;
-        let prs: Vec<&ReviewPr> = app.review_prs().iter()
+        let prs: Vec<&ReviewPr> = app
+            .review_prs()
+            .iter()
             .filter(|pr| pr.review_decision == *decision)
             .collect();
 
         let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
-        let items: Vec<ListItem> = prs.iter().enumerate().map(|(row, pr)| {
-            build_review_pr_item(pr, *decision, is_focused && row == selected_row)
-        }).collect();
+        let items: Vec<ListItem> = prs
+            .iter()
+            .enumerate()
+            .map(|(row, pr)| build_review_pr_item(pr, *decision, is_focused && row == selected_row))
+            .collect();
 
         let bg = if is_focused {
             review_column_bg_color(*decision)
@@ -1936,8 +2210,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             Color::Reset
         };
 
-        let list = List::new(items)
-            .block(Block::default().style(Style::default().bg(bg)));
+        let list = List::new(items).block(Block::default().style(Style::default().bg(bg)));
 
         let mut list_state = ListState::default();
         if is_focused {
@@ -1953,7 +2226,11 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool) -> ListItem<'static> {
+fn build_review_pr_item(
+    pr: &ReviewPr,
+    decision: ReviewDecision,
+    is_cursor: bool,
+) -> ListItem<'static> {
     let color = review_column_color(decision);
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
@@ -1965,7 +2242,9 @@ fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool
     let header_truncated = truncate(&header, 60);
 
     let line1_style = if is_cursor {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(color)
     };
@@ -2020,8 +2299,8 @@ mod tests {
 
     #[test]
     fn format_usage_compact() {
-        use chrono::Utc;
         use crate::models::TaskId;
+        use chrono::Utc;
         let u = TaskUsage {
             task_id: TaskId(1),
             cost_usd: 0.45,

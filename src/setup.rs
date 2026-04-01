@@ -27,9 +27,7 @@ pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
         _ => Map::new(),
     };
 
-    let servers = root
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}));
+    let servers = root.entry("mcpServers").or_insert_with(|| json!({}));
 
     if let Value::Object(servers_map) = servers {
         if servers_map.get("dispatch") == Some(&server_entry) {
@@ -69,9 +67,7 @@ pub fn merge_permissions(existing: Option<Value>) -> PermissionsMergeResult {
         _ => Map::new(),
     };
 
-    let permissions = root
-        .entry("permissions")
-        .or_insert_with(|| json!({}));
+    let permissions = root.entry("permissions").or_insert_with(|| json!({}));
 
     let allow = permissions
         .get("allow")
@@ -158,8 +154,7 @@ fn read_json_file(path: &std::path::Path) -> Result<Option<Value>> {
 
 fn write_json_file(path: &std::path::Path, value: &Value) -> Result<()> {
     let content = serde_json::to_string_pretty(value).context("Failed to serialize JSON")?;
-    fs::write(path, content + "\n")
-        .with_context(|| format!("Failed to write {}", path.display()))
+    fs::write(path, content + "\n").with_context(|| format!("Failed to write {}", path.display()))
 }
 
 // ---------------------------------------------------------------------------
@@ -362,10 +357,14 @@ mod tests {
         // The PreToolUse handler must read tool_name from the JSON input
         // and skip dispatch MCP tool calls to avoid clobbering review status
         // during wrap-up (get_task and wrap_up would otherwise set running).
-        assert!(HOOK_SCRIPT.contains("tool_name"),
-            "hook must extract tool_name from PreToolUse input");
-        assert!(HOOK_SCRIPT.contains("mcp__dispatch__"),
-            "hook must skip mcp__dispatch__ tools in PreToolUse");
+        assert!(
+            HOOK_SCRIPT.contains("tool_name"),
+            "hook must extract tool_name from PreToolUse input"
+        );
+        assert!(
+            HOOK_SCRIPT.contains("mcp__dispatch__"),
+            "hook must skip mcp__dispatch__ tools in PreToolUse"
+        );
     }
 
     #[test]

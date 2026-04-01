@@ -121,10 +121,7 @@ fn create_then_list() {
         String::from_utf8_lossy(&create_out.stderr)
     );
 
-    let out = binary()
-        .args(["--db", db_path, "list"])
-        .output()
-        .unwrap();
+    let out = binary().args(["--db", db_path, "list"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -191,7 +188,13 @@ fn create_idempotent_for_same_plan() {
     // First create
     binary()
         .args([
-            "--db", db_path, "create", "--from-plan", plan_path, "--repo-path", "/tmp/test-repo",
+            "--db",
+            db_path,
+            "create",
+            "--from-plan",
+            plan_path,
+            "--repo-path",
+            "/tmp/test-repo",
         ])
         .output()
         .unwrap();
@@ -199,7 +202,13 @@ fn create_idempotent_for_same_plan() {
     // Second create with same plan
     let out = binary()
         .args([
-            "--db", db_path, "create", "--from-plan", plan_path, "--repo-path", "/tmp/test-repo",
+            "--db",
+            db_path,
+            "create",
+            "--from-plan",
+            plan_path,
+            "--repo-path",
+            "/tmp/test-repo",
         ])
         .output()
         .unwrap();
@@ -211,10 +220,7 @@ fn create_idempotent_for_same_plan() {
     );
 
     // Only one task in list
-    let out = binary()
-        .args(["--db", db_path, "list"])
-        .output()
-        .unwrap();
+    let out = binary().args(["--db", db_path, "list"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let task_lines: Vec<_> = stdout
         .lines()
@@ -261,10 +267,7 @@ fn create_with_title_and_description_overrides() {
     );
 
     // Verify in list output
-    let out = binary()
-        .args(["--db", db_path, "list"])
-        .output()
-        .unwrap();
+    let out = binary().args(["--db", db_path, "list"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("Custom Title"),
@@ -357,8 +360,13 @@ fn plan_attaches_to_existing_task() {
     // Create a task first
     binary()
         .args([
-            "--db", db_path, "create", "--from-plan", plan.path().to_str().unwrap(),
-            "--repo-path", "/tmp/test-repo",
+            "--db",
+            db_path,
+            "create",
+            "--from-plan",
+            plan.path().to_str().unwrap(),
+            "--repo-path",
+            "/tmp/test-repo",
         ])
         .output()
         .unwrap();
@@ -367,7 +375,13 @@ fn plan_attaches_to_existing_task() {
     let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
 
     let out = binary()
-        .args(["--db", db_path, "plan", "1", attach_plan.path().to_str().unwrap()])
+        .args([
+            "--db",
+            db_path,
+            "plan",
+            "1",
+            attach_plan.path().to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -387,7 +401,11 @@ fn plan_nonexistent_file_fails() {
     let db = NamedTempFile::new().unwrap();
     let out = binary()
         .args([
-            "--db", db.path().to_str().unwrap(), "plan", "1", "/tmp/nonexistent-plan-99999.md",
+            "--db",
+            db.path().to_str().unwrap(),
+            "plan",
+            "1",
+            "/tmp/nonexistent-plan-99999.md",
         ])
         .output()
         .unwrap();
@@ -420,8 +438,5 @@ fn update_unknown_status_fails() {
         .args(["--db", db_path, "update", "1", "bogus-status"])
         .output()
         .unwrap();
-    assert!(
-        !out.status.success(),
-        "Expected failure for unknown status"
-    );
+    assert!(!out.status.success(), "Expected failure for unknown status");
 }

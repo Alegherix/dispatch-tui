@@ -178,7 +178,8 @@ const PR_FIELDS: &str = r#"... on PullRequest {
 /// Uses `gh api graphql` via the provided ProcessRunner.
 /// Bot authors (dependabot, renovate) are excluded server-side.
 pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, String> {
-    let query = format!(r#"{{
+    let query = format!(
+        r#"{{
   viewer {{ login }}
   requestedReview: search(query: "is:pr is:open review-requested:@me -is:draft -author:app/dependabot -author:app/renovate", type: ISSUE, first: 100) {{
     nodes {{
@@ -190,7 +191,8 @@ pub fn fetch_review_prs(runner: &dyn ProcessRunner) -> Result<Vec<ReviewPr>, Str
       {PR_FIELDS}
     }}
   }}
-}}"#);
+}}"#
+    );
 
     let output = runner
         .run("gh", &["api", "graphql", "-f", &format!("query={query}")])
@@ -336,9 +338,9 @@ mod tests {
 
     #[test]
     fn fetch_review_prs_calls_gh_and_parses() {
-        let runner = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(SAMPLE_RESPONSE.as_bytes()),
-        ]);
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            SAMPLE_RESPONSE.as_bytes(),
+        )]);
         let prs = fetch_review_prs(&runner).unwrap();
         assert_eq!(prs.len(), 2); // draft filtered out
 
@@ -350,9 +352,7 @@ mod tests {
 
     #[test]
     fn fetch_review_prs_gh_failure() {
-        let runner = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("gh: not authenticated"),
-        ]);
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::fail("gh: not authenticated")]);
         let result = fetch_review_prs(&runner);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not authenticated"));
@@ -360,14 +360,20 @@ mod tests {
 
     #[test]
     fn fetch_review_prs_query_includes_both_searches() {
-        let runner = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(SAMPLE_RESPONSE.as_bytes()),
-        ]);
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            SAMPLE_RESPONSE.as_bytes(),
+        )]);
         let _ = fetch_review_prs(&runner);
         let calls = runner.recorded_calls();
         let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
-        assert!(query_arg.contains("review-requested:@me"), "missing review-requested qualifier");
-        assert!(query_arg.contains("reviewed-by:@me"), "missing reviewed-by qualifier");
+        assert!(
+            query_arg.contains("review-requested:@me"),
+            "missing review-requested qualifier"
+        );
+        assert!(
+            query_arg.contains("reviewed-by:@me"),
+            "missing reviewed-by qualifier"
+        );
         assert!(query_arg.contains("-is:draft"));
         assert!(query_arg.contains("-author:app/dependabot"));
         assert!(query_arg.contains("-author:app/renovate"));
@@ -420,7 +426,8 @@ mod tests {
 
     #[test]
     fn classify_approved_takes_priority() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "APPROVED",
             "author": {"login": "alice"},
             "comments": {"nodes": [
@@ -428,13 +435,18 @@ mod tests {
             ]},
             "reviews": {"nodes": []},
             "commits": {"nodes": []}
-        }"#);
-        assert_eq!(classify_review_decision(&node, "me"), ReviewDecision::Approved);
+        }"#,
+        );
+        assert_eq!(
+            classify_review_decision(&node, "me"),
+            ReviewDecision::Approved
+        );
     }
 
     #[test]
     fn classify_changes_requested_takes_priority() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "CHANGES_REQUESTED",
             "author": {"login": "alice"},
             "comments": {"nodes": [
@@ -442,7 +454,8 @@ mod tests {
             ]},
             "reviews": {"nodes": []},
             "commits": {"nodes": []}
-        }"#);
+        }"#,
+        );
         assert_eq!(
             classify_review_decision(&node, "me"),
             ReviewDecision::ChangesRequested,
@@ -451,13 +464,15 @@ mod tests {
 
     #[test]
     fn classify_no_viewer_interaction() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "REVIEW_REQUIRED",
             "author": {"login": "alice"},
             "comments": {"nodes": []},
             "reviews": {"nodes": []},
             "commits": {"nodes": []}
-        }"#);
+        }"#,
+        );
         assert_eq!(
             classify_review_decision(&node, "me"),
             ReviewDecision::ReviewRequired,
@@ -466,7 +481,8 @@ mod tests {
 
     #[test]
     fn classify_viewer_comment_no_author_response() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "REVIEW_REQUIRED",
             "author": {"login": "alice"},
             "comments": {"nodes": [
@@ -474,7 +490,8 @@ mod tests {
             ]},
             "reviews": {"nodes": []},
             "commits": {"nodes": [{"commit": {"committedDate": "2026-03-27T10:00:00Z"}}]}
-        }"#);
+        }"#,
+        );
         assert_eq!(
             classify_review_decision(&node, "me"),
             ReviewDecision::WaitingForResponse,
@@ -483,7 +500,8 @@ mod tests {
 
     #[test]
     fn classify_viewer_commented_review_no_response() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "REVIEW_REQUIRED",
             "author": {"login": "alice"},
             "comments": {"nodes": []},
@@ -491,7 +509,8 @@ mod tests {
                 {"state": "COMMENTED", "author": {"login": "me"}, "submittedAt": "2026-03-28T12:00:00Z"}
             ]},
             "commits": {"nodes": [{"commit": {"committedDate": "2026-03-27T10:00:00Z"}}]}
-        }"#);
+        }"#,
+        );
         assert_eq!(
             classify_review_decision(&node, "me"),
             ReviewDecision::WaitingForResponse,
@@ -500,7 +519,8 @@ mod tests {
 
     #[test]
     fn classify_author_comment_after_viewer() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "REVIEW_REQUIRED",
             "author": {"login": "alice"},
             "comments": {"nodes": [
@@ -509,7 +529,8 @@ mod tests {
             ]},
             "reviews": {"nodes": []},
             "commits": {"nodes": [{"commit": {"committedDate": "2026-03-27T10:00:00Z"}}]}
-        }"#);
+        }"#,
+        );
         assert_eq!(
             classify_review_decision(&node, "me"),
             ReviewDecision::ReviewRequired,
@@ -518,7 +539,8 @@ mod tests {
 
     #[test]
     fn classify_new_commit_after_viewer_comment() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "REVIEW_REQUIRED",
             "author": {"login": "alice"},
             "comments": {"nodes": [
@@ -526,7 +548,8 @@ mod tests {
             ]},
             "reviews": {"nodes": []},
             "commits": {"nodes": [{"commit": {"committedDate": "2026-03-28T14:00:00Z"}}]}
-        }"#);
+        }"#,
+        );
         assert_eq!(
             classify_review_decision(&node, "me"),
             ReviewDecision::ReviewRequired,
@@ -535,7 +558,8 @@ mod tests {
 
     #[test]
     fn classify_author_comment_before_viewer() {
-        let node = make_pr_node(r#"{
+        let node = make_pr_node(
+            r#"{
             "reviewDecision": "REVIEW_REQUIRED",
             "author": {"login": "alice"},
             "comments": {"nodes": [
@@ -544,7 +568,8 @@ mod tests {
             ]},
             "reviews": {"nodes": []},
             "commits": {"nodes": [{"commit": {"committedDate": "2026-03-27T10:00:00Z"}}]}
-        }"#);
+        }"#,
+        );
         assert_eq!(
             classify_review_decision(&node, "me"),
             ReviewDecision::WaitingForResponse,

@@ -15,7 +15,9 @@ pub fn parse_plan(content: &str) -> Result<PlanMetadata> {
     let title = content
         .lines()
         .find(|line| line.starts_with("# "))
-        .ok_or_else(|| anyhow::anyhow!("No H1 heading found. Use --title to provide a title manually."))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("No H1 heading found. Use --title to provide a title manually.")
+        })?;
 
     let title = title
         .trim_start_matches('#')
@@ -105,7 +107,10 @@ mod tests {
         let result = parse_plan(content);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("H1"), "Error should mention missing H1 heading");
+        assert!(
+            msg.contains("H1"),
+            "Error should mention missing H1 heading"
+        );
     }
 
     #[test]

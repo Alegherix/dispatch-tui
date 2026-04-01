@@ -1,11 +1,13 @@
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::db::EpicPatch;
-use crate::models::{EpicId, TaskStatus};
 use crate::mcp::McpState;
+use crate::models::{EpicId, TaskStatus};
 
-use super::types::{JsonRpcResponse, deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args};
+use super::types::{
+    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, JsonRpcResponse,
+};
 
 // ---------------------------------------------------------------------------
 // Typed argument structs
@@ -47,7 +49,11 @@ pub(super) struct UpdateEpicArgs {
 // Epic tool handlers
 // ---------------------------------------------------------------------------
 
-pub(super) fn handle_create_epic(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) fn handle_create_epic(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<CreateEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -56,10 +62,15 @@ pub(super) fn handle_create_epic(state: &McpState, id: Option<Value>, args: Valu
 
     let repo_path = crate::models::expand_tilde(&parsed.repo_path);
 
-    match state.db.create_epic(&parsed.title, &parsed.description, &repo_path) {
+    match state
+        .db
+        .create_epic(&parsed.title, &parsed.description, &repo_path)
+    {
         Ok(epic) => {
             if let Some(so) = parsed.sort_order {
-                let _ = state.db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(so)));
+                let _ = state
+                    .db
+                    .patch_epic(epic.id, &EpicPatch::new().sort_order(Some(so)));
             }
             state.notify();
             JsonRpcResponse::ok(
@@ -81,7 +92,10 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
     match state.db.get_epic(EpicId(parsed.epic_id)) {
         Ok(Some(epic)) => {
             let subtasks = state.db.list_tasks_for_epic(epic.id).unwrap_or_default();
-            let done_count = subtasks.iter().filter(|t| t.status == TaskStatus::Done).count();
+            let done_count = subtasks
+                .iter()
+                .filter(|t| t.status == TaskStatus::Done)
+                .count();
             let total = subtasks.len();
             let mut text = format!(
                 "Epic {id}: {title}\nDescription: {desc}\nRepo: {repo}\nDone: {done_flag}",
@@ -97,8 +111,14 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
             if let Some(sort_order) = epic.sort_order {
                 text.push_str(&format!("\nSort order: {sort_order}"));
             }
-            text.push_str(&format!("\nCreated: {}", epic.created_at.format("%Y-%m-%d %H:%M:%S UTC")));
-            text.push_str(&format!("\nUpdated: {}", epic.updated_at.format("%Y-%m-%d %H:%M:%S UTC")));
+            text.push_str(&format!(
+                "\nCreated: {}",
+                epic.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+            ));
+            text.push_str(&format!(
+                "\nUpdated: {}",
+                epic.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+            ));
             text.push_str(&format!("\nSubtasks: {done_count}/{total} done"));
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
@@ -107,7 +127,11 @@ pub(super) fn handle_get_epic(state: &McpState, id: Option<Value>, args: Value) 
     }
 }
 
-pub(super) fn handle_list_epics(state: &McpState, id: Option<Value>, _args: Value) -> JsonRpcResponse {
+pub(super) fn handle_list_epics(
+    state: &McpState,
+    id: Option<Value>,
+    _args: Value,
+) -> JsonRpcResponse {
     tracing::info!("MCP list_epics");
 
     match state.db.list_epics() {
@@ -118,20 +142,42 @@ pub(super) fn handle_list_epics(state: &McpState, id: Option<Value>, _args: Valu
                     json!({"content": [{"type": "text", "text": "No epics found"}]}),
                 );
             }
-            let lines: Vec<String> = epics.iter().map(|e| {
-                let subtasks = state.db.list_tasks_for_epic(e.id).unwrap_or_default();
-                let done = subtasks.iter().filter(|t| t.status == TaskStatus::Done).count();
-                let plan_indicator = if e.plan.is_some() { " [plan]" } else { "" };
-                let done_indicator = if e.done { " [done]" } else { "" };
-                format!("- [{}] {} ({}/{} done){}{}: {}", e.id, e.title, done, subtasks.len(), plan_indicator, done_indicator, e.description)
-            }).collect();
-            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": lines.join("\n")}]}))
+            let lines: Vec<String> = epics
+                .iter()
+                .map(|e| {
+                    let subtasks = state.db.list_tasks_for_epic(e.id).unwrap_or_default();
+                    let done = subtasks
+                        .iter()
+                        .filter(|t| t.status == TaskStatus::Done)
+                        .count();
+                    let plan_indicator = if e.plan.is_some() { " [plan]" } else { "" };
+                    let done_indicator = if e.done { " [done]" } else { "" };
+                    format!(
+                        "- [{}] {} ({}/{} done){}{}: {}",
+                        e.id,
+                        e.title,
+                        done,
+                        subtasks.len(),
+                        plan_indicator,
+                        done_indicator,
+                        e.description
+                    )
+                })
+                .collect();
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": lines.join("\n")}]}),
+            )
         }
         Err(e) => JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     }
 }
 
-pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) fn handle_update_epic(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<UpdateEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -153,11 +199,21 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     }
 
     let mut patch = EpicPatch::new();
-    if let Some(ref t) = parsed.title { patch = patch.title(t); }
-    if let Some(ref d) = parsed.description { patch = patch.description(d); }
-    if let Some(d) = parsed.done { patch = patch.done(d); }
-    if let Some(ref p) = parsed.plan { patch = patch.plan(Some(p.as_str())); }
-    if let Some(so) = parsed.sort_order { patch = patch.sort_order(Some(so)); }
+    if let Some(ref t) = parsed.title {
+        patch = patch.title(t);
+    }
+    if let Some(ref d) = parsed.description {
+        patch = patch.description(d);
+    }
+    if let Some(d) = parsed.done {
+        patch = patch.done(d);
+    }
+    if let Some(ref p) = parsed.plan {
+        patch = patch.plan(Some(p.as_str()));
+    }
+    if let Some(so) = parsed.sort_order {
+        patch = patch.sort_order(Some(so));
+    }
 
     if let Err(e) = state.db.patch_epic(EpicId(parsed.epic_id), &patch) {
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
@@ -165,11 +221,21 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
 
     state.notify();
     let mut updated = Vec::new();
-    if parsed.title.is_some() { updated.push("title"); }
-    if parsed.description.is_some() { updated.push("description"); }
-    if parsed.done.is_some() { updated.push("done"); }
-    if parsed.plan.is_some() { updated.push("plan"); }
-    if parsed.sort_order.is_some() { updated.push("sort_order"); }
+    if parsed.title.is_some() {
+        updated.push("title");
+    }
+    if parsed.description.is_some() {
+        updated.push("description");
+    }
+    if parsed.done.is_some() {
+        updated.push("done");
+    }
+    if parsed.plan.is_some() {
+        updated.push("plan");
+    }
+    if parsed.sort_order.is_some() {
+        updated.push("sort_order");
+    }
 
     JsonRpcResponse::ok(
         id,

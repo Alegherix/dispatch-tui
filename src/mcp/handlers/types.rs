@@ -76,7 +76,8 @@ impl<'de> serde::de::Visitor<'de> for FlexibleI64Visitor {
     }
 
     fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<i64, E> {
-        v.parse::<i64>().map_err(|_| E::custom(format!("invalid integer string: {v}")))
+        v.parse::<i64>()
+            .map_err(|_| E::custom(format!("invalid integer string: {v}")))
     }
 }
 
@@ -87,7 +88,9 @@ where
     deserializer.deserialize_any(FlexibleI64Visitor)
 }
 
-pub(super) fn deserialize_optional_flexible_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+pub(super) fn deserialize_optional_flexible_i64<'de, D>(
+    deserializer: D,
+) -> Result<Option<i64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -99,8 +102,12 @@ where
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             f.write_str("null, an integer, or a string integer")
         }
-        fn visit_none<E: de::Error>(self) -> Result<Option<i64>, E> { Ok(None) }
-        fn visit_unit<E: de::Error>(self) -> Result<Option<i64>, E> { Ok(None) }
+        fn visit_none<E: de::Error>(self) -> Result<Option<i64>, E> {
+            Ok(None)
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Option<i64>, E> {
+            Ok(None)
+        }
         fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<Option<i64>, D2::Error> {
             d.deserialize_any(FlexibleI64Visitor).map(Some)
         }

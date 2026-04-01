@@ -12,9 +12,9 @@ impl App {
 
         match self.input.mode.clone() {
             InputMode::Normal => self.handle_key_normal(key),
-            InputMode::InputTitle
-            | InputMode::InputDescription
-            | InputMode::InputRepoPath => self.handle_key_text_input(key),
+            InputMode::InputTitle | InputMode::InputDescription | InputMode::InputRepoPath => {
+                self.handle_key_text_input(key)
+            }
             InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
             InputMode::InputTag => self.handle_key_tag(key),
             InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
@@ -47,9 +47,7 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Tab => {
-                self.update(Message::SwitchToReviewBoard)
-            }
+            KeyCode::Tab => self.update(Message::SwitchToReviewBoard),
 
             KeyCode::Char('q') => {
                 if matches!(self.view_mode, ViewMode::Epic { .. }) {
@@ -71,25 +69,23 @@ impl App {
             KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
             KeyCode::Char('f') => self.update(Message::StartRepoFilter),
-            KeyCode::Char('W') => {
-                match self.selected_column_item() {
-                    Some(ColumnItem::Task(task)) => {
-                        let id = task.id;
-                        self.update(Message::StartWrapUp(id))
-                    }
-                    Some(ColumnItem::Epic(epic)) => {
-                        let id = epic.id;
-                        self.update(Message::StartEpicWrapUp(id))
-                    }
-                    None => vec![],
+            KeyCode::Char('W') => match self.selected_column_item() {
+                Some(ColumnItem::Task(task)) => {
+                    let id = task.id;
+                    self.update(Message::StartWrapUp(id))
                 }
-            }
+                Some(ColumnItem::Epic(epic)) => {
+                    let id = epic.id;
+                    self.update(Message::StartEpicWrapUp(id))
+                }
+                None => vec![],
+            },
             KeyCode::Char('m') => {
                 if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
                     let id = epic.id;
                     let statuses = self.subtask_statuses(id);
-                    let all_done = !statuses.is_empty()
-                        && statuses.iter().all(|s| *s == TaskStatus::Done);
+                    let all_done =
+                        !statuses.is_empty() && statuses.iter().all(|s| *s == TaskStatus::Done);
                     if all_done && !epic.done {
                         let title = crate::tui::truncate_title(&epic.title, 30);
                         self.input.mode = InputMode::ConfirmEpicDone(id);
@@ -118,12 +114,16 @@ impl App {
             KeyCode::Char('g') => {
                 if let Some(task) = self.selected_task() {
                     if let Some(window) = &task.tmux_window {
-                        vec![Command::JumpToTmux { window: window.clone() }]
+                        vec![Command::JumpToTmux {
+                            window: window.clone(),
+                        }]
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
                     }
                 } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-                    let window = self.tasks.iter()
+                    let window = self
+                        .tasks
+                        .iter()
                         .filter(|t| {
                             t.epic_id == Some(epic.id)
                                 && (t.status == TaskStatus::Review
@@ -161,19 +161,17 @@ impl App {
 
             KeyCode::Char('a') => self.update(Message::SelectAllColumn),
 
-            KeyCode::Char(' ') => {
-                match self.selected_column_item() {
-                    Some(ColumnItem::Task(task)) => {
-                        let id = task.id;
-                        self.update(Message::ToggleSelect(id))
-                    }
-                    Some(ColumnItem::Epic(epic)) => {
-                        let id = epic.id;
-                        self.update(Message::ToggleSelectEpic(id))
-                    }
-                    None => vec![],
+            KeyCode::Char(' ') => match self.selected_column_item() {
+                Some(ColumnItem::Task(task)) => {
+                    let id = task.id;
+                    self.update(Message::ToggleSelect(id))
                 }
-            }
+                Some(ColumnItem::Epic(epic)) => {
+                    let id = epic.id;
+                    self.update(Message::ToggleSelectEpic(id))
+                }
+                None => vec![],
+            },
 
             KeyCode::Enter => {
                 if self.selection().on_select_all {
@@ -182,23 +180,21 @@ impl App {
                 self.update(Message::ToggleDetail)
             }
 
-            KeyCode::Char('e') => {
-                match self.selected_column_item() {
-                    Some(ColumnItem::Task(task)) => vec![Command::EditTaskInEditor(task.clone())],
-                    Some(ColumnItem::Epic(epic)) => {
-                        let id = epic.id;
-                        self.update(Message::EnterEpic(id))
-                    }
-                    None => {
-                        if let ViewMode::Epic { epic_id, .. } = &self.view_mode {
-                            let id = *epic_id;
-                            self.update(Message::EditEpic(id))
-                        } else {
-                            vec![]
-                        }
+            KeyCode::Char('e') => match self.selected_column_item() {
+                Some(ColumnItem::Task(task)) => vec![Command::EditTaskInEditor(task.clone())],
+                Some(ColumnItem::Epic(epic)) => {
+                    let id = epic.id;
+                    self.update(Message::EnterEpic(id))
+                }
+                None => {
+                    if let ViewMode::Epic { epic_id, .. } = &self.view_mode {
+                        let id = *epic_id;
+                        self.update(Message::EditEpic(id))
+                    } else {
+                        vec![]
                     }
                 }
-            }
+            },
 
             KeyCode::Char('V') => {
                 if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
@@ -217,9 +213,7 @@ impl App {
                     vec![]
                 } else {
                     match self.selected_column_item() {
-                        Some(ColumnItem::Epic(_)) => {
-                            self.update(Message::ConfirmArchiveEpic)
-                        }
+                        Some(ColumnItem::Epic(_)) => self.update(Message::ConfirmArchiveEpic),
                         _ => {
                             if self.selected_task().is_some() {
                                 self.input.mode = InputMode::ConfirmArchive;
@@ -237,7 +231,10 @@ impl App {
                     let eid = *epic_id;
                     if let Some(epic) = self.epics.iter().find(|e| e.id == eid) {
                         let repo_path = epic.repo_path.clone();
-                        return self.update(Message::QuickDispatch { repo_path, epic_id: Some(eid) });
+                        return self.update(Message::QuickDispatch {
+                            repo_path,
+                            epic_id: Some(eid),
+                        });
                     }
                 }
                 match self.repo_paths.len() {
@@ -246,7 +243,10 @@ impl App {
                     )),
                     1 => {
                         let repo_path = self.repo_paths[0].clone();
-                        self.update(Message::QuickDispatch { repo_path, epic_id: None })
+                        self.update(Message::QuickDispatch {
+                            repo_path,
+                            epic_id: None,
+                        })
                     }
                     _ => self.update(Message::StartQuickDispatchSelection),
                 }
@@ -339,8 +339,9 @@ impl App {
                 let has_worktree = task.worktree.is_some();
                 let has_plan = task.plan.is_some();
                 let tag = task.tag.as_deref();
-                let is_problematic = self.find_task(id)
-                    .is_some_and(|t| t.sub_status == SubStatus::Stale || t.sub_status == SubStatus::Crashed);
+                let is_problematic = self.find_task(id).is_some_and(|t| {
+                    t.sub_status == SubStatus::Stale || t.sub_status == SubStatus::Crashed
+                });
 
                 match status {
                     TaskStatus::Backlog => {
@@ -365,16 +366,17 @@ impl App {
                             self.update(Message::ResumeTask(id))
                         } else {
                             self.update(Message::StatusInfo(
-                                "No worktree to resume, move to Backlog and re-dispatch".to_string(),
+                                "No worktree to resume, move to Backlog and re-dispatch"
+                                    .to_string(),
                             ))
                         }
                     }
-                    TaskStatus::Done => self.update(Message::StatusInfo(
-                        "Task is done".to_string(),
-                    )),
-                    TaskStatus::Archived => self.update(Message::StatusInfo(
-                        "Task is archived".to_string(),
-                    )),
+                    TaskStatus::Done => {
+                        self.update(Message::StatusInfo("Task is done".to_string()))
+                    }
+                    TaskStatus::Archived => {
+                        self.update(Message::StatusInfo("Task is archived".to_string()))
+                    }
                 }
             }
             None => {
@@ -411,8 +413,12 @@ impl App {
         let is_repo_mode = matches!(self.input.mode, InputMode::InputRepoPath);
         if is_repo_mode && self.input.buffer.is_empty() {
             match key.code {
-                KeyCode::Char('j') | KeyCode::Down => return self.update(Message::MoveRepoCursor(1)),
-                KeyCode::Char('k') | KeyCode::Up => return self.update(Message::MoveRepoCursor(-1)),
+                KeyCode::Char('j') | KeyCode::Down => {
+                    return self.update(Message::MoveRepoCursor(1))
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    return self.update(Message::MoveRepoCursor(-1))
+                }
                 _ => {}
             }
         }
@@ -561,8 +567,12 @@ impl App {
         // In epic repo path mode, j/k navigate saved repo paths when the buffer is empty
         if matches!(self.input.mode, InputMode::InputEpicRepoPath) && self.input.buffer.is_empty() {
             match key.code {
-                KeyCode::Char('j') | KeyCode::Down => return self.update(Message::MoveRepoCursor(1)),
-                KeyCode::Char('k') | KeyCode::Up => return self.update(Message::MoveRepoCursor(-1)),
+                KeyCode::Char('j') | KeyCode::Down => {
+                    return self.update(Message::MoveRepoCursor(1))
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    return self.update(Message::MoveRepoCursor(-1))
+                }
                 _ => {}
             }
         }
@@ -570,7 +580,9 @@ impl App {
             KeyCode::Esc => self.update(Message::CancelInput),
             KeyCode::Enter => {
                 // In epic repo path mode with empty buffer, Enter selects the cursor repo
-                if matches!(self.input.mode, InputMode::InputEpicRepoPath) && self.input.buffer.is_empty() {
+                if matches!(self.input.mode, InputMode::InputEpicRepoPath)
+                    && self.input.buffer.is_empty()
+                {
                     let idx = self.input.repo_cursor;
                     if let Some(path) = self.repo_paths.get(idx) {
                         return self.update(Message::SubmitEpicRepoPath(path.clone()));
@@ -579,7 +591,9 @@ impl App {
                 let value = self.input.buffer.trim().to_string();
                 match self.input.mode.clone() {
                     InputMode::InputEpicTitle => self.update(Message::SubmitEpicTitle(value)),
-                    InputMode::InputEpicDescription => self.update(Message::SubmitEpicDescription(value)),
+                    InputMode::InputEpicDescription => {
+                        self.update(Message::SubmitEpicDescription(value))
+                    }
                     InputMode::InputEpicRepoPath => self.update(Message::SubmitEpicRepoPath(value)),
                     _ => vec![],
                 }

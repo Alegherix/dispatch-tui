@@ -1,12 +1,14 @@
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::db;
 use crate::dispatch;
-use crate::models::{EpicId, SubStatus, Task, TaskId, TaskStatus, UsageReport};
 use crate::mcp::McpState;
+use crate::models::{EpicId, SubStatus, Task, TaskId, TaskStatus, UsageReport};
 
-use super::types::{JsonRpcResponse, deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args};
+use super::types::{
+    deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, JsonRpcResponse,
+};
 
 // ---------------------------------------------------------------------------
 // Typed argument structs
@@ -126,14 +128,22 @@ fn format_task_detail(task: &Task) -> String {
     if let Some(sort_order) = task.sort_order {
         text.push_str(&format!("\nSort order: {sort_order}"));
     }
-    text.push_str(&format!("\nCreated: {}", task.created_at.format("%Y-%m-%d %H:%M:%S UTC")));
-    text.push_str(&format!("\nUpdated: {}", task.updated_at.format("%Y-%m-%d %H:%M:%S UTC")));
+    text.push_str(&format!(
+        "\nCreated: {}",
+        task.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+    ));
+    text.push_str(&format!(
+        "\nUpdated: {}",
+        task.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+    ));
     text
 }
 
 fn format_task_line(t: &Task) -> String {
     let desc_preview = if t.description.len() > 200 {
-        let end = t.description.char_indices()
+        let end = t
+            .description
+            .char_indices()
             .take_while(|(i, _)| *i < 200)
             .last()
             .map(|(i, c)| i + c.len_utf8())
@@ -153,7 +163,14 @@ fn format_task_line(t: &Task) -> String {
     };
     format!(
         "- [{}] {} ({}/{}){}{}{}: {}",
-        t.id, t.title, t.status.as_str(), t.sub_status.as_str(), plan_indicator, tag_indicator, epic_indicator, desc_preview
+        t.id,
+        t.title,
+        t.status.as_str(),
+        t.sub_status.as_str(),
+        plan_indicator,
+        tag_indicator,
+        epic_indicator,
+        desc_preview
     )
 }
 
@@ -161,7 +178,11 @@ fn format_task_line(t: &Task) -> String {
 // Task tool handlers
 // ---------------------------------------------------------------------------
 
-pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) fn handle_update_task(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<UpdateTaskArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -193,9 +214,7 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
                 return JsonRpcResponse::err(
                     id,
                     -32602,
-                    format!(
-                        "Unknown status: {status_str}. Valid values: backlog, running, review"
-                    ),
+                    format!("Unknown status: {status_str}. Valid values: backlog, running, review"),
                 )
             }
         }
@@ -248,16 +267,28 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
             ),
         };
         // Validate against current (or new) status
-        let effective_status = parsed.status.as_deref()
+        let effective_status = parsed
+            .status
+            .as_deref()
             .and_then(TaskStatus::parse)
             .or_else(|| {
-                state.db.get_task(TaskId(parsed.task_id)).ok().flatten().map(|t| t.status)
+                state
+                    .db
+                    .get_task(TaskId(parsed.task_id))
+                    .ok()
+                    .flatten()
+                    .map(|t| t.status)
             });
         if let Some(eff) = effective_status {
             if !ss.is_valid_for(eff) {
                 return JsonRpcResponse::err(
-                    id, -32602,
-                    format!("sub_status '{}' is not valid for status '{}'", ss_str, eff.as_str()),
+                    id,
+                    -32602,
+                    format!(
+                        "sub_status '{}' is not valid for status '{}'",
+                        ss_str,
+                        eff.as_str()
+                    ),
                 );
             }
         }
@@ -271,15 +302,33 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     state.notify();
 
     let mut updated = Vec::new();
-    if let Some(ref s) = parsed.status { updated.push(format!("status={s}")); }
-    if parsed.plan.is_some() { updated.push("plan".to_string()); }
-    if parsed.title.is_some() { updated.push("title".to_string()); }
-    if parsed.description.is_some() { updated.push("description".to_string()); }
-    if parsed.repo_path.is_some() { updated.push("repo_path".to_string()); }
-    if parsed.sort_order.is_some() { updated.push("sort_order".to_string()); }
-    if parsed.pr_url.is_some() { updated.push("pr_url".to_string()); }
-    if parsed.tag.is_some() { updated.push("tag".to_string()); }
-    if parsed.sub_status.is_some() { updated.push("sub_status".to_string()); }
+    if let Some(ref s) = parsed.status {
+        updated.push(format!("status={s}"));
+    }
+    if parsed.plan.is_some() {
+        updated.push("plan".to_string());
+    }
+    if parsed.title.is_some() {
+        updated.push("title".to_string());
+    }
+    if parsed.description.is_some() {
+        updated.push("description".to_string());
+    }
+    if parsed.repo_path.is_some() {
+        updated.push("repo_path".to_string());
+    }
+    if parsed.sort_order.is_some() {
+        updated.push("sort_order".to_string());
+    }
+    if parsed.pr_url.is_some() {
+        updated.push("pr_url".to_string());
+    }
+    if parsed.tag.is_some() {
+        updated.push("tag".to_string());
+    }
+    if parsed.sub_status.is_some() {
+        updated.push("sub_status".to_string());
+    }
 
     JsonRpcResponse::ok(
         id,
@@ -287,7 +336,11 @@ pub(super) fn handle_update_task(state: &McpState, id: Option<Value>, args: Valu
     )
 }
 
-pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) fn handle_create_task(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<CreateTaskWithEpicArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -314,14 +367,22 @@ pub(super) fn handle_create_task(state: &McpState, id: Option<Value>, args: Valu
         Ok(task_id) => {
             if let Some(eid) = parsed.epic_id {
                 if let Err(e) = state.db.set_task_epic_id(task_id, Some(EpicId(eid))) {
-                    return JsonRpcResponse::err(id, -32603, format!("Failed to link task to epic: {e}"));
+                    return JsonRpcResponse::err(
+                        id,
+                        -32603,
+                        format!("Failed to link task to epic: {e}"),
+                    );
                 }
             }
             if let Some(so) = parsed.sort_order {
-                let _ = state.db.patch_task(task_id, &db::TaskPatch::new().sort_order(Some(so)));
+                let _ = state
+                    .db
+                    .patch_task(task_id, &db::TaskPatch::new().sort_order(Some(so)));
             }
             if let Some(ref t) = parsed.tag {
-                let _ = state.db.patch_task(task_id, &db::TaskPatch::new().tag(Some(t)));
+                let _ = state
+                    .db
+                    .patch_task(task_id, &db::TaskPatch::new().tag(Some(t)));
             }
             state.notify();
             JsonRpcResponse::ok(
@@ -349,7 +410,11 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
     }
 }
 
-pub(super) fn handle_list_tasks(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) fn handle_list_tasks(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<ListTasksArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -395,7 +460,10 @@ pub(super) fn handle_list_tasks(state: &McpState, id: Option<Value>, args: Value
     };
 
     let filtered: Vec<_> = match &status_filter {
-        Some(statuses) => tasks.into_iter().filter(|t| statuses.contains(&t.status)).collect(),
+        Some(statuses) => tasks
+            .into_iter()
+            .filter(|t| statuses.contains(&t.status))
+            .collect(),
         None => tasks,
     };
 
@@ -409,13 +477,14 @@ pub(super) fn handle_list_tasks(state: &McpState, id: Option<Value>, args: Value
     let lines: Vec<String> = filtered.iter().map(format_task_line).collect();
 
     let text = lines.join("\n");
-    JsonRpcResponse::ok(
-        id,
-        json!({"content": [{"type": "text", "text": text}]}),
-    )
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) fn handle_claim_task(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<ClaimTaskArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -438,7 +507,11 @@ pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value
         return JsonRpcResponse::err(
             id,
             -32602,
-            format!("Task {} is already {}", parsed.task_id, task.status.as_str()),
+            format!(
+                "Task {} is already {}",
+                parsed.task_id,
+                task.status.as_str()
+            ),
         );
     }
 
@@ -478,7 +551,11 @@ pub(super) fn handle_claim_task(state: &McpState, id: Option<Value>, args: Value
     )
 }
 
-pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) async fn handle_wrap_up(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<WrapUpArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
@@ -489,7 +566,10 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
         return JsonRpcResponse::err(
             id,
             -32602,
-            format!("Unknown action: {}. Valid values: rebase, pr", parsed.action),
+            format!(
+                "Unknown action: {}. Valid values: rebase, pr",
+                parsed.action
+            ),
         );
     }
 
@@ -505,11 +585,17 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
         return JsonRpcResponse::err(
             id,
             -32602,
-            format!("Task {} cannot be wrapped up. Requires Running or Review status with a worktree.", parsed.task_id),
+            format!(
+                "Task {} cannot be wrapped up. Requires Running or Review status with a worktree.",
+                parsed.task_id
+            ),
         );
     }
 
-    let worktree = task.worktree.clone().expect("is_wrappable guarantees worktree is Some");
+    let worktree = task
+        .worktree
+        .clone()
+        .expect("is_wrappable guarantees worktree is Some");
 
     let branch = match dispatch::branch_from_worktree(&worktree) {
         Some(b) => b,
@@ -530,19 +616,28 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
 
     // Gather auto-dispatch context for epic subtasks.
     // If this task belongs to an epic, find the next backlog subtask to chain-dispatch.
-    let next_epic_task = task.epic_id.and_then(|epic_id| {
-        match state.db.list_tasks_for_epic(epic_id) {
-            Ok(tasks) => tasks.into_iter().find(|t| t.status == TaskStatus::Backlog),
-            Err(e) => {
-                tracing::warn!(epic_id = epic_id.0, "auto-dispatch: failed to list epic tasks: {e}");
-                None
-            }
-        }
-    });
+    let next_epic_task =
+        task.epic_id
+            .and_then(|epic_id| match state.db.list_tasks_for_epic(epic_id) {
+                Ok(tasks) => tasks.into_iter().find(|t| t.status == TaskStatus::Backlog),
+                Err(e) => {
+                    tracing::warn!(
+                        epic_id = epic_id.0,
+                        "auto-dispatch: failed to list epic tasks: {e}"
+                    );
+                    None
+                }
+            });
 
-    let auto_dispatch_msg = next_epic_task.as_ref().map(|t| {
-        format!("; next epic task #{} '{}' will be dispatched", t.id, t.title)
-    }).unwrap_or_default();
+    let auto_dispatch_msg = next_epic_task
+        .as_ref()
+        .map(|t| {
+            format!(
+                "; next epic task #{} '{}' will be dispatched",
+                t.id, t.title
+            )
+        })
+        .unwrap_or_default();
 
     match parsed.action.as_str() {
         "rebase" => {
@@ -558,7 +653,9 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
                     None, // Don't kill tmux yet -- need to return response first
                     &*rebase_runner,
                 )
-            }).await {
+            })
+            .await
+            {
                 Ok(r) => r,
                 Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
             };
@@ -605,7 +702,9 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
             let pr_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up pr starting");
                 dispatch::create_pr(&repo_path, &branch, &title, &description, &*pr_runner)
-            }).await {
+            })
+            .await
+            {
                 Ok(r) => r,
                 Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
             };
@@ -628,8 +727,7 @@ pub(super) async fn handle_wrap_up(state: &McpState, id: Option<Value>, args: Va
                     tokio::task::spawn_blocking(move || {
                         if let Some(window) = &tmux_window {
                             let review_cmd = format!("/code-review {}", result.pr_url);
-                            if let Err(e) =
-                                crate::tmux::send_keys(window, &review_cmd, &*ad_runner)
+                            if let Err(e) = crate::tmux::send_keys(window, &review_cmd, &*ad_runner)
                             {
                                 tracing::warn!(
                                     task_id = task_id.0,
@@ -701,24 +799,31 @@ fn auto_dispatch_next(
             }
         }
         Err(e) => {
-            tracing::warn!(
-                task_id = next_id.0,
-                "auto-dispatch: dispatch failed: {e:#}"
-            );
+            tracing::warn!(task_id = next_id.0, "auto-dispatch: dispatch failed: {e:#}");
         }
     }
 }
 
-pub(super) fn handle_report_usage(state: &McpState, id: Option<Value>, args: Value) -> JsonRpcResponse {
+pub(super) fn handle_report_usage(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
     let parsed = match parse_args::<ReportUsageArgs>(&id, args) {
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(task_id = parsed.task_id, cost_usd = parsed.cost_usd, "MCP report_usage");
+    tracing::info!(
+        task_id = parsed.task_id,
+        cost_usd = parsed.cost_usd,
+        "MCP report_usage"
+    );
 
     match state.db.get_task(TaskId(parsed.task_id)) {
         Ok(Some(_)) => {}
-        Ok(None) => return JsonRpcResponse::err(id, -32602, format!("Task {} not found", parsed.task_id)),
+        Ok(None) => {
+            return JsonRpcResponse::err(id, -32602, format!("Task {} not found", parsed.task_id))
+        }
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     }
 

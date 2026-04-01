@@ -2,15 +2,15 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 use std::collections::HashSet;
 use std::io;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -18,11 +18,13 @@ use tokio::time::interval;
 use tempfile::Builder as TempfileBuilder;
 
 use crate::db::{EpicPatch, TaskStore};
-use crate::editor::{format_editor_content, parse_editor_content, format_epic_for_editor, parse_epic_editor_output};
+use crate::editor::{
+    format_editor_content, format_epic_for_editor, parse_editor_content, parse_epic_editor_output,
+};
+use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::tui::{self, App, Command, Message};
-use crate::models::TaskId;
-use crate::{db, dispatch, models, mcp, tmux};
+use crate::{db, dispatch, mcp, models, tmux};
 
 // ---------------------------------------------------------------------------
 // run_tui — entry point for the TUI mode
@@ -52,7 +54,8 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     app.update(Message::RefreshUsage(usage));
 
     // Load notification preference
-    let notif_enabled = database.get_setting_bool("notifications_enabled")
+    let notif_enabled = database
+        .get_setting_bool("notifications_enabled")
         .unwrap_or(None)
         .unwrap_or(true);
     app.set_notifications_enabled(notif_enabled);
@@ -122,17 +125,15 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     // opening an external editor) via the input_paused flag.
     let input_paused = Arc::new(AtomicBool::new(false));
     let paused_clone = input_paused.clone();
-    tokio::task::spawn_blocking(move || {
-        loop {
-            if paused_clone.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(100));
-                continue;
-            }
-            if event::poll(Duration::from_millis(50)).unwrap_or(false) {
-                if let Ok(Event::Key(key)) = event::read() {
-                    if key_tx.send(key).is_err() {
-                        break;
-                    }
+    tokio::task::spawn_blocking(move || loop {
+        if paused_clone.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(100));
+            continue;
+        }
+        if event::poll(Duration::from_millis(50)).unwrap_or(false) {
+            if let Ok(Event::Key(key)) = event::read() {
+                if key_tx.send(key).is_err() {
+                    break;
                 }
             }
         }
@@ -249,8 +250,22 @@ impl TuiRuntime {
         format!("DB error {action}: {e}")
     }
 
-    fn exec_insert_task(&self, app: &mut App, title: String, description: String, repo_path: String, tag: Option<String>, epic_id: Option<models::EpicId>) {
-        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
+    fn exec_insert_task(
+        &self,
+        app: &mut App,
+        title: String,
+        description: String,
+        repo_path: String,
+        tag: Option<String>,
+        epic_id: Option<models::EpicId>,
+    ) {
+        match self.database.create_task_returning(
+            &title,
+            &description,
+            &repo_path,
+            None,
+            models::TaskStatus::Backlog,
+        ) {
             Ok(mut task) => {
                 if let Some(eid) = epic_id {
                     if let Err(e) = self.database.set_task_epic_id(task.id, Some(eid)) {
@@ -275,8 +290,21 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_quick_dispatch(&self, app: &mut App, title: String, description: String, repo_path: String, epic_id: Option<models::EpicId>) {
-        match self.database.create_task_returning(&title, &description, &repo_path, None, models::TaskStatus::Backlog) {
+    fn exec_quick_dispatch(
+        &self,
+        app: &mut App,
+        title: String,
+        description: String,
+        repo_path: String,
+        epic_id: Option<models::EpicId>,
+    ) {
+        match self.database.create_task_returning(
+            &title,
+            &description,
+            &repo_path,
+            None,
+            models::TaskStatus::Backlog,
+        ) {
             Ok(mut task) => {
                 if let Some(eid) = epic_id {
                     if let Err(e) = self.database.set_task_epic_id(task.id, Some(eid)) {
@@ -303,7 +331,8 @@ impl TuiRuntime {
                             });
                         }
                         Err(e) => {
-                            let _ = tx.send(Message::Error(format!("Quick dispatch failed: {e:#}")));
+                            let _ =
+                                tx.send(Message::Error(format!("Quick dispatch failed: {e:#}")));
                         }
                     }
                 });
@@ -329,11 +358,16 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_patch_sub_status(&self, app: &mut App, id: models::TaskId, sub_status: models::SubStatus) {
-        if let Err(e) = self.database.patch_task(
-            id,
-            &db::TaskPatch::new().sub_status(sub_status),
-        ) {
+    fn exec_patch_sub_status(
+        &self,
+        app: &mut App,
+        id: models::TaskId,
+        sub_status: models::SubStatus,
+    ) {
+        if let Err(e) = self
+            .database
+            .patch_task(id, &db::TaskPatch::new().sub_status(sub_status))
+        {
             app.update(Message::Error(Self::db_error("patching sub_status", e)));
         }
     }
@@ -401,7 +435,11 @@ impl TuiRuntime {
 
             match tmux::capture_pane(&window, 5, &*runner) {
                 Ok(output) => {
-                    let _ = tx.send(Message::TmuxOutput { id, output, activity_ts });
+                    let _ = tx.send(Message::TmuxOutput {
+                        id,
+                        output,
+                        activity_ts,
+                    });
                 }
                 Err(e) => {
                     let _ = tx.send(Message::Error(format!(
@@ -427,9 +465,7 @@ impl TuiRuntime {
 
         let _guard = InputPausedGuard::new(&self.input_paused, terminal)?;
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-        let status = std::process::Command::new(&editor)
-            .arg(tmp.path())
-            .status();
+        let status = std::process::Command::new(&editor).arg(tmp.path()).status();
         drop(_guard);
 
         match status {
@@ -458,12 +494,32 @@ impl TuiRuntime {
         };
 
         let fields = parse_editor_content(&edited);
-        let title = if fields.title.is_empty() { task.title.clone() } else { fields.title };
-        let description = if fields.description.is_empty() { task.description.clone() } else { fields.description };
-        let repo_path = if fields.repo_path.is_empty() { task.repo_path.clone() } else { fields.repo_path };
+        let title = if fields.title.is_empty() {
+            task.title.clone()
+        } else {
+            fields.title
+        };
+        let description = if fields.description.is_empty() {
+            task.description.clone()
+        } else {
+            fields.description
+        };
+        let repo_path = if fields.repo_path.is_empty() {
+            task.repo_path.clone()
+        } else {
+            fields.repo_path
+        };
         let new_status = models::TaskStatus::parse(&fields.status).unwrap_or(task.status);
-        let plan = if fields.plan.is_empty() { None } else { Some(fields.plan) };
-        let tag = if fields.tag.is_empty() { None } else { Some(fields.tag) };
+        let plan = if fields.plan.is_empty() {
+            None
+        } else {
+            Some(fields.plan)
+        };
+        let tag = if fields.tag.is_empty() {
+            None
+        } else {
+            Some(fields.tag)
+        };
 
         if let Err(e) = self.database.patch_task(
             task_id,
@@ -519,7 +575,10 @@ impl TuiRuntime {
 
     fn exec_send_notification(&self, title: &str, body: &str, urgent: bool) {
         let urgency = if urgent { "critical" } else { "normal" };
-        if let Err(e) = self.runner.run("notify-send", &["-u", urgency, title, body]) {
+        if let Err(e) = self
+            .runner
+            .run("notify-send", &["-u", urgency, title, body])
+        {
             tracing::warn!("notify-send failed: {e}");
         }
     }
@@ -548,7 +607,13 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_insert_epic(&self, app: &mut App, title: String, description: String, repo_path: String) {
+    fn exec_insert_epic(
+        &self,
+        app: &mut App,
+        title: String,
+        description: String,
+        repo_path: String,
+    ) {
         match self.database.create_epic(&title, &description, &repo_path) {
             Ok(epic) => {
                 app.update(Message::EpicCreated(epic));
@@ -572,9 +637,21 @@ impl TuiRuntime {
         };
 
         let fields = parse_epic_editor_output(&edited);
-        let title = if fields.title.is_empty() { epic.title.clone() } else { fields.title };
-        let description = if fields.description.is_empty() { epic.description.clone() } else { fields.description };
-        let repo_path = if fields.repo_path.is_empty() { epic.repo_path.clone() } else { fields.repo_path };
+        let title = if fields.title.is_empty() {
+            epic.title.clone()
+        } else {
+            fields.title
+        };
+        let description = if fields.description.is_empty() {
+            epic.description.clone()
+        } else {
+            fields.description
+        };
+        let repo_path = if fields.repo_path.is_empty() {
+            epic.repo_path.clone()
+        } else {
+            fields.repo_path
+        };
 
         if let Err(e) = self.database.patch_epic(
             epic_id,
@@ -596,7 +673,13 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_persist_epic(&self, app: &mut App, id: models::EpicId, done: Option<bool>, sort_order: Option<i64>) {
+    fn exec_persist_epic(
+        &self,
+        app: &mut App,
+        id: models::EpicId,
+        done: Option<bool>,
+        sort_order: Option<i64>,
+    ) {
         let mut patch = EpicPatch::new();
         if let Some(d) = done {
             patch = patch.done(d);
@@ -633,7 +716,13 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_cleanup(&self, id: TaskId, repo_path: String, worktree: String, tmux_window: Option<String>) {
+    fn exec_cleanup(
+        &self,
+        id: TaskId,
+        repo_path: String,
+        worktree: String,
+        tmux_window: Option<String>,
+    ) {
         let shared = self
             .database
             .has_other_tasks_with_worktree(&worktree, id)
@@ -642,8 +731,13 @@ impl TuiRuntime {
         if shared {
             // Other active tasks share this worktree — just detach this task
             tracing::info!(task_id = id.0, "worktree shared, detaching only");
-            if let Err(e) = self.database.patch_task(id, &db::TaskPatch::new().worktree(None).tmux_window(None)) {
-                let _ = self.msg_tx.send(Message::Error(format!("Detach failed: {e:#}")));
+            if let Err(e) = self
+                .database
+                .patch_task(id, &db::TaskPatch::new().worktree(None).tmux_window(None))
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Message::Error(format!("Detach failed: {e:#}")));
             }
             return;
         }
@@ -653,7 +747,9 @@ impl TuiRuntime {
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = dispatch::cleanup_task(&repo_path, &worktree, tmux_window.as_deref(), &*runner) {
+            if let Err(e) =
+                dispatch::cleanup_task(&repo_path, &worktree, tmux_window.as_deref(), &*runner)
+            {
                 let _ = tx.send(Message::Error(format!("Cleanup failed: {e:#}")));
             }
         });
@@ -673,7 +769,10 @@ impl TuiRuntime {
             .unwrap_or(false);
 
         if shared {
-            tracing::info!(task_id = id.0, "worktree shared, detaching only (no rebase)");
+            tracing::info!(
+                task_id = id.0,
+                "worktree shared, detaching only (no rebase)"
+            );
             if let Err(e) = self
                 .database
                 .patch_task(id, &db::TaskPatch::new().worktree(None).tmux_window(None))
@@ -757,7 +856,10 @@ impl TuiRuntime {
         ) {
             Ok(mut task) => {
                 if let Err(e) = self.database.set_task_epic_id(task.id, Some(epic.id)) {
-                    app.update(Message::Error(Self::db_error("linking planning task to epic", e)));
+                    app.update(Message::Error(Self::db_error(
+                        "linking planning task to epic",
+                        e,
+                    )));
                     return;
                 }
                 task.epic_id = Some(epic.id);
@@ -780,8 +882,18 @@ impl TuiRuntime {
 
         tokio::task::spawn_blocking(move || {
             let id = task.id;
-            tracing::info!(task_id = id.0, epic_id = epic_id.0, "dispatching epic planning agent");
-            match dispatch::epic_planning_agent(&task, epic_id, &epic_title, &epic_description, &*runner) {
+            tracing::info!(
+                task_id = id.0,
+                epic_id = epic_id.0,
+                "dispatching epic planning agent"
+            );
+            match dispatch::epic_planning_agent(
+                &task,
+                epic_id,
+                &epic_title,
+                &epic_description,
+                &*runner,
+            ) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
                         id,
@@ -791,7 +903,9 @@ impl TuiRuntime {
                     });
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::Error(format!("Epic planning dispatch failed: {e:#}")));
+                    let _ = tx.send(Message::Error(format!(
+                        "Epic planning dispatch failed: {e:#}"
+                    )));
                 }
             }
         });
@@ -837,11 +951,7 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_check_pr_status(
-        &self,
-        id: TaskId,
-        pr_url: String,
-    ) {
+    fn exec_check_pr_status(&self, id: TaskId, pr_url: String) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
@@ -962,8 +1072,14 @@ async fn execute_commands(
     while let Some(command) = queue.pop_front() {
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
-            Command::InsertTask { draft, epic_id } =>
-                rt.exec_insert_task(app, draft.title, draft.description, draft.repo_path, draft.tag, epic_id),
+            Command::InsertTask { draft, epic_id } => rt.exec_insert_task(
+                app,
+                draft.title,
+                draft.description,
+                draft.repo_path,
+                draft.tag,
+                epic_id,
+            ),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::Dispatch { task } => rt.exec_dispatch(task),
             Command::Brainstorm { task } => rt.exec_brainstorm(task),
@@ -975,42 +1091,69 @@ async fn execute_commands(
                 let extra = rt.exec_refresh_from_db(app);
                 queue.extend(extra);
             }
-            Command::Cleanup { id, repo_path, worktree, tmux_window } =>
-                rt.exec_cleanup(id, repo_path, worktree, tmux_window),
+            Command::Cleanup {
+                id,
+                repo_path,
+                worktree,
+                tmux_window,
+            } => rt.exec_cleanup(id, repo_path, worktree, tmux_window),
             Command::Resume { task } => rt.exec_resume(task),
             Command::JumpToTmux { window } => rt.exec_jump_to_tmux(app, window),
-            Command::QuickDispatch { draft, epic_id } =>
-                rt.exec_quick_dispatch(app, draft.title, draft.description, draft.repo_path, epic_id),
+            Command::QuickDispatch { draft, epic_id } => rt.exec_quick_dispatch(
+                app,
+                draft.title,
+                draft.description,
+                draft.repo_path,
+                epic_id,
+            ),
             Command::KillTmuxWindow { window } => rt.exec_kill_tmux_window(window),
-            Command::Finish { id, repo_path, branch, worktree, tmux_window } =>
-                rt.exec_finish(id, repo_path, branch, worktree, tmux_window),
+            Command::Finish {
+                id,
+                repo_path,
+                branch,
+                worktree,
+                tmux_window,
+            } => rt.exec_finish(id, repo_path, branch, worktree, tmux_window),
             // Epic commands
-            Command::InsertEpic(draft) =>
-                rt.exec_insert_epic(app, draft.title, draft.description, draft.repo_path),
+            Command::InsertEpic(draft) => {
+                rt.exec_insert_epic(app, draft.title, draft.description, draft.repo_path)
+            }
             Command::EditEpicInEditor(epic) => rt.exec_edit_epic_in_editor(app, epic, terminal)?,
             Command::DeleteEpic(id) => rt.exec_delete_epic(app, id),
-            Command::PersistEpic { id, done, sort_order } => rt.exec_persist_epic(app, id, done, sort_order),
+            Command::PersistEpic {
+                id,
+                done,
+                sort_order,
+            } => rt.exec_persist_epic(app, id, done, sort_order),
             Command::RefreshEpicsFromDb => rt.exec_refresh_epics_from_db(app),
             Command::DispatchEpic { epic } => rt.exec_dispatch_epic(app, epic),
-            Command::SendNotification { title, body, urgent } =>
-                rt.exec_send_notification(&title, &body, urgent),
-            Command::PersistSetting { key, value } =>
-                rt.exec_persist_setting(app, &key, value),
-            Command::CreatePr { id, repo_path, branch, title, description } =>
-                rt.exec_create_pr(id, repo_path, branch, title, description),
-            Command::CheckPrStatus { id, pr_url } =>
-                rt.exec_check_pr_status(id, pr_url),
-            Command::PersistStringSetting { key, value } =>
-                rt.exec_persist_string_setting(app, &key, &value),
+            Command::SendNotification {
+                title,
+                body,
+                urgent,
+            } => rt.exec_send_notification(&title, &body, urgent),
+            Command::PersistSetting { key, value } => rt.exec_persist_setting(app, &key, value),
+            Command::CreatePr {
+                id,
+                repo_path,
+                branch,
+                title,
+                description,
+            } => rt.exec_create_pr(id, repo_path, branch, title, description),
+            Command::CheckPrStatus { id, pr_url } => rt.exec_check_pr_status(id, pr_url),
+            Command::PersistStringSetting { key, value } => {
+                rt.exec_persist_string_setting(app, &key, &value)
+            }
             Command::FetchReviewPrs => rt.exec_fetch_review_prs(),
             Command::PersistReviewPrs(prs) => rt.exec_persist_review_prs(prs),
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
-            Command::PersistFilterPreset { name, repo_paths } =>
-                rt.exec_persist_filter_preset(app, &name, &repo_paths),
-            Command::DeleteFilterPreset(name) =>
-                rt.exec_delete_filter_preset(app, &name),
-            Command::PatchSubStatus { id, sub_status } =>
-                rt.exec_patch_sub_status(app, id, sub_status),
+            Command::PersistFilterPreset { name, repo_paths } => {
+                rt.exec_persist_filter_preset(app, &name, &repo_paths)
+            }
+            Command::DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name),
+            Command::PatchSubStatus { id, sub_status } => {
+                rt.exec_patch_sub_status(app, id, sub_status)
+            }
         }
     }
 
@@ -1051,7 +1194,14 @@ mod tests {
     #[test]
     fn exec_insert_task_adds_to_db_and_app() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None, None);
+        rt.exec_insert_task(
+            &mut app,
+            "Test".into(),
+            "Desc".into(),
+            "/repo".into(),
+            None,
+            None,
+        );
         assert_eq!(app.tasks().len(), 1);
         assert_eq!(app.tasks()[0].title, "Test");
         assert_eq!(rt.database.list_all().unwrap().len(), 1);
@@ -1060,7 +1210,14 @@ mod tests {
     #[test]
     fn exec_delete_task_removes_from_db() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None, None);
+        rt.exec_insert_task(
+            &mut app,
+            "Test".into(),
+            "Desc".into(),
+            "/repo".into(),
+            None,
+            None,
+        );
         let id = app.tasks()[0].id;
         rt.exec_delete_task(&mut app, id);
         assert!(rt.database.list_all().unwrap().is_empty());
@@ -1069,7 +1226,14 @@ mod tests {
     #[test]
     fn exec_persist_task_saves_status_to_db() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_task(&mut app, "Test".into(), "Desc".into(), "/repo".into(), None, None);
+        rt.exec_insert_task(
+            &mut app,
+            "Test".into(),
+            "Desc".into(),
+            "/repo".into(),
+            None,
+            None,
+        );
         let mut task = app.tasks()[0].clone();
         task.status = models::TaskStatus::Running;
         task.sub_status = models::SubStatus::Active;
@@ -1083,14 +1247,25 @@ mod tests {
     #[test]
     fn exec_persist_task_preserves_sub_status() {
         let (rt, mut app) = test_runtime();
-        rt.exec_insert_task(&mut app, "PR Task".into(), "Desc".into(), "/repo".into(), None, None);
+        rt.exec_insert_task(
+            &mut app,
+            "PR Task".into(),
+            "Desc".into(),
+            "/repo".into(),
+            None,
+            None,
+        );
         let id = app.tasks()[0].id;
         // Put task in Review+Approved state in DB, then sync to app
-        rt.database.patch_task(id, &db::TaskPatch::new()
-            .status(models::TaskStatus::Review)
-            .sub_status(models::SubStatus::Approved)
-            .pr_url(Some("https://github.com/org/repo/pull/42")))
-        .unwrap();
+        rt.database
+            .patch_task(
+                id,
+                &db::TaskPatch::new()
+                    .status(models::TaskStatus::Review)
+                    .sub_status(models::SubStatus::Approved)
+                    .pr_url(Some("https://github.com/org/repo/pull/42")),
+            )
+            .unwrap();
         rt.exec_refresh_from_db(&mut app);
         assert_eq!(app.tasks()[0].sub_status, models::SubStatus::Approved);
 
@@ -1115,7 +1290,13 @@ mod tests {
         let (rt, mut app) = test_runtime();
         // Insert directly into DB, bypassing app
         rt.database
-            .create_task("External", "Added via CLI", "/repo", None, models::TaskStatus::Backlog)
+            .create_task(
+                "External",
+                "Added via CLI",
+                "/repo",
+                None,
+                models::TaskStatus::Backlog,
+            )
             .unwrap();
         assert!(app.tasks().is_empty());
         rt.exec_refresh_from_db(&mut app);
@@ -1136,11 +1317,18 @@ mod tests {
 
         // Now update it to Review directly in DB
         let task = rt.database.list_all().unwrap()[0].clone();
-        rt.database.patch_task(task.id, &db::TaskPatch::new().status(models::TaskStatus::Review)).unwrap();
+        rt.database
+            .patch_task(
+                task.id,
+                &db::TaskPatch::new().status(models::TaskStatus::Review),
+            )
+            .unwrap();
 
         // Refresh should detect the transition and return a SendNotification
         let cmds = rt.exec_refresh_from_db(&mut app);
-        assert!(cmds.iter().any(|c| matches!(c, Command::SendNotification { .. })));
+        assert!(cmds
+            .iter()
+            .any(|c| matches!(c, Command::SendNotification { .. })));
     }
 
     #[test]
@@ -1188,11 +1376,11 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
             // git worktree add is skipped (dir pre-created above)
-            MockProcessRunner::ok(),  // tmux new-window
-            MockProcessRunner::ok(),  // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),  // tmux set-hook (after-split-window)
-            MockProcessRunner::ok(),  // tmux send-keys -l
-            MockProcessRunner::ok(),  // tmux send-keys Enter
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
         let rt = TuiRuntime {
             database: db.clone(),
@@ -1202,11 +1390,19 @@ mod tests {
             runner: mock,
         };
 
-        let task = db.create_task_returning("Test Task", "desc", repo, None, models::TaskStatus::Backlog).unwrap();
+        let task = db
+            .create_task_returning("Test Task", "desc", repo, None, models::TaskStatus::Backlog)
+            .unwrap();
         rt.exec_dispatch(task);
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(msg, Message::Dispatched { .. }), "Expected Dispatched, got: {msg:?}");
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::Dispatched { .. }),
+            "Expected Dispatched, got: {msg:?}"
+        );
     }
 
     #[tokio::test]
@@ -1214,7 +1410,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("fatal: not a git repository"),  // git worktree add fails
+            MockProcessRunner::fail("fatal: not a git repository"), // git worktree add fails
         ]));
         let rt = TuiRuntime {
             database: db.clone(),
@@ -1224,11 +1420,25 @@ mod tests {
             runner: mock,
         };
 
-        let task = db.create_task_returning("Fail Task", "desc", "/nonexistent", None, models::TaskStatus::Backlog).unwrap();
+        let task = db
+            .create_task_returning(
+                "Fail Task",
+                "desc",
+                "/nonexistent",
+                None,
+                models::TaskStatus::Backlog,
+            )
+            .unwrap();
         rt.exec_dispatch(task);
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(msg, Message::Error(_)), "Expected Error, got: {msg:?}");
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::Error(_)),
+            "Expected Error, got: {msg:?}"
+        );
     }
 
     #[tokio::test]
@@ -1253,8 +1463,16 @@ mod tests {
 
         rt.exec_capture_tmux(TaskId(1), "test-window".to_string());
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        let Message::TmuxOutput { id, output, activity_ts } = msg else {
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let Message::TmuxOutput {
+            id,
+            output,
+            activity_ts,
+        } = msg
+        else {
             panic!("Expected TmuxOutput, got: {msg:?}");
         };
         assert_eq!(id, TaskId(1));
@@ -1280,8 +1498,14 @@ mod tests {
 
         rt.exec_capture_tmux(TaskId(1), "gone-window".to_string());
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(msg, Message::WindowGone(TaskId(1))), "Expected WindowGone, got: {msg:?}");
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::WindowGone(TaskId(1))),
+            "Expected WindowGone, got: {msg:?}"
+        );
     }
 
     #[test]
@@ -1311,22 +1535,55 @@ mod tests {
         let (rt, mut app) = test_runtime();
 
         // Create two tasks sharing the same worktree
-        rt.exec_insert_task(&mut app, "Task A".into(), "desc".into(), "/repo".into(), None, None);
-        rt.exec_insert_task(&mut app, "Task B".into(), "desc".into(), "/repo".into(), None, None);
+        rt.exec_insert_task(
+            &mut app,
+            "Task A".into(),
+            "desc".into(),
+            "/repo".into(),
+            None,
+            None,
+        );
+        rt.exec_insert_task(
+            &mut app,
+            "Task B".into(),
+            "desc".into(),
+            "/repo".into(),
+            None,
+            None,
+        );
 
         let id_a = app.tasks()[0].id;
         let id_b = app.tasks()[1].id;
 
         let worktree = "/repo/.worktrees/1-task-a";
-        rt.database.patch_task(id_a, &db::TaskPatch::new().status(models::TaskStatus::Running).worktree(Some(worktree)).tmux_window(Some("task-1"))).unwrap();
-        rt.database.patch_task(id_b, &db::TaskPatch::new().status(models::TaskStatus::Running).worktree(Some(worktree)).tmux_window(Some("task-1"))).unwrap();
+        rt.database
+            .patch_task(
+                id_a,
+                &db::TaskPatch::new()
+                    .status(models::TaskStatus::Running)
+                    .worktree(Some(worktree))
+                    .tmux_window(Some("task-1")),
+            )
+            .unwrap();
+        rt.database
+            .patch_task(
+                id_b,
+                &db::TaskPatch::new()
+                    .status(models::TaskStatus::Running)
+                    .worktree(Some(worktree))
+                    .tmux_window(Some("task-1")),
+            )
+            .unwrap();
 
         // Cleanup task A — should detach only (worktree is shared)
         rt.exec_cleanup(id_a, "/repo".into(), worktree.into(), Some("task-1".into()));
 
         let task_a = rt.database.get_task(id_a).unwrap().unwrap();
         assert!(task_a.worktree.is_none(), "task A should be detached");
-        assert!(task_a.tmux_window.is_none(), "task A tmux should be cleared");
+        assert!(
+            task_a.tmux_window.is_none(),
+            "task A tmux should be cleared"
+        );
 
         // Task B should still have the worktree
         let task_b = rt.database.get_task(id_b).unwrap().unwrap();
@@ -1338,12 +1595,12 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail(""),                   // symbolic-ref (no remote → fallback to "main")
+            MockProcessRunner::fail(""), // symbolic-ref (no remote → fallback to "main")
             MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
-            MockProcessRunner::fail(""),                   // remote get-url (no remote)
-            MockProcessRunner::ok(),                       // git rebase main (from worktree)
-            MockProcessRunner::ok(),                       // git merge --ff-only (fast-forward)
-            // Worktree is preserved; cleanup happens later during archive.
+            MockProcessRunner::fail(""), // remote get-url (no remote)
+            MockProcessRunner::ok(),     // git rebase main (from worktree)
+            MockProcessRunner::ok(),     // git merge --ff-only (fast-forward)
+                                         // Worktree is preserved; cleanup happens later during archive.
         ]));
         let rt = TuiRuntime {
             database: db.clone(),
@@ -1419,7 +1676,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let Message::FinishFailed { id: tid, is_conflict, .. } = msg else {
+        let Message::FinishFailed {
+            id: tid,
+            is_conflict,
+            ..
+        } = msg
+        else {
             panic!("Expected FinishFailed, got: {msg:?}");
         };
         assert_eq!(tid, id);
@@ -1431,7 +1693,10 @@ mod tests {
         let (rt, mut app) = test_runtime();
 
         // Create an epic in the DB
-        let epic = rt.database.create_epic("Auth redesign", "Rework login", "/repo").unwrap();
+        let epic = rt
+            .database
+            .create_epic("Auth redesign", "Rework login", "/repo")
+            .unwrap();
 
         rt.exec_dispatch_epic(&mut app, epic.clone());
 
@@ -1486,7 +1751,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let Message::FinishFailed { id: tid, is_conflict, .. } = msg else {
+        let Message::FinishFailed {
+            id: tid,
+            is_conflict,
+            ..
+        } = msg
+        else {
             panic!("Expected FinishFailed, got: {msg:?}");
         };
         assert_eq!(tid, id);
@@ -1519,9 +1789,7 @@ mod tests {
     fn exec_send_notification_urgent_uses_critical() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),
-        ]));
+        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
@@ -1538,9 +1806,9 @@ mod tests {
     fn exec_send_notification_failure_does_not_panic() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("command not found"),
-        ]));
+        let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "command not found",
+        )]));
         let rt = TuiRuntime {
             database: db,
             msg_tx: tx,
@@ -1557,7 +1825,9 @@ mod tests {
         let (rt, mut app) = test_runtime();
         rt.exec_persist_setting(&mut app, "notifications_enabled", true);
         assert_eq!(
-            rt.database.get_setting_bool("notifications_enabled").unwrap(),
+            rt.database
+                .get_setting_bool("notifications_enabled")
+                .unwrap(),
             Some(true)
         );
     }
@@ -1568,9 +1838,9 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
-            MockProcessRunner::ok(),  // git push
-            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),  // git remote get-url
-            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"),  // gh pr create
+            MockProcessRunner::ok(),                                          // git push
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
+            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
         ]));
         let rt = TuiRuntime {
             database: db,
@@ -1588,7 +1858,10 @@ mod tests {
             "Description".to_string(),
         );
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert!(matches!(msg, Message::PrCreated { id: TaskId(1), .. }));
     }
 
@@ -1616,7 +1889,10 @@ mod tests {
             "Description".to_string(),
         );
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert!(matches!(msg, Message::PrFailed { .. }));
     }
 
@@ -1625,7 +1901,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"MERGED\n"),  // gh pr view (no review decision line)
+            MockProcessRunner::ok_with_stdout(b"MERGED\n"), // gh pr view (no review decision line)
         ]));
         let rt = TuiRuntime {
             database: db,
@@ -1637,7 +1913,10 @@ mod tests {
 
         rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert!(matches!(msg, Message::PrMerged(TaskId(1))));
     }
 
@@ -1646,7 +1925,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"),  // gh pr view
+            MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"), // gh pr view
         ]));
         let rt = TuiRuntime {
             database: db,
@@ -1658,9 +1937,15 @@ mod tests {
 
         rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         match msg {
-            Message::PrReviewState { id, review_decision } => {
+            Message::PrReviewState {
+                id,
+                review_decision,
+            } => {
                 assert_eq!(id, TaskId(1));
                 assert_eq!(review_decision, Some(dispatch::PrReviewDecision::Approved));
             }

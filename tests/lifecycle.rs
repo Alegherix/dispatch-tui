@@ -39,7 +39,13 @@ fn full_lifecycle() {
 
     // 1. Create task with a plan: simulate what exec_insert_task does (DB insert + TaskCreated message)
     let task_id = db
-        .create_task("Fix auth bug", "Users can't log in", "/repo", Some("plan.md"), TaskStatus::Backlog)
+        .create_task(
+            "Fix auth bug",
+            "Users can't log in",
+            "/repo",
+            Some("plan.md"),
+            TaskStatus::Backlog,
+        )
         .unwrap();
     let now = chrono::Utc::now();
     let cmds = app.update(Message::TaskCreated {
@@ -83,10 +89,7 @@ fn full_lifecycle() {
     });
     execute(&db, &cmds);
     assert_eq!(app.tasks()[0].status, TaskStatus::Running);
-    assert_eq!(
-        app.tasks()[0].tmux_window.as_deref(),
-        Some("task-1")
-    );
+    assert_eq!(app.tasks()[0].tmux_window.as_deref(), Some("task-1"));
 
     // 4. WindowGone on a Running task → marks as crashed (tmux_window preserved, no PersistTask)
     let cmds = app.update(Message::WindowGone(task_id));
@@ -109,8 +112,15 @@ fn full_lifecycle() {
         id: task_id,
         direction: MoveDirection::Forward,
     });
-    assert!(cmds.is_empty(), "MoveTask should not produce commands when entering ConfirmDone");
-    assert_eq!(app.tasks()[0].status, TaskStatus::Review, "Task stays in Review until confirmed");
+    assert!(
+        cmds.is_empty(),
+        "MoveTask should not produce commands when entering ConfirmDone"
+    );
+    assert_eq!(
+        app.tasks()[0].status,
+        TaskStatus::Review,
+        "Task stays in Review until confirmed"
+    );
 
     // Confirm the Done transition
     let cmds = app.update(Message::ConfirmDone);

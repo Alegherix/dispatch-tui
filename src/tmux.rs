@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 
 use crate::process::ProcessRunner;
 
@@ -98,11 +98,22 @@ pub fn select_window(window: &str, runner: &dyn ProcessRunner) -> Result<()> {
 /// Store the worktree path as a per-window user option so the session-level
 /// `after-split-window` hook (installed by [`ensure_split_hook`]) can look it
 /// up when a split happens in this window.
-pub fn set_window_dispatch_dir(window: &str, working_dir: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &[
-        "set-option", "-w", "-t", window,
-        "@dispatch_dir", working_dir,
-    ])?;
+pub fn set_window_dispatch_dir(
+    window: &str,
+    working_dir: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    let output = runner.run(
+        "tmux",
+        &[
+            "set-option",
+            "-w",
+            "-t",
+            window,
+            "@dispatch_dir",
+            working_dir,
+        ],
+    )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("ambiguous") {
@@ -111,7 +122,11 @@ pub fn set_window_dispatch_dir(window: &str, working_dir: &str, runner: &dyn Pro
                 window
             );
         }
-        bail!("tmux set-option failed with status {}: {}", output.status, stderr.trim());
+        bail!(
+            "tmux set-option failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
     }
     Ok(())
 }
@@ -126,12 +141,14 @@ pub fn ensure_split_hook(runner: &dyn ProcessRunner) -> Result<()> {
     // where the split occurred.  if-shell -F treats a non-empty expansion as
     // true, so windows without the option are left alone.
     let hook_cmd = "if-shell -F '#{@dispatch_dir}' \"send-keys 'cd #{@dispatch_dir}' Enter\"";
-    let output = runner.run("tmux", &[
-        "set-hook", "after-split-window", hook_cmd,
-    ])?;
+    let output = runner.run("tmux", &["set-hook", "after-split-window", hook_cmd])?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("tmux set-hook failed with status {}: {}", output.status, stderr.trim());
+        bail!(
+            "tmux set-hook failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
     }
     Ok(())
 }
@@ -179,7 +196,11 @@ pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
 
 #[cfg(test)]
 fn select_window_args(window: &str) -> Vec<String> {
-    vec!["select-window".to_string(), "-t".to_string(), window.to_string()]
+    vec![
+        "select-window".to_string(),
+        "-t".to_string(),
+        window.to_string(),
+    ]
 }
 
 #[cfg(test)]
@@ -240,7 +261,11 @@ fn ensure_split_hook_args() -> Vec<String> {
 
 #[cfg(test)]
 fn current_window_name_args() -> Vec<String> {
-    vec!["display-message".to_string(), "-p".to_string(), "#W".to_string()]
+    vec![
+        "display-message".to_string(),
+        "-p".to_string(),
+        "#W".to_string(),
+    ]
 }
 
 #[cfg(test)]
@@ -297,27 +322,25 @@ mod tests {
 
     #[test]
     fn has_window_finds_match_in_output() {
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"main\ntask-42\nother-window\n"),
-        ]);
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            b"main\ntask-42\nother-window\n",
+        )]);
         let result = has_window("task-42", &mock).unwrap();
         assert!(result);
     }
 
     #[test]
     fn has_window_no_match() {
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"main\nother-window\n"),
-        ]);
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            b"main\nother-window\n",
+        )]);
         let result = has_window("task-42", &mock).unwrap();
         assert!(!result);
     }
 
     #[test]
     fn has_window_exact_match_not_prefix() {
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"task-42\n"),
-        ]);
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"task-42\n")]);
         let result = has_window("task-4", &mock).unwrap();
         assert!(!result);
     }
@@ -366,15 +389,19 @@ mod tests {
         let args = window_activity_args("task-42");
         assert_eq!(
             args,
-            vec!["display-message", "-p", "-t", "task-42", "#{window_activity}"]
+            vec![
+                "display-message",
+                "-p",
+                "-t",
+                "task-42",
+                "#{window_activity}"
+            ]
         );
     }
 
     #[test]
     fn window_activity_parses_timestamp() {
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"1711700000\n"),
-        ]);
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"1711700000\n")]);
         let result = window_activity("task-42", &mock).unwrap();
         assert_eq!(result, 1711700000);
     }
@@ -391,8 +418,12 @@ mod tests {
         assert_eq!(
             args,
             vec![
-                "set-option", "-w", "-t", "task-42",
-                "@dispatch_dir", "/some/path",
+                "set-option",
+                "-w",
+                "-t",
+                "task-42",
+                "@dispatch_dir",
+                "/some/path",
             ]
         );
     }
@@ -407,15 +438,20 @@ mod tests {
         assert_eq!(
             calls[0].1,
             vec![
-                "set-option", "-w", "-t", "task-42",
-                "@dispatch_dir", "/some/path",
+                "set-option",
+                "-w",
+                "-t",
+                "task-42",
+                "@dispatch_dir",
+                "/some/path",
             ]
         );
     }
 
     #[test]
     fn set_window_dispatch_dir_detects_ambiguous_windows() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("ambiguous window: task-42")]);
+        let mock =
+            MockProcessRunner::new(vec![MockProcessRunner::fail("ambiguous window: task-42")]);
         let err = set_window_dispatch_dir("task-42", "/some/path", &mock).unwrap_err();
         assert!(err.to_string().contains("multiple tmux windows"));
     }
@@ -458,9 +494,7 @@ mod tests {
 
     #[test]
     fn current_window_name_returns_trimmed_stdout() {
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"dispatch\n"),
-        ]);
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
         let result = current_window_name(&mock).unwrap();
         assert_eq!(result, "dispatch");
     }
@@ -494,7 +528,10 @@ mod tests {
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "tmux");
-        assert_eq!(calls[0].1, vec!["rename-window", "-t", "dispatch", "my-old-name"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["rename-window", "-t", "dispatch", "my-old-name"]
+        );
     }
 
     #[test]
@@ -516,7 +553,10 @@ mod tests {
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "tmux");
-        assert_eq!(calls[0].1, vec!["bind-key", "g", "select-window -t dispatch"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["bind-key", "g", "select-window -t dispatch"]
+        );
     }
 
     #[test]

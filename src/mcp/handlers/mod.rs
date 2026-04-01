@@ -1,7 +1,7 @@
-mod types;
-mod tasks;
-mod epics;
 mod dispatch;
+mod epics;
+mod tasks;
+mod types;
 
 #[cfg(test)]
 mod tests;

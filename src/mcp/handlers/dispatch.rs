@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use axum::{Json, extract::State, http::StatusCode};
-use serde_json::{Value, json};
+use axum::{extract::State, http::StatusCode, Json};
+use serde_json::{json, Value};
 
 use crate::mcp::McpState;
 
-use super::types::{JsonRpcRequest, JsonRpcResponse};
-use super::tasks;
 use super::epics;
+use super::tasks;
+use super::types::{JsonRpcRequest, JsonRpcResponse};
 
 // ---------------------------------------------------------------------------
 // Tool definitions returned by tools/list
@@ -255,8 +255,9 @@ pub async fn handle_mcp(
 ) -> (StatusCode, Json<JsonRpcResponse>) {
     let id = req.id;
     let response = match req.method.as_str() {
-        "initialize" => {
-            JsonRpcResponse::ok(id, json!({
+        "initialize" => JsonRpcResponse::ok(
+            id,
+            json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": {
                     "tools": {}
@@ -265,8 +266,8 @@ pub async fn handle_mcp(
                     "name": "dispatch",
                     "version": "0.1.0"
                 }
-            }))
-        }
+            }),
+        ),
 
         "tools/list" => JsonRpcResponse::ok(id, tool_definitions()),
 

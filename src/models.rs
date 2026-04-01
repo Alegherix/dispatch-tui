@@ -203,15 +203,15 @@ impl SubStatus {
     /// Sort priority for column grouping (lower = more urgent = top of column).
     pub fn column_priority(self) -> u8 {
         match self {
-            SubStatus::Conflict  => 0,
-            SubStatus::Crashed   => 1,
-            SubStatus::Stale     => 2,
+            SubStatus::Conflict => 0,
+            SubStatus::Crashed => 1,
+            SubStatus::Stale => 2,
             SubStatus::NeedsInput => 3,
             SubStatus::ChangesRequested => 4,
-            SubStatus::Active    => 5,
-            SubStatus::AwaitingReview => 5,  // same slot as Active
-            SubStatus::None      => 5,
-            SubStatus::Approved  => 6,
+            SubStatus::Active => 5,
+            SubStatus::AwaitingReview => 5, // same slot as Active
+            SubStatus::None => 5,
+            SubStatus::Approved => 6,
         }
     }
 
@@ -258,14 +258,46 @@ pub struct VisualColumn {
 impl VisualColumn {
     pub const COUNT: usize = 8;
     pub const ALL: &'static [VisualColumn] = &[
-        VisualColumn { label: "Backlog",    parent_status: TaskStatus::Backlog,  sub_statuses: &[SubStatus::None] },
-        VisualColumn { label: "Active",     parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::Active] },
-        VisualColumn { label: "Blocked",    parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::NeedsInput] },
-        VisualColumn { label: "Stale",      parent_status: TaskStatus::Running,  sub_statuses: &[SubStatus::Stale, SubStatus::Crashed, SubStatus::Conflict] },
-        VisualColumn { label: "PR Created", parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::AwaitingReview] },
-        VisualColumn { label: "Revise",     parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::ChangesRequested] },
-        VisualColumn { label: "Approved",   parent_status: TaskStatus::Review,   sub_statuses: &[SubStatus::Approved] },
-        VisualColumn { label: "Done",       parent_status: TaskStatus::Done,     sub_statuses: &[SubStatus::None] },
+        VisualColumn {
+            label: "Backlog",
+            parent_status: TaskStatus::Backlog,
+            sub_statuses: &[SubStatus::None],
+        },
+        VisualColumn {
+            label: "Active",
+            parent_status: TaskStatus::Running,
+            sub_statuses: &[SubStatus::Active],
+        },
+        VisualColumn {
+            label: "Blocked",
+            parent_status: TaskStatus::Running,
+            sub_statuses: &[SubStatus::NeedsInput],
+        },
+        VisualColumn {
+            label: "Stale",
+            parent_status: TaskStatus::Running,
+            sub_statuses: &[SubStatus::Stale, SubStatus::Crashed, SubStatus::Conflict],
+        },
+        VisualColumn {
+            label: "PR Created",
+            parent_status: TaskStatus::Review,
+            sub_statuses: &[SubStatus::AwaitingReview],
+        },
+        VisualColumn {
+            label: "Revise",
+            parent_status: TaskStatus::Review,
+            sub_statuses: &[SubStatus::ChangesRequested],
+        },
+        VisualColumn {
+            label: "Approved",
+            parent_status: TaskStatus::Review,
+            sub_statuses: &[SubStatus::Approved],
+        },
+        VisualColumn {
+            label: "Done",
+            parent_status: TaskStatus::Done,
+            sub_statuses: &[SubStatus::None],
+        },
     ];
 
     pub fn contains(&self, sub_status: SubStatus) -> bool {
@@ -273,11 +305,17 @@ impl VisualColumn {
     }
 
     pub fn parent_group_start(status: TaskStatus) -> usize {
-        Self::ALL.iter().position(|vc| vc.parent_status == status).unwrap_or(0)
+        Self::ALL
+            .iter()
+            .position(|vc| vc.parent_status == status)
+            .unwrap_or(0)
     }
 
     pub fn parent_group_span(status: TaskStatus) -> usize {
-        Self::ALL.iter().filter(|vc| vc.parent_status == status).count()
+        Self::ALL
+            .iter()
+            .filter(|vc| vc.parent_status == status)
+            .count()
     }
 }
 
@@ -574,9 +612,9 @@ const WEEKS_THRESHOLD_DAYS: i64 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Staleness {
-    Fresh,  // < 3 days
-    Aging,  // 3-7 days
-    Stale,  // > 7 days
+    Fresh, // < 3 days
+    Aging, // 3-7 days
+    Stale, // > 7 days
 }
 
 impl Staleness {
@@ -680,7 +718,10 @@ mod tests {
     fn status_invalid_from_str() {
         assert!(TaskStatus::parse("").is_none());
         assert!(TaskStatus::parse("unknown").is_none());
-        assert!(TaskStatus::parse("Backlog").is_none(), "should be case-sensitive");
+        assert!(
+            TaskStatus::parse("Backlog").is_none(),
+            "should be case-sensitive"
+        );
     }
 
     #[test]
@@ -693,7 +734,11 @@ mod tests {
         assert_eq!(TaskStatus::Backlog.next(), TaskStatus::Running);
         assert_eq!(TaskStatus::Running.next(), TaskStatus::Review);
         assert_eq!(TaskStatus::Review.next(), TaskStatus::Done);
-        assert_eq!(TaskStatus::Done.next(), TaskStatus::Done, "Done.next() should stay Done");
+        assert_eq!(
+            TaskStatus::Done.next(),
+            TaskStatus::Done,
+            "Done.next() should stay Done"
+        );
     }
 
     #[test]
@@ -701,7 +746,11 @@ mod tests {
         assert_eq!(TaskStatus::Done.prev(), TaskStatus::Review);
         assert_eq!(TaskStatus::Review.prev(), TaskStatus::Running);
         assert_eq!(TaskStatus::Running.prev(), TaskStatus::Backlog);
-        assert_eq!(TaskStatus::Backlog.prev(), TaskStatus::Backlog, "Backlog.prev() should stay Backlog");
+        assert_eq!(
+            TaskStatus::Backlog.prev(),
+            TaskStatus::Backlog,
+            "Backlog.prev() should stay Backlog"
+        );
     }
 
     #[test]
@@ -735,7 +784,9 @@ mod tests {
         ];
         for sub in all {
             let s = sub.as_str();
-            let parsed: SubStatus = s.parse().unwrap_or_else(|e| panic!("roundtrip failed for {s}: {e}"));
+            let parsed: SubStatus = s
+                .parse()
+                .unwrap_or_else(|e| panic!("roundtrip failed for {s}: {e}"));
             assert_eq!(sub, parsed, "roundtrip failed for {s}");
         }
     }
@@ -756,7 +807,10 @@ mod tests {
     fn substatus_from_str_invalid() {
         assert!("bogus".parse::<SubStatus>().is_err());
         assert!("".parse::<SubStatus>().is_err());
-        assert!("None".parse::<SubStatus>().is_err(), "should be case-sensitive");
+        assert!(
+            "None".parse::<SubStatus>().is_err(),
+            "should be case-sensitive"
+        );
     }
 
     #[test]
@@ -800,10 +854,19 @@ mod tests {
     #[test]
     fn substatus_default_for() {
         assert_eq!(SubStatus::default_for(TaskStatus::Backlog), SubStatus::None);
-        assert_eq!(SubStatus::default_for(TaskStatus::Running), SubStatus::Active);
-        assert_eq!(SubStatus::default_for(TaskStatus::Review), SubStatus::AwaitingReview);
+        assert_eq!(
+            SubStatus::default_for(TaskStatus::Running),
+            SubStatus::Active
+        );
+        assert_eq!(
+            SubStatus::default_for(TaskStatus::Review),
+            SubStatus::AwaitingReview
+        );
         assert_eq!(SubStatus::default_for(TaskStatus::Done), SubStatus::None);
-        assert_eq!(SubStatus::default_for(TaskStatus::Archived), SubStatus::None);
+        assert_eq!(
+            SubStatus::default_for(TaskStatus::Archived),
+            SubStatus::None
+        );
     }
 
     // --- VisualColumn ---
@@ -1182,9 +1245,15 @@ mod tests {
 
     fn make_epic_for_status(done: bool) -> Epic {
         Epic {
-            id: EpicId(1), title: String::new(), description: String::new(),
-            repo_path: String::new(), done, plan: None, sort_order: None,
-            created_at: Utc::now(), updated_at: Utc::now(),
+            id: EpicId(1),
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            done,
+            plan: None,
+            sort_order: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -1273,25 +1342,49 @@ mod tests {
 
     #[test]
     fn review_decision_from_column_index() {
-        assert_eq!(ReviewDecision::from_column_index(0), Some(ReviewDecision::ReviewRequired));
-        assert_eq!(ReviewDecision::from_column_index(1), Some(ReviewDecision::WaitingForResponse));
-        assert_eq!(ReviewDecision::from_column_index(2), Some(ReviewDecision::ChangesRequested));
-        assert_eq!(ReviewDecision::from_column_index(3), Some(ReviewDecision::Approved));
+        assert_eq!(
+            ReviewDecision::from_column_index(0),
+            Some(ReviewDecision::ReviewRequired)
+        );
+        assert_eq!(
+            ReviewDecision::from_column_index(1),
+            Some(ReviewDecision::WaitingForResponse)
+        );
+        assert_eq!(
+            ReviewDecision::from_column_index(2),
+            Some(ReviewDecision::ChangesRequested)
+        );
+        assert_eq!(
+            ReviewDecision::from_column_index(3),
+            Some(ReviewDecision::Approved)
+        );
         assert_eq!(ReviewDecision::from_column_index(4), None);
     }
 
     #[test]
     fn review_decision_as_str() {
         assert_eq!(ReviewDecision::ReviewRequired.as_str(), "Needs Review");
-        assert_eq!(ReviewDecision::ChangesRequested.as_str(), "Changes Requested");
+        assert_eq!(
+            ReviewDecision::ChangesRequested.as_str(),
+            "Changes Requested"
+        );
         assert_eq!(ReviewDecision::Approved.as_str(), "Approved");
     }
 
     #[test]
     fn review_decision_parse() {
-        assert_eq!(ReviewDecision::parse("REVIEW_REQUIRED"), Some(ReviewDecision::ReviewRequired));
-        assert_eq!(ReviewDecision::parse("CHANGES_REQUESTED"), Some(ReviewDecision::ChangesRequested));
-        assert_eq!(ReviewDecision::parse("APPROVED"), Some(ReviewDecision::Approved));
+        assert_eq!(
+            ReviewDecision::parse("REVIEW_REQUIRED"),
+            Some(ReviewDecision::ReviewRequired)
+        );
+        assert_eq!(
+            ReviewDecision::parse("CHANGES_REQUESTED"),
+            Some(ReviewDecision::ChangesRequested)
+        );
+        assert_eq!(
+            ReviewDecision::parse("APPROVED"),
+            Some(ReviewDecision::Approved)
+        );
         assert_eq!(ReviewDecision::parse("bogus"), None);
         assert_eq!(ReviewDecision::parse(""), None);
     }
@@ -1300,17 +1393,26 @@ mod tests {
 
     #[test]
     fn pr_number_from_standard_url() {
-        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42"), Some(42));
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42"),
+            Some(42)
+        );
     }
 
     #[test]
     fn pr_number_from_url_with_trailing_slash() {
-        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42/"), Some(42));
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42/"),
+            Some(42)
+        );
     }
 
     #[test]
     fn pr_number_from_url_with_query_params() {
-        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42?diff=split"), Some(42));
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42?diff=split"),
+            Some(42)
+        );
     }
 
     #[test]
@@ -1325,7 +1427,10 @@ mod tests {
 
     #[test]
     fn pr_number_from_url_with_fragment() {
-        assert_eq!(pr_number_from_url("https://github.com/org/repo/pull/42#issuecomment-123"), Some(42));
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42#issuecomment-123"),
+            Some(42)
+        );
     }
 
     #[test]

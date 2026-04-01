@@ -871,6 +871,46 @@ mod tests {
     }
 
     #[test]
+    fn is_wrappable_running_with_worktree() {
+        let task = Task {
+            status: TaskStatus::Running,
+            worktree: Some("/tmp/wt".to_string()),
+            ..make_task("/repo")
+        };
+        assert!(is_wrappable(&task));
+    }
+
+    #[test]
+    fn is_wrappable_review_with_worktree() {
+        let task = Task {
+            status: TaskStatus::Review,
+            worktree: Some("/tmp/wt".to_string()),
+            ..make_task("/repo")
+        };
+        assert!(is_wrappable(&task));
+    }
+
+    #[test]
+    fn is_wrappable_running_without_worktree() {
+        let task = Task {
+            status: TaskStatus::Running,
+            worktree: None,
+            ..make_task("/repo")
+        };
+        assert!(!is_wrappable(&task));
+    }
+
+    #[test]
+    fn is_wrappable_backlog_with_worktree() {
+        let task = Task {
+            status: TaskStatus::Backlog,
+            worktree: Some("/tmp/wt".to_string()),
+            ..make_task("/repo")
+        };
+        assert!(!is_wrappable(&task));
+    }
+
+    #[test]
     fn expand_tilde_with_path() {
         let home = std::env::var("HOME").unwrap();
         assert_eq!(expand_tilde("~/projects/foo"), format!("{home}/projects/foo"));

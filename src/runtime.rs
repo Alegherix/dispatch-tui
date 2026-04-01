@@ -1339,9 +1339,7 @@ mod tests {
             MockProcessRunner::fail(""),                   // remote get-url (no remote)
             MockProcessRunner::ok(),                       // git rebase main (from worktree)
             MockProcessRunner::ok(),                       // git merge --ff-only (fast-forward)
-            // cleanup_task internals (no tmux window):
-            MockProcessRunner::ok(),                       // git worktree remove
-            MockProcessRunner::ok(),                       // git branch -D (best-effort)
+            // Worktree is preserved; cleanup happens later during archive.
         ]));
         let rt = TuiRuntime {
             database: db.clone(),

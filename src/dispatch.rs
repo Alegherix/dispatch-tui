@@ -198,14 +198,21 @@ pub fn cleanup_task(
         }
     }
 
+    let repo = expand_tilde(repo_path);
     let output = runner
-        .run("git", &["worktree", "remove", "--force", worktree_path])
+        .run("git", &["-C", &repo, "worktree", "remove", "--force", worktree_path])
         .context("failed to run git worktree remove")?;
     if !output.status.success() {
-        anyhow::bail!(
-            "git worktree remove failed for path {worktree_path}: {}",
-            stderr_str(&output)
-        );
+        let stderr = stderr_str(&output);
+        // If the worktree is already gone (manually removed or pruned), treat as success.
+        if stderr.contains("is not a working tree") {
+            tracing::info!(worktree_path, "worktree already removed, skipping");
+        } else {
+            anyhow::bail!(
+                "git worktree remove failed for path {worktree_path}: {}",
+                stderr
+            );
+        }
     }
 
     if let Some(branch) = std::path::Path::new(worktree_path)
@@ -213,7 +220,7 @@ pub fn cleanup_task(
         .and_then(|n| n.to_str())
     {
         // Best-effort: ignore errors (branch may not exist).
-        let _ = runner.run("git", &["-C", repo_path, "branch", "-D", branch]);
+        let _ = runner.run("git", &["-C", &repo, "branch", "-D", branch]);
     }
 
     Ok(())
@@ -1115,7 +1122,21 @@ mod tests {
         assert_eq!(calls[1].0, "tmux");
         assert_eq!(calls[1].1[0], "kill-window");
         assert_eq!(calls[2].0, "git");
+        // git worktree remove is invoked with -C <repo>
+        assert!(calls[2].1.contains(&"-C".to_string()));
         assert!(calls[2].1.contains(&"remove".to_string()));
+    }
+
+    #[test]
+    fn cleanup_succeeds_when_worktree_already_removed() {
+        // When git says "not a working tree" the archive should still succeed,
+        // not surface an error to the user.
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("fatal: '/repo/.worktrees/42-fix-bug' is not a working tree"),
+            MockProcessRunner::ok(), // git branch -D (best-effort)
+        ]);
+
+        cleanup_task("/repo", "/repo/.worktrees/42-fix-bug", None, &mock).unwrap();
     }
 
     #[test]

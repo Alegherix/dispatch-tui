@@ -78,11 +78,13 @@ Backlog → Running → Review → Done
 
 ## Review Board
 
-Press `Tab` to switch to the Review Board, which shows GitHub PRs where you are a requested reviewer (excluding Dependabot and Renovate PRs via the GraphQL search query). Data is fetched via `gh api graphql` and refreshed every 60 seconds.
+Press `Tab` to switch to the Review Board, which shows GitHub PRs where you are a requested reviewer (excluding Dependabot and Renovate PRs via the GraphQL search query). Data is fetched via `gh api graphql` and refreshed every 30 seconds.
 
-Three columns: **Needs Review** → **Changes Requested** → **Approved**
+Four columns: **Needs Review** → **Waiting for Response** → **Changes Requested** → **Approved**
 
-Keys: `Enter` to open PR in browser, `r` to refresh, `Esc`/`Tab` to go back. Standard `h/l/j/k` navigation.
+The "Waiting for Response" column uses client-side heuristics: if you've commented or reviewed and the author hasn't responded (via comment, commit, or re-requesting your review), the PR appears here instead of "Needs Review."
+
+Keys: `Enter` to show detail panel, `p` to open PR in browser, `d` to dispatch review agent, `r` to refresh, `f` for repo filter, `Esc`/`Tab` to go back. Standard `h/l/j/k` navigation.
 
 Requires `gh` CLI authenticated (`gh auth login`).
 
@@ -186,6 +188,8 @@ Normal ──d (stale/crashed)──▶ ConfirmRetry(id) ──r/f──▶ Norm
 Normal ──J/K──▶ reorder item up/down (stays Normal)
 Normal ──?──▶ Help ──?/Esc──▶ Normal
 Normal (in epic view) ──q──▶ ExitEpic (q quits only from board view)
+ReviewBoard ──Enter──▶ toggles detail panel
+ReviewBoard ──f──▶ ReviewRepoFilter ──Enter/Esc──▶ ReviewBoard
 
 Any input mode ──Esc──▶ Normal (cancels)
 Error popup ──any key──▶ dismisses

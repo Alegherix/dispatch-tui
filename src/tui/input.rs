@@ -32,6 +32,7 @@ impl App {
             InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
+            InputMode::ReviewRepoFilter => self.handle_key_review_repo_filter(key),
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
         }
@@ -690,6 +691,27 @@ impl App {
         }
     }
 
+    fn handle_key_review_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseReviewRepoFilter),
+            KeyCode::Char('a') => self.update(Message::ToggleAllReviewRepoFilter),
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                let idx = (c as usize) - ('1' as usize);
+                let repos: Vec<String> = self.review_prs.iter()
+                    .map(|pr| pr.repo.clone())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                if let Some(repo) = repos.get(idx) {
+                    self.update(Message::ToggleReviewRepoFilter(repo.clone()))
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        }
+    }
+
     fn handle_key_input_preset_name(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Enter => {
@@ -776,7 +798,9 @@ impl App {
                 vec![]
             }
 
-            KeyCode::Enter => {
+            KeyCode::Enter => self.update(Message::ToggleReviewDetail),
+
+            KeyCode::Char('p') => {
                 if let Some(pr) = self.selected_review_pr() {
                     let url = pr.url.clone();
                     vec![Command::OpenInBrowser { url }]
@@ -786,6 +810,21 @@ impl App {
             }
 
             KeyCode::Char('r') => self.update(Message::RefreshReviewPrs),
+            KeyCode::Char('f') => self.update(Message::StartReviewRepoFilter),
+
+            KeyCode::Char('d') => {
+                if let Some(pr) = self.selected_review_pr() {
+                    self.update(Message::DispatchReviewAgent {
+                        repo: pr.repo.clone(),
+                        number: pr.number,
+                        title: pr.title.clone(),
+                        body: pr.body.clone(),
+                        head_ref: pr.head_ref.clone(),
+                    })
+                } else {
+                    vec![]
+                }
+            }
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 

@@ -152,13 +152,22 @@ pub enum Message {
     OpenInBrowser {
         url: String,
     },
+    ToggleReviewDetail,
     RefreshReviewPrs,
+    DispatchReviewAgent { repo: String, number: i64, title: String, body: String, head_ref: String },
+    ReviewAgentDispatched { repo: String, number: i64, tmux_window: String },
+    ReviewAgentFailed { error: String },
     // Repo filter
     StartRepoFilter,
     CloseRepoFilter,
     ToggleRepoFilter(String),
     ToggleAllRepoFilter,
     MoveRepoCursor(isize),
+    // Review repo filter
+    StartReviewRepoFilter,
+    CloseReviewRepoFilter,
+    ToggleReviewRepoFilter(String),
+    ToggleAllReviewRepoFilter,
     // Filter presets
     StartSavePreset,
     SaveFilterPreset(String),
@@ -289,6 +298,13 @@ pub enum Command {
         id: TaskId,
         sub_status: SubStatus,
     },
+    DispatchReviewAgent {
+        repo: String,
+        number: i64,
+        title: String,
+        body: String,
+        head_ref: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +336,7 @@ pub enum InputMode {
     // Overlay modes
     Help,
     RepoFilter,
+    ReviewRepoFilter,
     InputPresetName,
     ConfirmDeletePreset,
 }

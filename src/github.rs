@@ -1,4 +1,4 @@
-use crate::models::{ReviewDecision, ReviewPr};
+use crate::models::{CiStatus, ReviewDecision, ReviewPr, Reviewer};
 use crate::process::ProcessRunner;
 use chrono::{DateTime, Utc};
 
@@ -14,6 +14,18 @@ fn classify_review_decision(node: &serde_json::Value, viewer_login: &str) -> Rev
         "APPROVED" => return ReviewDecision::Approved,
         "CHANGES_REQUESTED" => return ReviewDecision::ChangesRequested,
         _ => {}
+    }
+
+    // Re-request is the strongest signal: if the viewer is in the current
+    // reviewRequests list, the author explicitly asked for another look.
+    let viewer_re_requested = node["reviewRequests"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|req| req["requestedReviewer"]["login"].as_str() == Some(viewer_login));
+
+    if viewer_re_requested {
+        return ReviewDecision::ReviewRequired;
     }
 
     let pr_author = node["author"]["login"].as_str().unwrap_or("");
@@ -68,6 +80,42 @@ fn classify_review_decision(node: &serde_json::Value, viewer_login: &str) -> Rev
     } else {
         ReviewDecision::WaitingForResponse
     }
+}
+
+/// Extract reviewers from a PR node by merging completed reviews and pending
+/// review requests. A reviewer who has left an APPROVED or CHANGES_REQUESTED
+/// review gets that decision; a pending request (not yet reviewed) gets `None`.
+fn parse_reviewers(node: &serde_json::Value) -> Vec<Reviewer> {
+    let mut by_login: std::collections::HashMap<String, Option<ReviewDecision>> =
+        std::collections::HashMap::new();
+
+    // Completed reviews — latest state per reviewer
+    if let Some(reviews) = node["reviews"]["nodes"].as_array() {
+        for review in reviews {
+            if let Some(login) = review["author"]["login"].as_str() {
+                let decision = match review["state"].as_str() {
+                    Some("APPROVED") => Some(ReviewDecision::Approved),
+                    Some("CHANGES_REQUESTED") => Some(ReviewDecision::ChangesRequested),
+                    _ => continue,
+                };
+                by_login.insert(login.to_string(), decision);
+            }
+        }
+    }
+
+    // Pending review requests — only add if not already reviewed
+    if let Some(requests) = node["reviewRequests"]["nodes"].as_array() {
+        for req in requests {
+            if let Some(login) = req["requestedReviewer"]["login"].as_str() {
+                by_login.entry(login.to_string()).or_insert(None);
+            }
+        }
+    }
+
+    by_login
+        .into_iter()
+        .map(|(login, decision)| Reviewer { login, decision })
+        .collect()
 }
 
 /// Parse the JSON response from `gh api graphql` into a list of ReviewPr.
@@ -127,6 +175,17 @@ fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
             .and_then(|s| s.parse::<DateTime<Utc>>().ok())
             .unwrap_or_else(Utc::now);
 
+        let body = node["body"].as_str().unwrap_or("").to_string();
+        let head_ref = node["headRefName"].as_str().unwrap_or("").to_string();
+
+        let ci_state = node["commits"]["nodes"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|n| n["commit"]["statusCheckRollup"]["state"].as_str());
+        let ci_status = CiStatus::from_github(ci_state);
+
+        let reviewers = parse_reviewers(node);
+
         prs.push(ReviewPr {
             number: node["number"].as_i64().unwrap_or(0),
             title: node["title"].as_str().unwrap_or("").to_string(),
@@ -143,6 +202,10 @@ fn parse_review_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
             deletions: node["deletions"].as_i64().unwrap_or(0),
             review_decision,
             labels,
+            body,
+            head_ref,
+            ci_status,
+            reviewers,
         });
     }
 
@@ -160,12 +223,15 @@ const PR_FIELDS: &str = r#"... on PullRequest {
         additions
         deletions
         reviewDecision
+        body
+        headRefName
         author { login }
         repository { nameWithOwner }
         labels(first: 10) { nodes { name } }
         comments(last: 50) { nodes { author { login } createdAt } }
         reviews(last: 20) { nodes { state author { login } submittedAt } }
-        commits(last: 1) { nodes { commit { committedDate } } }
+        reviewRequests(first: 10) { nodes { requestedReviewer { ... on User { login } } } }
+        commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
       }"#;
 
 /// Fetch open PRs where the current user is a requested or past reviewer.
@@ -574,6 +640,89 @@ mod tests {
             classify_review_decision(&node, "me"),
             ReviewDecision::WaitingForResponse,
         );
+    }
+
+    #[test]
+    fn parse_review_prs_extracts_ci_status_and_body() {
+        let json = r#"{"data":{"viewer":{"login":"me"},"requestedReview":{"nodes":[{
+            "number": 77,
+            "title": "Fix auth bug",
+            "url": "https://github.com/acme/app/pull/77",
+            "isDraft": false,
+            "createdAt": "2026-03-28T10:00:00Z",
+            "updatedAt": "2026-03-29T14:00:00Z",
+            "additions": 10,
+            "deletions": 2,
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": {"login": "alice"},
+            "repository": {"nameWithOwner": "acme/app"},
+            "labels": {"nodes": []},
+            "comments": {"nodes": []},
+            "reviews": {"nodes": []},
+            "body": "This fixes the auth bug",
+            "headRefName": "fix-auth-bug",
+            "commits": {"nodes": [{"commit": {"committedDate": "2026-03-28T10:00:00Z", "statusCheckRollup": {"state": "SUCCESS"}}}]},
+            "reviewRequests": {"nodes": []}
+        }]},"alreadyReviewed":{"nodes":[]}}}"#;
+        let prs = parse_review_prs(json).unwrap();
+        assert_eq!(prs.len(), 1);
+        let pr = &prs[0];
+        assert_eq!(pr.ci_status, CiStatus::Success);
+        assert_eq!(pr.body, "This fixes the auth bug");
+        assert_eq!(pr.head_ref, "fix-auth-bug");
+    }
+
+    #[test]
+    fn parse_reviewers_from_reviews_and_requests() {
+        let node = make_pr_node(r#"{
+            "reviews": {"nodes": [
+                {"state": "APPROVED", "author": {"login": "bob"}, "submittedAt": "2026-03-28T12:00:00Z"}
+            ]},
+            "reviewRequests": {"nodes": [
+                {"requestedReviewer": {"login": "carol"}}
+            ]}
+        }"#);
+        let mut reviewers = parse_reviewers(&node);
+        reviewers.sort_by(|a, b| a.login.cmp(&b.login));
+        assert_eq!(reviewers.len(), 2);
+        assert_eq!(reviewers[0].login, "bob");
+        assert_eq!(reviewers[0].decision, Some(ReviewDecision::Approved));
+        assert_eq!(reviewers[1].login, "carol");
+        assert_eq!(reviewers[1].decision, None);
+    }
+
+    #[test]
+    fn classify_rerequest_moves_to_review_required() {
+        let node = serde_json::json!({
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": { "login": "alice" },
+            "comments": { "nodes": [
+                { "author": { "login": "viewer" }, "createdAt": "2026-01-01T01:00:00Z" }
+            ] },
+            "reviews": { "nodes": [] },
+            "commits": { "nodes": [{ "commit": { "committedDate": "2026-01-01T00:00:00Z" } }] },
+            "reviewRequests": { "nodes": [
+                { "requestedReviewer": { "login": "viewer" } }
+            ] }
+        });
+        let decision = classify_review_decision(&node, "viewer");
+        assert_eq!(decision, ReviewDecision::ReviewRequired);
+    }
+
+    #[test]
+    fn classify_no_rerequest_stays_waiting() {
+        let node = serde_json::json!({
+            "reviewDecision": "REVIEW_REQUIRED",
+            "author": { "login": "alice" },
+            "comments": { "nodes": [
+                { "author": { "login": "viewer" }, "createdAt": "2026-01-01T01:00:00Z" }
+            ] },
+            "reviews": { "nodes": [] },
+            "commits": { "nodes": [{ "commit": { "committedDate": "2026-01-01T00:00:00Z" } }] },
+            "reviewRequests": { "nodes": [] }
+        });
+        let decision = classify_review_decision(&node, "viewer");
+        assert_eq!(decision, ReviewDecision::WaitingForResponse);
     }
 
     #[test]

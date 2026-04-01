@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    self, epic_status, Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskUsage, VisualColumn,
+    self, epic_status, Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus,
+    TaskUsage, VisualColumn,
 };
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,8 @@ pub struct App {
     pub(in crate::tui) last_review_error: Option<String>,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
+    pub(in crate::tui) review_detail_visible: bool,
+    pub(in crate::tui) review_repo_filter: HashSet<String>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -80,6 +83,8 @@ impl App {
             last_review_error: None,
             usage: HashMap::new(),
             merge_queue: None,
+            review_detail_visible: false,
+            review_repo_filter: HashSet::new(),
         }
     }
 
@@ -194,6 +199,12 @@ impl App {
     }
     pub fn last_review_error(&self) -> Option<&str> {
         self.last_review_error.as_deref()
+    }
+    pub fn review_detail_visible(&self) -> bool {
+        self.review_detail_visible
+    }
+    pub fn review_repo_filter(&self) -> &HashSet<String> {
+        &self.review_repo_filter
     }
 
     /// Get the review board selection state, if currently in review board mode.
@@ -539,6 +550,11 @@ impl App {
             Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
             Message::ToggleAllRepoFilter => self.handle_toggle_all_repo_filter(),
             Message::MoveRepoCursor(delta) => self.handle_move_repo_cursor(delta),
+            // Review repo filter
+            Message::StartReviewRepoFilter => self.handle_start_review_repo_filter(),
+            Message::CloseReviewRepoFilter => self.handle_close_review_repo_filter(),
+            Message::ToggleReviewRepoFilter(repo) => self.handle_toggle_review_repo_filter(repo),
+            Message::ToggleAllReviewRepoFilter => self.handle_toggle_all_review_repo_filter(),
             // Wrap up
             Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
             Message::WrapUpRebase => self.handle_wrap_up_rebase(),
@@ -559,6 +575,19 @@ impl App {
             Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
             Message::ReviewPrsLoaded(prs) => self.handle_review_prs_loaded(prs),
             Message::ReviewPrsFetchFailed(err) => self.handle_review_prs_fetch_failed(err),
+            Message::ToggleReviewDetail => self.handle_toggle_review_detail(),
+            Message::DispatchReviewAgent { repo, number, title, body, head_ref } => {
+                self.handle_dispatch_review_agent(repo, number, title, body, head_ref)
+            }
+            Message::ReviewAgentDispatched { repo, number, tmux_window: _ } => {
+                let repo_short = repo.split('/').next_back().unwrap_or(&repo);
+                self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
+                vec![]
+            }
+            Message::ReviewAgentFailed { error } => {
+                self.set_status(format!("Review dispatch failed: {error}"));
+                vec![]
+            }
             Message::OpenInBrowser { url } => vec![Command::OpenInBrowser { url }],
             Message::RefreshReviewPrs => {
                 self.review_board_loading = true;
@@ -938,6 +967,11 @@ impl App {
         vec![]
     }
 
+    fn handle_toggle_review_detail(&mut self) -> Vec<Command> {
+        self.review_detail_visible = !self.review_detail_visible;
+        vec![]
+    }
+
     fn handle_tmux_output(&mut self, id: TaskId, output: String, activity_ts: u64) -> Vec<Command> {
         let mut cmds = Vec::new();
         let activity_changed = self
@@ -1099,10 +1133,10 @@ impl App {
             cmds.push(Command::CheckPrStatus { id, pr_url });
         }
 
-        // Refresh review board data if stale (> 60s), regardless of active tab
+        // Refresh review board data if stale (> 30s), regardless of active tab
         let needs_fetch = self
             .last_review_fetch
-            .map(|t| t.elapsed() > Duration::from_secs(60))
+            .map(|t| t.elapsed() > Duration::from_secs(30))
             .unwrap_or(true);
         if needs_fetch && !self.review_board_loading {
             self.review_board_loading = true;
@@ -2114,7 +2148,7 @@ impl App {
         };
         let needs_fetch = self
             .last_review_fetch
-            .map(|t| t.elapsed() > Duration::from_secs(60))
+            .map(|t| t.elapsed() > Duration::from_secs(30))
             .unwrap_or(true);
         if needs_fetch && !self.review_board_loading {
             self.review_board_loading = true;
@@ -2142,13 +2176,13 @@ impl App {
     }
 
     fn clamp_review_selection(&mut self) {
-        let counts: [usize; crate::models::ReviewDecision::COLUMN_COUNT] =
-            std::array::from_fn(|col| {
-                self.review_prs
-                    .iter()
-                    .filter(|pr| pr.review_decision.column_index() == col)
-                    .count()
-            });
+        let filtered = self.filtered_review_prs();
+        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
+            filtered
+                .iter()
+                .filter(|pr| pr.review_decision.column_index() == col)
+                .count()
+        });
         if let Some(sel) = self.review_selection_mut() {
             for (col, &count) in counts.iter().enumerate() {
                 if count == 0 {
@@ -2168,14 +2202,59 @@ impl App {
         vec![]
     }
 
+    fn handle_dispatch_review_agent(
+        &mut self,
+        repo: String,
+        number: i64,
+        title: String,
+        body: String,
+        head_ref: String,
+    ) -> Vec<Command> {
+        // Find a local repo path from existing tasks
+        let repo_path = self.tasks.iter()
+            .find(|t| {
+                let dir_name = std::path::Path::new(&t.repo_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                let repo_short = repo.split('/').next_back().unwrap_or(&repo);
+                dir_name == repo_short
+            })
+            .map(|t| t.repo_path.clone());
+
+        let Some(repo_path) = repo_path else {
+            self.set_status(format!("No local repo found for {repo}"));
+            return vec![];
+        };
+
+        self.set_status(format!("Dispatching review agent for #{number}..."));
+        vec![Command::DispatchReviewAgent {
+            repo: repo_path,
+            number,
+            title,
+            body,
+            head_ref,
+        }]
+    }
+
+    /// Return review PRs filtered by the review repo filter.
+    /// When the filter is empty, all PRs are returned.
+    pub fn filtered_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
+        self.review_prs.iter()
+            .filter(|pr| {
+                self.review_repo_filter.is_empty() || self.review_repo_filter.contains(&pr.repo)
+            })
+            .collect()
+    }
+
     /// Get the currently selected ReviewPr, if in review board mode.
     pub fn selected_review_pr(&self) -> Option<&crate::models::ReviewPr> {
         let sel = self.review_selection()?;
         let col = sel.column();
         let row = sel.row(col);
         let decision = crate::models::ReviewDecision::from_column_index(col)?;
-        self.review_prs
-            .iter()
+        self.filtered_review_prs()
+            .into_iter()
             .filter(|pr| pr.review_decision == decision)
             .nth(row)
     }
@@ -2185,7 +2264,7 @@ impl App {
             Some(sel) => {
                 let col = sel.selected_column;
                 let count = self
-                    .review_prs
+                    .filtered_review_prs()
                     .iter()
                     .filter(|pr| pr.review_decision.column_index() == col)
                     .count();
@@ -2203,13 +2282,13 @@ impl App {
         }
     }
 
-    /// Get PRs for a specific review decision column.
+    /// Get PRs for a specific review decision column (respects active filter).
     pub fn review_prs_by_decision(
         &self,
         decision: crate::models::ReviewDecision,
     ) -> Vec<&crate::models::ReviewPr> {
-        self.review_prs
-            .iter()
+        self.filtered_review_prs()
+            .into_iter()
             .filter(|pr| pr.review_decision == decision)
             .collect()
     }
@@ -2542,6 +2621,38 @@ impl App {
             self.repo_filter = self.repo_paths.iter().cloned().collect();
         }
         self.clamp_selection();
+        vec![]
+    }
+
+    fn handle_start_review_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::ReviewRepoFilter;
+        vec![]
+    }
+
+    fn handle_close_review_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clamp_review_selection();
+        vec![]
+    }
+
+    fn handle_toggle_review_repo_filter(&mut self, repo: String) -> Vec<Command> {
+        if !self.review_repo_filter.remove(&repo) {
+            self.review_repo_filter.insert(repo);
+        }
+        self.clamp_review_selection();
+        vec![]
+    }
+
+    fn handle_toggle_all_review_repo_filter(&mut self) -> Vec<Command> {
+        let all_repos: HashSet<String> = self.review_prs.iter()
+            .map(|pr| pr.repo.clone())
+            .collect();
+        if self.review_repo_filter.len() == all_repos.len() {
+            self.review_repo_filter.clear();
+        } else {
+            self.review_repo_filter = all_repos;
+        }
+        self.clamp_review_selection();
         vec![]
     }
 

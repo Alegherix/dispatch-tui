@@ -10,7 +10,8 @@ use ratatui::{
 use super::{App, ColumnItem, InputMode, ViewMode};
 use crate::dispatch;
 use crate::models::{
-    format_age, Epic, ReviewDecision, ReviewPr, Staleness, SubStatus, Task, TaskStatus, TaskUsage,
+    format_age, CiStatus, Epic, ReviewDecision, ReviewPr, Staleness, SubStatus, Task, TaskStatus,
+    TaskUsage,
 };
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
@@ -1387,13 +1388,21 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             ]),
             Line::from(vec![
                 Span::styled("  Enter", key),
+                Span::styled(" detail panel  ", desc),
+                Span::styled("p", key),
                 Span::styled(" open PR in browser", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  Actions", header)),
             Line::from(vec![
                 Span::styled("  r", key),
-                Span::styled(" refresh from GitHub", desc),
+                Span::styled(" refresh from GitHub  ", desc),
+                Span::styled("d", key),
+                Span::styled(" dispatch review agent", desc),
+            ]),
+            Line::from(vec![
+                Span::styled("  f", key),
+                Span::styled(" filter repos", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  General", header)),
@@ -1717,6 +1726,60 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, popup_area);
 }
 
+fn render_review_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
+    // Collect distinct repos sorted alphabetically
+    let repos: Vec<String> = app.review_prs().iter()
+        .map(|pr| pr.repo.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    let repo_count = repos.len();
+    let popup_height = (repo_count as u16 + 5).clamp(7, area.height.saturating_sub(4));
+    let popup_width = (area.width * 70 / 100).clamp(30, 60);
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" Review Repo Filter ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+
+    let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Gray);
+    let note_style = Style::default().fg(Color::DarkGray);
+
+    let mut lines = vec![Line::from("")];
+
+    for (i, repo) in repos.iter().enumerate() {
+        let num = i + 1;
+        let checked = if app.review_repo_filter().contains(repo) { "x" } else { " " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {num}"), key_style),
+            Span::styled(format!(". [{checked}] {repo}"), desc_style),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    let all_selected = !repos.is_empty() && app.review_repo_filter().len() == repos.len();
+    let a_label = if all_selected { "clear all" } else { "select all" };
+    lines.push(Line::from(vec![
+        Span::styled("  a", key_style),
+        Span::styled(format!(": {a_label}  "), note_style),
+        Span::styled("Enter/Esc", key_style),
+        Span::styled(": close", note_style),
+    ]));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, popup_area);
+}
+
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     if let Some(msg) = &app.status_message {
         let bar = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Yellow));
@@ -1901,6 +1964,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .as_deref()
                 .unwrap_or("Detach tmux panel? (y/n)");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ReviewRepoFilter => {
+            let bar = Paragraph::new("Filter repos: 1-9 toggle, (a)ll, Enter/Esc close")
+                .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
     }
@@ -2103,24 +2171,29 @@ fn review_column_bg_color(decision: ReviewDecision) -> Color {
 
 /// Render the review board view.
 pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
+    let detail_height = if app.review_detail_visible() { 8 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // tab bar
-            Constraint::Length(1), // summary row
-            Constraint::Min(1),    // board
-            Constraint::Length(1), // status bar
+            Constraint::Length(1),             // tab bar
+            Constraint::Length(1),             // summary row
+            Constraint::Min(1),               // board
+            Constraint::Length(detail_height), // detail panel
+            Constraint::Length(1),             // status bar
         ])
         .split(area);
 
     render_tab_bar(frame, app, chunks[0]);
     render_review_summary_row(frame, app, chunks[1]);
 
-    if app.review_prs().is_empty() {
+    let filtered = app.filtered_review_prs();
+    if filtered.is_empty() {
         let msg = if app.review_board_loading() {
             "Fetching reviews..."
-        } else {
+        } else if app.review_prs().is_empty() {
             "No PRs awaiting your review"
+        } else {
+            "No PRs match filter"
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
@@ -2130,23 +2203,114 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         render_review_columns(frame, app, chunks[2]);
     }
 
+    render_review_detail(frame, app, chunks[3]);
+
     // Status bar: transient message takes priority; fall back to persistent error
     if let Some(msg) = app.status_message() {
-        let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[3]);
+        let status =
+            Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
+        frame.render_widget(status, chunks[4]);
     } else if let Some(err) = app.last_review_error() {
-        let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, chunks[3]);
+        let status =
+            Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
+        frame.render_widget(status, chunks[4]);
     } else {
         let has_pr = app.selected_review_pr().is_some();
         let hints = Paragraph::new(Line::from(review_action_hints(has_pr)));
-        frame.render_widget(hints, chunks[3]);
+        frame.render_widget(hints, chunks[4]);
     }
+
+    // Filter overlay (on top of everything)
+    if matches!(app.mode(), InputMode::ReviewRepoFilter) {
+        render_review_repo_filter_overlay(frame, app, area);
+    }
+}
+
+fn render_review_detail(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(BORDER));
+
+    if !app.review_detail_visible() {
+        let paragraph = Paragraph::new("").block(block);
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    let Some(pr) = app.selected_review_pr() else {
+        let paragraph = Paragraph::new("").block(block);
+        frame.render_widget(paragraph, area);
+        return;
+    };
+
+    let decision_color = review_column_color(pr.review_decision);
+    let now = Utc::now();
+    let age = format_age(pr.created_at, now);
+
+    // Line 1: title + CI status
+    let ci_color = match pr.ci_status {
+        CiStatus::Success => Color::Green,
+        CiStatus::Failure => Color::Red,
+        CiStatus::Pending => Color::Yellow,
+        CiStatus::None => Color::DarkGray,
+    };
+    let ci_label = match pr.ci_status {
+        CiStatus::Success => "passing",
+        CiStatus::Failure => "failing",
+        CiStatus::Pending => "pending",
+        CiStatus::None => "no checks",
+    };
+    let line1 = Line::from(vec![
+        Span::styled(
+            format!("{}#{} {}", pr.repo, pr.number, pr.title),
+            Style::default().fg(decision_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  CI: {} {ci_label}", pr.ci_status.symbol()),
+            Style::default().fg(ci_color),
+        ),
+    ]);
+
+    // Line 2: metadata
+    let line2 = Line::from(Span::styled(
+        format!("@{} \u{00b7} {} \u{00b7} +{}/-{}", pr.author, age, pr.additions, pr.deletions),
+        Style::default().fg(MUTED),
+    ));
+
+    // Line 3: reviewer list
+    let reviewer_spans: Vec<String> = pr.reviewers.iter().map(|r| {
+        let icon = match r.decision {
+            Some(ReviewDecision::Approved) => "\u{2713}",
+            Some(ReviewDecision::ChangesRequested) => "\u{2717}",
+            _ => "\u{23f3}",
+        };
+        format!("@{} {icon}", r.login)
+    }).collect();
+    let reviewer_line = if reviewer_spans.is_empty() {
+        "No reviewers".to_string()
+    } else {
+        format!("Reviews: {}", reviewer_spans.join(" \u{00b7} "))
+    };
+    let line3 = Line::from(Span::styled(reviewer_line, Style::default().fg(MUTED_LIGHT)));
+
+    // Lines 4+: PR body (truncated to fit remaining space)
+    let body_lines: Vec<Line> = pr.body
+        .lines()
+        .take(5)
+        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::DarkGray))))
+        .collect();
+
+    let mut lines = vec![line1, line2, line3];
+    lines.extend(body_lines);
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     let sel = app.review_selection();
     let selected_col = sel.map(|s| s.column()).unwrap_or(0);
+    let filtered = app.filtered_review_prs();
 
     let segments = Layout::default()
         .direction(Direction::Horizontal)
@@ -2157,8 +2321,7 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
-        let count = app
-            .review_prs()
+        let count = filtered
             .iter()
             .filter(|pr| pr.review_decision == *decision)
             .count();
@@ -2180,6 +2343,7 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
+    let filter = app.review_repo_filter().clone();
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
@@ -2194,6 +2358,7 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         let prs: Vec<&ReviewPr> = app
             .review_prs()
             .iter()
+            .filter(|pr| filter.is_empty() || filter.contains(&pr.repo))
             .filter(|pr| pr.review_decision == *decision)
             .collect();
 
@@ -2249,9 +2414,17 @@ fn build_review_pr_item(
         Style::default().fg(color)
     };
 
+    let ci_color = match pr.ci_status {
+        CiStatus::Success => Color::Green,
+        CiStatus::Failure => Color::Red,
+        CiStatus::Pending => Color::Yellow,
+        CiStatus::None => Color::DarkGray,
+    };
+
     let line1 = Line::from(vec![
         Span::styled(stripe, Style::default().fg(color)),
         Span::styled(header_truncated, line1_style),
+        Span::styled(format!(" {}", pr.ci_status.symbol()), Style::default().fg(ci_color)),
     ]);
 
     // Line 2: author · age · +/-lines

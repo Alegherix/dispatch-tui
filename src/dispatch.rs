@@ -753,6 +753,90 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Dispatch a Claude agent to review a PR in an isolated worktree.
+pub fn dispatch_review_agent(
+    repo_path: &str,
+    number: i64,
+    title: &str,
+    body: &str,
+    head_ref: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<DispatchResult> {
+    let repo_path = expand_tilde(repo_path);
+    let repo_short = repo_path.split('/').next_back().unwrap_or(&repo_path);
+    let worktree_name = format!("review-{number}");
+    let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
+    let tmux_window = format!("review-{repo_short}-{number}");
+
+    // Check if tmux window already exists — focus it instead
+    if tmux::has_window(&tmux_window, runner).unwrap_or(false) {
+        return Ok(DispatchResult {
+            worktree_path,
+            tmux_window,
+        });
+    }
+
+    std::fs::create_dir_all(format!("{repo_path}/.worktrees"))
+        .context("failed to create .worktrees directory")?;
+
+    // Fetch the PR branch and create worktree tracking it
+    let fetch_output = runner
+        .run("git", &["-C", &repo_path, "fetch", "origin", head_ref])
+        .context("failed to fetch PR branch")?;
+    anyhow::ensure!(
+        fetch_output.status.success(),
+        "git fetch failed: {}",
+        stderr_str(&fetch_output)
+    );
+
+    if !std::path::Path::new(&worktree_path).exists() {
+        let output = runner
+            .run(
+                "git",
+                &[
+                    "-C",
+                    &repo_path,
+                    "worktree",
+                    "add",
+                    &worktree_path,
+                    &format!("origin/{head_ref}"),
+                ],
+            )
+            .context("failed to create review worktree")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git worktree add failed: {}",
+            stderr_str(&output)
+        );
+    }
+
+    tmux::new_window(&tmux_window, &worktree_path, runner)
+        .context("failed to create tmux window")?;
+
+    // Write prompt and launch Claude
+    let prompt = format!(
+        "You are reviewing PR #{number}: {title}\n\n\
+         ## PR Description\n\n{body}\n\n\
+         ## Instructions\n\n\
+         1. Read the diff: `gh pr diff {number}`\n\
+         2. Review the changes for correctness, style, bugs, and security issues\n\
+         3. Submit your review using `gh pr review {number}` with appropriate comments\n\
+         4. If changes are needed, use `--request-changes`. If it looks good, use `--approve`.\n\n\
+         Focus on substantive issues. Don't nitpick style unless it affects readability."
+    );
+    let prompt_file = format!("{worktree_path}/.claude-prompt");
+    fs::write(&prompt_file, &prompt)
+        .with_context(|| format!("failed to write {prompt_file}"))?;
+    let claude_cmd = "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude --permission-mode acceptEdits \"$prompt\"'";
+    tmux::send_keys(&tmux_window, claude_cmd, runner)
+        .context("failed to send keys to tmux window")?;
+
+    Ok(DispatchResult {
+        worktree_path,
+        tmux_window,
+    })
+}
+
 /// A task can be wrapped up if it has a worktree and is either Running or Review.
 pub fn is_wrappable(task: &Task) -> bool {
     task.worktree.is_some()

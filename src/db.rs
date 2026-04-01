@@ -5,8 +5,8 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::models::{
-    Epic, EpicId, ReviewDecision, ReviewPr, SubStatus, Task, TaskId, TaskStatus, TaskUsage,
-    UsageReport,
+    CiStatus, Epic, EpicId, ReviewDecision, ReviewPr, Reviewer, SubStatus, Task, TaskId,
+    TaskStatus, TaskUsage, UsageReport,
 };
 
 // ---------------------------------------------------------------------------
@@ -475,6 +475,10 @@ impl Database {
                     deletions       INTEGER NOT NULL,
                     review_decision TEXT    NOT NULL,
                     labels          TEXT    NOT NULL,
+                    body            TEXT    NOT NULL DEFAULT '',
+                    head_ref        TEXT    NOT NULL DEFAULT '',
+                    ci_status       TEXT    NOT NULL DEFAULT 'none',
+                    reviewers       TEXT    NOT NULL DEFAULT '[]',
                     PRIMARY KEY (repo, number)
                 )",
             )
@@ -662,6 +666,25 @@ impl Database {
             }
             conn.pragma_update(None, "user_version", 18i64)
                 .context("Failed to update schema version to 18")?;
+        }
+
+        if current_version < 19 {
+            // Add new review_prs columns. Fresh DBs already have them from
+            // the CREATE TABLE in migration 14, so ignore "duplicate column" errors.
+            let _ = conn.execute_batch(
+                "ALTER TABLE review_prs ADD COLUMN body TEXT NOT NULL DEFAULT ''"
+            );
+            let _ = conn.execute_batch(
+                "ALTER TABLE review_prs ADD COLUMN head_ref TEXT NOT NULL DEFAULT ''"
+            );
+            let _ = conn.execute_batch(
+                "ALTER TABLE review_prs ADD COLUMN ci_status TEXT NOT NULL DEFAULT 'none'"
+            );
+            let _ = conn.execute_batch(
+                "ALTER TABLE review_prs ADD COLUMN reviewers TEXT NOT NULL DEFAULT '[]'"
+            );
+            conn.pragma_update(None, "user_version", 19i64)
+                .context("Failed to update schema version to 19")?;
         }
 
         Ok(())
@@ -1185,12 +1208,19 @@ impl TaskStore for Database {
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
-                 created_at, updated_at, additions, deletions, review_decision, labels)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 created_at, updated_at, additions, deletions, review_decision, labels,
+                 body, head_ref, ci_status, reviewers)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             )?;
             for pr in prs {
                 let labels_json =
                     serde_json::to_string(&pr.labels).context("Failed to serialize labels")?;
+                let reviewers_json = serde_json::to_string(&pr.reviewers.iter().map(|r| {
+                    serde_json::json!({
+                        "login": r.login,
+                        "decision": r.decision.map(|d| d.as_db_str())
+                    })
+                }).collect::<Vec<_>>()).unwrap_or_default();
                 stmt.execute(params![
                     pr.repo,
                     pr.number,
@@ -1204,6 +1234,10 @@ impl TaskStore for Database {
                     pr.deletions,
                     pr.review_decision.as_db_str(),
                     labels_json,
+                    pr.body,
+                    pr.head_ref,
+                    pr.ci_status.as_db_str(),
+                    reviewers_json,
                 ])?;
             }
         }
@@ -1216,7 +1250,7 @@ impl TaskStore for Database {
         let mut stmt = conn.prepare(
             "SELECT repo, number, title, author, url, is_draft,
                     created_at, updated_at, additions, deletions,
-                    review_decision, labels
+                    review_decision, labels, body, head_ref, ci_status, reviewers
              FROM review_prs",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -1232,6 +1266,10 @@ impl TaskStore for Database {
             let deletions: i64 = row.get(9)?;
             let decision_str: String = row.get(10)?;
             let labels_json: String = row.get(11)?;
+            let body: String = row.get(12)?;
+            let head_ref: String = row.get(13)?;
+            let ci_status_str: String = row.get(14)?;
+            let reviewers_json: String = row.get(15)?;
             Ok((
                 repo,
                 number,
@@ -1245,6 +1283,10 @@ impl TaskStore for Database {
                 deletions,
                 decision_str,
                 labels_json,
+                body,
+                head_ref,
+                ci_status_str,
+                reviewers_json,
             ))
         })?;
 
@@ -1263,6 +1305,10 @@ impl TaskStore for Database {
                 deletions,
                 decision_str,
                 labels_json,
+                body,
+                head_ref,
+                ci_status_str,
+                reviewers_json,
             ) = row?;
 
             let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -1274,6 +1320,15 @@ impl TaskStore for Database {
             let review_decision = ReviewDecision::from_db_str(&decision_str)
                 .unwrap_or(ReviewDecision::ReviewRequired);
             let labels: Vec<String> = serde_json::from_str(&labels_json).unwrap_or_default();
+            let ci_status = CiStatus::from_db_str(&ci_status_str);
+            let reviewers: Vec<Reviewer> = serde_json::from_str::<Vec<serde_json::Value>>(&reviewers_json)
+                .unwrap_or_default()
+                .iter()
+                .map(|v| Reviewer {
+                    login: v["login"].as_str().unwrap_or("").to_string(),
+                    decision: v["decision"].as_str().and_then(ReviewDecision::from_db_str),
+                })
+                .collect();
 
             prs.push(ReviewPr {
                 number,
@@ -1288,6 +1343,10 @@ impl TaskStore for Database {
                 deletions,
                 review_decision,
                 labels,
+                body,
+                head_ref,
+                ci_status,
+                reviewers,
             });
         }
         Ok(prs)
@@ -1569,7 +1628,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18, "fresh DB should be at schema version 18");
+        assert_eq!(version, 19, "fresh DB should be at schema version 19");
     }
 
     #[test]
@@ -1634,7 +1693,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18);
+        assert_eq!(version, 19);
 
         // Verify Migration 1 added the plan column
         let has_plan: bool = conn.prepare("SELECT plan FROM tasks LIMIT 1").is_ok();
@@ -1700,7 +1759,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18);
+        assert_eq!(version, 19);
     }
 
     #[test]
@@ -2410,6 +2469,10 @@ mod tests {
             deletions: 5,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec!["bug".to_string()],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: CiStatus::None,
+            reviewers: vec![],
         };
         let pr2 = ReviewPr {
             number: 99,
@@ -2424,6 +2487,10 @@ mod tests {
             deletions: 80,
             review_decision: ReviewDecision::Approved,
             labels: vec![],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: CiStatus::None,
+            reviewers: vec![],
         };
 
         db.save_review_prs(&[pr1, pr2]).unwrap();
@@ -2448,7 +2515,7 @@ mod tests {
 
     #[test]
     fn save_review_prs_replaces_all() {
-        use crate::models::{ReviewDecision, ReviewPr};
+        use crate::models::{CiStatus, ReviewDecision, ReviewPr, Reviewer};
         use chrono::Utc;
 
         let db = Database::open_in_memory().unwrap();
@@ -2466,9 +2533,22 @@ mod tests {
             deletions: 0,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec![],
+            body: "Initial body".to_string(),
+            head_ref: "feature/old-branch".to_string(),
+            ci_status: CiStatus::Pending,
+            reviewers: vec![Reviewer { login: "carol".to_string(), decision: None }],
         };
         db.save_review_prs(&[pr1]).unwrap();
         assert_eq!(db.load_review_prs().unwrap().len(), 1);
+
+        // Verify new fields round-trip on the first save
+        let loaded_first = db.load_review_prs().unwrap();
+        assert_eq!(loaded_first[0].body, "Initial body");
+        assert_eq!(loaded_first[0].head_ref, "feature/old-branch");
+        assert_eq!(loaded_first[0].ci_status, CiStatus::Pending);
+        assert_eq!(loaded_first[0].reviewers.len(), 1);
+        assert_eq!(loaded_first[0].reviewers[0].login, "carol");
+        assert_eq!(loaded_first[0].reviewers[0].decision, None);
 
         // Save new set — old ones should be gone
         let pr2 = ReviewPr {
@@ -2484,6 +2564,12 @@ mod tests {
             deletions: 3,
             review_decision: ReviewDecision::ChangesRequested,
             labels: vec!["urgent".to_string()],
+            body: "Needs more work".to_string(),
+            head_ref: "fix/new-branch".to_string(),
+            ci_status: CiStatus::Failure,
+            reviewers: vec![
+                Reviewer { login: "dave".to_string(), decision: Some(ReviewDecision::ChangesRequested) },
+            ],
         };
         db.save_review_prs(&[pr2]).unwrap();
 
@@ -2491,6 +2577,12 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].number, 2);
         assert_eq!(loaded[0].repo, "acme/other");
+        assert_eq!(loaded[0].body, "Needs more work");
+        assert_eq!(loaded[0].head_ref, "fix/new-branch");
+        assert_eq!(loaded[0].ci_status, CiStatus::Failure);
+        assert_eq!(loaded[0].reviewers.len(), 1);
+        assert_eq!(loaded[0].reviewers[0].login, "dave");
+        assert_eq!(loaded[0].reviewers[0].decision, Some(ReviewDecision::ChangesRequested));
     }
 
     #[test]
@@ -2594,7 +2686,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18);
+        assert_eq!(version, 19);
 
         // Verify needs_input=1 became sub_status='needs_input'
         let ss: String = conn
@@ -2689,13 +2781,13 @@ mod tests {
     }
 
     #[test]
-    fn schema_version_is_16() {
+    fn schema_version_is_19() {
         let db = Database::open_in_memory().unwrap();
         let conn = db.conn.lock().unwrap();
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18, "fresh DB should be at schema version 18");
+        assert_eq!(version, 19, "fresh DB should be at schema version 19");
     }
 
     #[test]
@@ -2821,7 +2913,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18);
+        assert_eq!(version, 19);
 
         // (review, needs_input) must be converted to (review, awaiting_review)
         let ss: String = conn

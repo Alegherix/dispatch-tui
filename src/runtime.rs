@@ -1007,6 +1007,36 @@ impl TuiRuntime {
             }
         });
     }
+
+    fn exec_dispatch_review_agent(
+        &self,
+        repo_path: String,
+        number: i64,
+        title: String,
+        body: String,
+        head_ref: String,
+    ) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            match crate::dispatch::dispatch_review_agent(
+                &repo_path, number, &title, &body, &head_ref, &*runner,
+            ) {
+                Ok(result) => {
+                    let _ = tx.send(Message::ReviewAgentDispatched {
+                        repo: repo_path,
+                        number,
+                        tmux_window: result.tmux_window,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::ReviewAgentFailed {
+                        error: format!("{e:#}"),
+                    });
+                }
+            }
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1153,6 +1183,9 @@ async fn execute_commands(
             Command::DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name),
             Command::PatchSubStatus { id, sub_status } => {
                 rt.exec_patch_sub_status(app, id, sub_status)
+            }
+            Command::DispatchReviewAgent { repo, number, title, body, head_ref } => {
+                rt.exec_dispatch_review_agent(repo, number, title, body, head_ref)
             }
         }
     }
@@ -1965,7 +1998,7 @@ mod tests {
 
     #[test]
     fn startup_loads_cached_review_prs() {
-        use crate::models::{ReviewDecision, ReviewPr};
+        use crate::models::{CiStatus, ReviewDecision, ReviewPr};
         use chrono::Utc;
 
         let (rt, mut app) = test_runtime();
@@ -1984,6 +2017,10 @@ mod tests {
             deletions: 5,
             review_decision: ReviewDecision::ReviewRequired,
             labels: vec![],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: CiStatus::None,
+            reviewers: vec![],
         };
         rt.database.save_review_prs(&[pr]).unwrap();
 

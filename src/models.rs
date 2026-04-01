@@ -475,6 +475,66 @@ impl ReviewDecision {
 }
 
 // ---------------------------------------------------------------------------
+// CiStatus — CI check status for a PR
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CiStatus {
+    Pending,
+    Success,
+    Failure,
+    None,
+}
+
+impl CiStatus {
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            Self::Pending => "\u{23f3}",  // ⏳
+            Self::Success => "\u{2713}",  // ✓
+            Self::Failure => "\u{2717}",  // ✗
+            Self::None => "\u{00b7}",     // ·
+        }
+    }
+
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::None => "none",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "pending" => Self::Pending,
+            "success" => Self::Success,
+            "failure" => Self::Failure,
+            _ => Self::None,
+        }
+    }
+
+    pub fn from_github(s: Option<&str>) -> Self {
+        match s {
+            Some("SUCCESS") => Self::Success,
+            Some("FAILURE") | Some("ERROR") => Self::Failure,
+            Some("PENDING") | Some("EXPECTED") => Self::Pending,
+            _ => Self::None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reviewer — a reviewer on a PR
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reviewer {
+    pub login: String,
+    pub decision: Option<ReviewDecision>,
+}
+
+// ---------------------------------------------------------------------------
 // ReviewPr — a PR the user is expected to review
 // ---------------------------------------------------------------------------
 
@@ -492,6 +552,10 @@ pub struct ReviewPr {
     pub deletions: i64,
     pub review_decision: ReviewDecision,
     pub labels: Vec<String>,
+    pub body: String,
+    pub head_ref: String,
+    pub ci_status: CiStatus,
+    pub reviewers: Vec<Reviewer>,
 }
 
 // ---------------------------------------------------------------------------

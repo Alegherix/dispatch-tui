@@ -2860,8 +2860,12 @@ fn render_help_overlay_in_review_board_shows_review_shortcuts() {
         "review help should mention open PR"
     );
     assert!(
-        !buffer_contains(&buf, "dispatch"),
-        "review help should not show task board dispatch key"
+        buffer_contains(&buf, "dispatch review agent"),
+        "review help should mention dispatch review agent"
+    );
+    assert!(
+        !buffer_contains(&buf, "new task"),
+        "review help should not show task board new task key"
     );
 }
 
@@ -5988,6 +5992,10 @@ fn make_review_pr(number: i64, author: &str, decision: ReviewDecision) -> crate:
         deletions: 5,
         review_decision: decision,
         labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: crate::models::CiStatus::None,
+        reviewers: vec![],
     }
 }
 
@@ -6086,15 +6094,26 @@ fn review_board_navigation() {
 }
 
 #[test]
-fn review_board_enter_opens_pr() {
+fn review_board_enter_toggles_detail() {
     let mut app = make_app();
-    app.update(Message::ReviewPrsLoaded(vec![make_review_pr(
-        42,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]));
-    app.handle_key(make_key(KeyCode::Tab)); // to review board
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    app.review_prs = vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)];
+    app.update(Message::SwitchToReviewBoard);
+    assert!(!app.review_detail_visible);
+
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.review_detail_visible);
+
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(!app.review_detail_visible);
+}
+
+#[test]
+fn review_board_p_opens_browser() {
+    let mut app = make_app();
+    app.review_prs = vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)];
+    app.update(Message::SwitchToReviewBoard);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::OpenInBrowser { .. })));
@@ -8022,6 +8041,125 @@ fn quick_dispatch_enter_selects_cursor_repo() {
 }
 
 #[test]
+fn review_board_d_dispatches_review_agent() {
+    let mut app = make_app();
+    // The default make_task uses repo_path "/repo"
+    // Create a PR where repo matches the task's repo_path directory name
+    let mut pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    pr.repo = "org/repo".to_string();
+    pr.head_ref = "fix-bug".to_string();
+    app.review_prs = vec![pr];
+    app.update(Message::SwitchToReviewBoard);
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent { .. })));
+}
+
+#[test]
+fn review_board_d_no_repo_shows_error() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review_prs = vec![pr];
+    app.update(Message::SwitchToReviewBoard);
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+    assert!(cmds.is_empty()); // no command, just status message
+    assert!(app.status_message.as_deref().unwrap().contains("No local repo"));
+}
+
+#[test]
+fn review_agent_dispatched_sets_status() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let cmds = app.update(Message::ReviewAgentDispatched {
+        repo: "org/my-repo".to_string(),
+        number: 99,
+        tmux_window: "review-my-repo-99".to_string(),
+    });
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("my-repo#99"));
+}
+
+#[test]
+fn review_agent_failed_sets_status() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let cmds = app.update(Message::ReviewAgentFailed {
+        error: "git fetch failed".to_string(),
+    });
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("git fetch failed"));
+}
+
+#[test]
+fn clamp_review_selection_clamps_approved_column() {
+    // The Approved column is at index 3. Load a PR into it, set the row
+    // selection beyond the end, clear the PR list, and verify the selection
+    // is clamped to 0.
+    let mut app = make_app();
+
+    // Switch to the review board so that review_selection_mut() returns Some.
+    app.update(Message::SwitchToReviewBoard);
+
+    // Manually push a PR into the Approved column (index 3).
+    app.review_prs = vec![make_review_pr(1, "alice", ReviewDecision::Approved)];
+
+    // Set the row selection for the Approved column to an out-of-bounds value.
+    if let Some(sel) = app.review_selection_mut() {
+        sel.selected_row[3] = 5;
+    }
+
+    // Now remove all PRs and trigger a clamp via ReviewPrsLoaded with an
+    // empty list (which calls clamp_review_selection internally).
+    app.update(Message::ReviewPrsLoaded(vec![]));
+
+    // The Approved column selection must have been clamped to 0.
+    let row = app.review_selection().unwrap().selected_row[3];
+    assert_eq!(row, 0, "Approved column (index 3) selection was not clamped");
+}
+
+#[test]
+fn review_repo_filter_hides_prs() {
+    let mut app = make_app();
+    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    pr1.repo = "org/repo-a".to_string();
+    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
+    pr2.repo = "org/repo-b".to_string();
+    app.review_prs = vec![pr1, pr2];
+    app.update(Message::SwitchToReviewBoard);
+
+    // No filter — both visible
+    assert_eq!(app.filtered_review_prs().len(), 2);
+
+    // Filter to repo-a only
+    app.review_repo_filter.insert("org/repo-a".to_string());
+    assert_eq!(app.filtered_review_prs().len(), 1);
+    assert_eq!(app.filtered_review_prs()[0].repo, "org/repo-a");
+}
+
+#[test]
+fn review_repo_filter_f_opens_filter() {
+    let mut app = make_app();
+    app.review_prs = vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)];
+    app.update(Message::SwitchToReviewBoard);
+
+    app.handle_key(KeyEvent::from(KeyCode::Char('f')));
+    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
+}
+
+#[test]
+fn review_repo_filter_esc_closes() {
+    let mut app = make_app();
+    app.review_prs = vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)];
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::StartReviewRepoFilter);
+    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
+
+    app.handle_key(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
 fn repo_cursor_resets_on_quick_dispatch_entry() {
     let mut app = App::new(
         vec![make_task(1, TaskStatus::Backlog)],
@@ -8058,4 +8196,81 @@ fn repo_filter_space_toggles_cursor_repo() {
         "cursor repo should be toggled"
     );
     assert!(!app.repo_filter.contains("/repo-a"));
+}
+
+#[test]
+fn review_repo_filter_toggle_all() {
+    let mut app = make_app();
+    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    pr1.repo = "org/repo-a".to_string();
+    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
+    pr2.repo = "org/repo-b".to_string();
+    app.review_prs = vec![pr1, pr2];
+    app.update(Message::SwitchToReviewBoard);
+
+    // Toggle all on
+    app.update(Message::ToggleAllReviewRepoFilter);
+    assert_eq!(app.review_repo_filter.len(), 2);
+
+    // Toggle all off
+    app.update(Message::ToggleAllReviewRepoFilter);
+    assert!(app.review_repo_filter.is_empty());
+}
+
+#[test]
+fn review_repo_filter_toggle_single() {
+    let mut app = make_app();
+    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    pr1.repo = "org/repo-a".to_string();
+    app.review_prs = vec![pr1];
+    app.update(Message::SwitchToReviewBoard);
+
+    // Toggle on
+    app.update(Message::ToggleReviewRepoFilter("org/repo-a".to_string()));
+    assert!(app.review_repo_filter.contains("org/repo-a"));
+
+    // Toggle off
+    app.update(Message::ToggleReviewRepoFilter("org/repo-a".to_string()));
+    assert!(!app.review_repo_filter.contains("org/repo-a"));
+}
+
+#[test]
+fn review_repo_filter_clamps_selection() {
+    let mut app = make_app();
+    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    pr1.repo = "org/repo-a".to_string();
+    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
+    pr2.repo = "org/repo-b".to_string();
+    app.review_prs = vec![pr1, pr2];
+    app.update(Message::SwitchToReviewBoard);
+
+    // Select the second row
+    if let Some(sel) = app.review_selection_mut() {
+        sel.selected_row[0] = 1;
+    }
+
+    // Filter to only one PR, selection should clamp
+    app.update(Message::ToggleReviewRepoFilter("org/repo-a".to_string()));
+    let row = app.review_selection().unwrap().selected_row[0];
+    assert_eq!(row, 0);
+}
+
+#[test]
+fn review_repo_filter_selected_pr_uses_filter() {
+    let mut app = make_app();
+    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    pr1.repo = "org/repo-a".to_string();
+    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
+    pr2.repo = "org/repo-b".to_string();
+    app.review_prs = vec![pr1, pr2];
+    app.update(Message::SwitchToReviewBoard);
+
+    // Without filter, first PR is selected
+    let selected = app.selected_review_pr().unwrap();
+    assert_eq!(selected.number, 1);
+
+    // Filter to repo-b only, first visible PR should be #2
+    app.review_repo_filter.insert("org/repo-b".to_string());
+    let selected = app.selected_review_pr().unwrap();
+    assert_eq!(selected.number, 2);
 }

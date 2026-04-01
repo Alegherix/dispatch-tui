@@ -1010,6 +1010,37 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
     frame.render_widget(paragraph, area);
 }
 
+/// Appends a scrollable repo-path picker list to `lines`.
+fn append_repo_path_list<'a>(
+    lines: &mut Vec<Line<'a>>,
+    repo_paths: &'a [String],
+    cursor: usize,
+    height_offset: u16,
+    area_height: u16,
+    hint: Style,
+) {
+    let repo_count = repo_paths.len();
+    let visible_repos = (area_height.saturating_sub(height_offset) as usize).max(1);
+    let scroll = if repo_count <= visible_repos {
+        0
+    } else {
+        cursor
+            .saturating_sub(visible_repos - 1)
+            .min(repo_count - visible_repos)
+    };
+    let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    for (i, path) in repo_paths.iter().enumerate().skip(scroll).take(visible_repos) {
+        if i == cursor {
+            lines.push(Line::from(vec![
+                Span::styled("  ► ", cursor_style),
+                Span::styled(path.as_str(), cursor_style),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(format!("    {path}"), hint)));
+        }
+    }
+}
+
 /// Renders the input form in the detail panel area. Returns true if it rendered.
 fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     let completed = Style::default().fg(Color::White);
@@ -1065,29 +1096,15 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                     active,
                 )),
             ];
-            // Show saved repo paths if available and user hasn't started typing
             if app.input.buffer.is_empty() {
-                let cursor = app.input.repo_cursor;
-                let repo_count = app.repo_paths.len();
-                // Content rows: height - borders(2) - 3 header rows - blank(1) - hint(1)
-                let visible_repos = (area.height.saturating_sub(7)) as usize;
-                let visible_repos = visible_repos.max(1);
-                let scroll = if repo_count <= visible_repos {
-                    0
-                } else {
-                    cursor.saturating_sub(visible_repos - 1).min(repo_count - visible_repos)
-                };
-                let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-                for (i, path) in app.repo_paths.iter().enumerate().skip(scroll).take(visible_repos) {
-                    if i == cursor {
-                        lines.push(Line::from(vec![
-                            Span::styled("  ► ", cursor_style),
-                            Span::styled(path.as_str(), cursor_style),
-                        ]));
-                    } else {
-                        lines.push(Line::from(Span::styled(format!("    {path}"), hint)));
-                    }
-                }
+                append_repo_path_list(
+                    &mut lines,
+                    &app.repo_paths,
+                    app.input.repo_cursor,
+                    7,
+                    area.height,
+                    hint,
+                );
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
@@ -1097,32 +1114,18 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
             lines
         }
         InputMode::QuickDispatch => {
-            let cursor = app.input.repo_cursor;
-            let repo_count = app.repo_paths.len();
-            // Content rows available for the repo list: height - borders(2) - header(1) - blank(1) - blank(1) - hint(1)
-            let visible_repos = (area.height.saturating_sub(6)) as usize;
-            let visible_repos = visible_repos.max(1);
-            let scroll = if repo_count <= visible_repos {
-                0
-            } else {
-                cursor.saturating_sub(visible_repos - 1).min(repo_count - visible_repos)
-            };
-
-            let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
             let mut lines = vec![
                 Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
                 Line::from(""),
             ];
-            for (i, path) in app.repo_paths.iter().enumerate().skip(scroll).take(visible_repos) {
-                if i == cursor {
-                    lines.push(Line::from(vec![
-                        Span::styled("  ► ", cursor_style),
-                        Span::styled(path.as_str(), cursor_style),
-                    ]));
-                } else {
-                    lines.push(Line::from(Span::styled(format!("    {path}"), hint)));
-                }
-            }
+            append_repo_path_list(
+                &mut lines,
+                &app.repo_paths,
+                app.input.repo_cursor,
+                6,
+                area.height,
+                hint,
+            );
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  j/k navigate · Enter select · 1-9 shortcut · Esc cancel",
@@ -1186,26 +1189,14 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
                 )),
             ];
             if app.input.buffer.is_empty() {
-                let cursor = app.input.repo_cursor;
-                let repo_count = app.repo_paths.len();
-                let visible_repos = (area.height.saturating_sub(7)) as usize;
-                let visible_repos = visible_repos.max(1);
-                let scroll = if repo_count <= visible_repos {
-                    0
-                } else {
-                    cursor.saturating_sub(visible_repos - 1).min(repo_count - visible_repos)
-                };
-                let cursor_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-                for (i, path) in app.repo_paths.iter().enumerate().skip(scroll).take(visible_repos) {
-                    if i == cursor {
-                        lines.push(Line::from(vec![
-                            Span::styled("  ► ", cursor_style),
-                            Span::styled(path.as_str(), cursor_style),
-                        ]));
-                    } else {
-                        lines.push(Line::from(Span::styled(format!("    {path}"), hint)));
-                    }
-                }
+                append_repo_path_list(
+                    &mut lines,
+                    &app.repo_paths,
+                    app.input.repo_cursor,
+                    7,
+                    area.height,
+                    hint,
+                );
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(

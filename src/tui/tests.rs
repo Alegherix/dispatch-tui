@@ -3607,7 +3607,47 @@ fn g_key_on_epic_no_review_session_shows_status() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
-    assert!(app.status_message.as_deref().unwrap().contains("No active review session"));
+    assert!(app.status_message.as_deref().unwrap().contains("No active session"));
+}
+
+#[test]
+fn g_key_on_epic_jumps_to_blocked_running_subtask() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let epic = make_epic(10);
+    app.epics = vec![epic];
+
+    let mut subtask = make_task(1, TaskStatus::Running);
+    subtask.epic_id = Some(EpicId(10));
+    subtask.sub_status = SubStatus::NeedsInput;
+    subtask.tmux_window = Some("win-blocked".to_string());
+    app.tasks = vec![subtask];
+
+    // Epic with Running subtask => epic_status = Running => column 1
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-blocked"));
+}
+
+#[test]
+fn g_key_on_epic_jumps_to_stale_running_subtask() {
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    let epic = make_epic(10);
+    app.epics = vec![epic];
+
+    let mut subtask = make_task(1, TaskStatus::Running);
+    subtask.epic_id = Some(EpicId(10));
+    subtask.sub_status = SubStatus::Stale;
+    subtask.tmux_window = Some("win-stale".to_string());
+    app.tasks = vec![subtask];
+
+    // Epic with Running subtask => epic_status = Running => column 1
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(matches!(&cmds[0], Command::JumpToTmux { window } if window == "win-stale"));
 }
 
 // ---------------------------------------------------------------------------

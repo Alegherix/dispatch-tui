@@ -915,10 +915,7 @@ impl TaskStore for Database {
     }
 
     fn has_other_tasks_with_worktree(&self, worktree: &str, exclude_id: TaskId) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        let conn = self.conn()?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM tasks WHERE worktree = ?1 AND id != ?2 AND status != 'done'",

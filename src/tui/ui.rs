@@ -1347,8 +1347,14 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  General", header)),
             Line::from(vec![
-                Span::styled("  Tab/Esc", key), Span::styled(" back to Task Board  ", desc),
-                Span::styled("q", key), Span::styled(" quit", desc),
+                Span::styled("  Shift+Tab", key),
+                Span::styled(" toggle Reviews / My PRs", desc),
+            ]),
+            Line::from(vec![
+                Span::styled("  Tab/Esc", key),
+                Span::styled(" back to Task Board  ", desc),
+                Span::styled("q", key),
+                Span::styled(" quit", desc),
             ]),
             Line::from(vec![
                 Span::styled("  ?", key), Span::styled(" close this help", desc),
@@ -1583,7 +1589,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_review_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     // Collect distinct repos sorted alphabetically
-    let repos: Vec<String> = app.review_prs().iter()
+    let repos: Vec<String> = app.active_review_prs().iter()
         .map(|pr| pr.repo.clone())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()

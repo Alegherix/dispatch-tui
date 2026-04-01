@@ -538,8 +538,18 @@ impl App {
             }
             Message::OpenInBrowser { url } => vec![Command::OpenInBrowser { url }],
             Message::RefreshReviewPrs => {
-                self.review_board_loading = true;
-                vec![Command::FetchReviewPrs]
+                let mut cmds = vec![];
+                match &self.view_mode {
+                    ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => {
+                        self.my_prs_loading = true;
+                        cmds.push(Command::FetchMyPrs);
+                    }
+                    _ => {
+                        self.review_board_loading = true;
+                        cmds.push(Command::FetchReviewPrs);
+                    }
+                }
+                cmds
             }
             // Filter presets
             Message::StartSavePreset => self.handle_start_save_preset(),

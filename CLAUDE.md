@@ -206,3 +206,10 @@ This project has an Allium specification (`allium/`) that describes entities, ru
 - **Database abstraction**: `db::TaskStore` trait abstracts persistence. `TuiRuntime` and `McpState` hold `Arc<dyn TaskStore>`. Tests can provide mock implementations.
 - **Task lookup**: Use `App::find_task(id)` / `find_task_mut(id)` instead of inline `.iter().find()`.
 - **Error handling**: Message handlers should return `Vec<Command>` with error messages displayed via the status bar, never panic.
+
+## Releasing
+
+1. Add a `CARGO_REGISTRY_TOKEN` secret to the GitHub repo (Settings → Secrets → Actions).
+   Get the token from https://crates.io/settings/tokens — scope: `publish-new` and `publish-update`.
+2. Push a version tag: `git tag v0.2.0 && git push origin v0.2.0`
+3. GitHub Actions builds the binary, creates a GitHub Release, and publishes to crates.io.

@@ -1062,14 +1062,14 @@ impl App {
         let pr_tasks: Vec<(TaskId, String)> = self
             .tasks
             .iter()
-            .filter(|t| t.status == TaskStatus::Review && t.pr_url.is_some())
+            .filter(|t| t.status == TaskStatus::Review)
             .filter(|t| {
                 self.agents
                     .last_pr_poll
                     .get(&t.id)
                     .is_none_or(|last| last.elapsed() > PR_POLL_INTERVAL)
             })
-            .map(|t| (t.id, t.pr_url.clone().unwrap()))
+            .filter_map(|t| t.pr_url.clone().map(|url| (t.id, url)))
             .collect();
 
         for (id, pr_url) in pr_tasks {
@@ -1959,30 +1959,33 @@ impl App {
 
     fn advance_merge_queue(&mut self) -> Vec<Command> {
         loop {
-            let (total, next_idx, action) = match &self.merge_queue {
-                Some(q) => (q.task_ids.len(), q.completed, q.action.clone()),
+            let (total, next_idx, next_id, action) = match &self.merge_queue {
+                Some(q) if q.completed < q.task_ids.len() => {
+                    (q.task_ids.len(), q.completed, q.task_ids[q.completed], q.action.clone())
+                }
+                Some(q) => {
+                    let total = q.task_ids.len();
+                    self.merge_queue = None;
+                    self.set_status(format!("Epic merge complete: {total}/{total} done"));
+                    return vec![];
+                }
                 None => return vec![],
             };
 
-            if next_idx >= total {
-                self.merge_queue = None;
-                self.set_status(format!("Epic merge complete: {total}/{total} done"));
-                return vec![];
-            }
-
-            let next_id = self.merge_queue.as_ref().unwrap().task_ids[next_idx];
-
             // Validate the task is still eligible
             let task_data = match self.find_task(next_id) {
-                Some(t) if t.status == TaskStatus::Review && t.worktree.is_some() => {
-                    let worktree = t.worktree.clone().unwrap();
-                    let branch = dispatch::branch_from_worktree(&worktree);
-                    let repo_path = t.repo_path.clone();
-                    let title = t.title.clone();
-                    let description = t.description.clone();
-                    let tmux_window = t.tmux_window.clone();
-                    branch.map(|b| (worktree, b, repo_path, title, description, tmux_window))
-                }
+                Some(t) if t.status == TaskStatus::Review => match t.worktree {
+                    Some(ref worktree) => {
+                        let worktree = worktree.clone();
+                        let branch = dispatch::branch_from_worktree(&worktree);
+                        let repo_path = t.repo_path.clone();
+                        let title = t.title.clone();
+                        let description = t.description.clone();
+                        let tmux_window = t.tmux_window.clone();
+                        branch.map(|b| (worktree, b, repo_path, title, description, tmux_window))
+                    }
+                    None => None,
+                },
                 _ => None,
             };
 

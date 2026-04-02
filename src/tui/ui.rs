@@ -206,10 +206,15 @@ fn my_prs_tab_label(app: &App, prefix: &str) -> String {
     } else {
         ""
     };
-    if my_count > 0 {
-        format!("{prefix}My PRs ({my_count}){loading} ")
+    let filter = if app.dispatch_pr_filter() {
+        " \u{25c6}"
     } else {
-        format!("{prefix}My PRs{loading} ")
+        ""
+    };
+    if my_count > 0 {
+        format!("{prefix}My PRs ({my_count}){filter}{loading} ")
+    } else {
+        format!("{prefix}My PRs{filter}{loading} ")
     }
 }
 
@@ -394,15 +399,10 @@ fn classify_card_indicator(
     app: &App,
     now: DateTime<Utc>,
 ) -> CardIndicator {
-    let has_worktree_no_window = task.worktree.is_some() && task.tmux_window.is_none();
-    let is_detached = has_worktree_no_window
-        && matches!(status, TaskStatus::Running | TaskStatus::Review)
-        && task.sub_status != SubStatus::Conflict;
-
     if task.sub_status == SubStatus::Conflict {
         return CardIndicator::Conflict;
     }
-    if is_detached {
+    if task.is_detached() {
         if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
             let pr_label = crate::models::pr_number_from_url(pr_url)
                 .map_or("PR".to_string(), |n| format!("PR #{n}"));
@@ -586,7 +586,7 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
         for (item_idx, item) in column_items.iter().enumerate() {
             if show_headers {
                 let priority = match item {
-                    ColumnItem::Task(t) => t.sub_status.column_priority(),
+                    ColumnItem::Task(t) => t.sub_status.column_priority_detached(t.is_detached()),
                     ColumnItem::Epic(e) => {
                         let subtasks: Vec<Task> = app.tasks().iter()
                             .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
@@ -599,7 +599,7 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
                 if Some(priority) != current_priority {
                     current_priority = Some(priority);
                     let label = match item {
-                        ColumnItem::Task(t) => t.sub_status.header_label().to_string(),
+                        ColumnItem::Task(t) => t.sub_status.header_label_detached(t.is_detached()).to_string(),
                         ColumnItem::Epic(e) => {
                             let subtasks: Vec<Task> = app.tasks().iter()
                                 .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
@@ -1944,7 +1944,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 // Review board rendering
 // ---------------------------------------------------------------------------
 
-fn review_action_hints(has_pr: bool) -> Vec<Span<'static>> {
+fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>> {
     let key_color = Color::Cyan;
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -1956,6 +1956,9 @@ fn review_action_hints(has_pr: bool) -> Vec<Span<'static>> {
         push_hint("Enter", "open PR");
     }
     push_hint("r", "refresh");
+    if is_author_mode {
+        push_hint("D", "dispatch filter");
+    }
     push_hint("Tab", "task board");
     push_hint("?", "help");
     push_hint("q", "quit");
@@ -2044,7 +2047,8 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_widget(status, chunks[4]);
     } else {
         let has_pr = app.selected_review_pr().is_some();
-        let hints = Paragraph::new(Line::from(review_action_hints(has_pr)));
+        let is_author_mode = matches!(app.view_mode(), ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. });
+        let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode)));
         frame.render_widget(hints, chunks[4]);
     }
 
@@ -2170,6 +2174,7 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
+    let dispatch_urls = app.dispatch_pr_urls();
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
@@ -2184,7 +2189,8 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
 
         let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
         let items: Vec<ListItem> = prs.iter().enumerate().map(|(row, pr)| {
-            build_review_pr_item(pr, *decision, is_focused && row == selected_row)
+            let is_dispatch = dispatch_urls.contains(pr.url.as_str());
+            build_review_pr_item(pr, *decision, is_focused && row == selected_row, is_dispatch)
         }).collect();
 
         let bg = if is_focused {
@@ -2210,15 +2216,16 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool) -> ListItem<'static> {
+fn build_review_pr_item(pr: &ReviewPr, decision: ReviewDecision, is_cursor: bool, is_dispatch: bool) -> ListItem<'static> {
     let color = review_column_color(decision);
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
 
-    // Line 1: stripe + repo#number + title
+    // Line 1: stripe + dispatch badge + repo#number + title
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
+    let dispatch_badge = if is_dispatch { "\u{25c6} " } else { "" };
     let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-    let header = format!("{repo_short}#{} {}", pr.number, pr.title);
+    let header = format!("{dispatch_badge}{repo_short}#{} {}", pr.number, pr.title);
     let header_truncated = truncate(&header, 60);
 
     let line1_style = if is_cursor {

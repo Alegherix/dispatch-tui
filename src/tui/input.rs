@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ReviewAgentRequest, ViewMode};
+use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ReviewAgentRequest, ReviewBoardMode, ViewMode};
 use crate::models::{DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag};
 
 impl App {
@@ -737,6 +737,14 @@ impl App {
                         body: pr.body.clone(),
                         head_ref: pr.head_ref.clone(),
                     }))
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('D') => {
+                if matches!(self.view_mode, ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. }) {
+                    self.update(Message::ToggleDispatchPrFilter)
                 } else {
                     vec![]
                 }

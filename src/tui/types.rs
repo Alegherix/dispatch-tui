@@ -169,6 +169,8 @@ pub enum Message {
     ToggleReviewRepoFilter(String),
     ToggleAllReviewRepoFilter,
     ToggleReviewRepoFilterMode,
+    // Dispatch PR filter (My PRs tab)
+    ToggleDispatchPrFilter,
     // Filter presets
     StartSavePreset,
     SaveFilterPreset(String),
@@ -401,6 +403,7 @@ pub struct ReviewBoardState {
     pub last_my_prs_fetch: Option<Instant>,
     pub my_prs_repo_filter: HashSet<String>,
     pub my_prs_repo_filter_mode: RepoFilterMode,
+    pub dispatch_pr_filter: bool,
 }
 
 impl ReviewBoardState {

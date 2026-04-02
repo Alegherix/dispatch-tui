@@ -227,6 +227,15 @@ impl SubStatus {
         }
     }
 
+    /// Sort priority for column grouping, detach-aware variant.
+    /// Detached review tasks sort below Approved so they sink to the bottom.
+    pub fn column_priority_detached(self, is_detached: bool) -> u8 {
+        match (self, is_detached) {
+            (SubStatus::AwaitingReview, true) => 7,
+            _ => self.column_priority(),
+        }
+    }
+
     /// Label for section header lines within a column.
     pub fn header_label(self) -> &'static str {
         match self {
@@ -239,6 +248,15 @@ impl SubStatus {
             SubStatus::AwaitingReview => "awaiting review",
             SubStatus::ChangesRequested => "changes requested",
             SubStatus::Approved => "approved",
+        }
+    }
+
+    /// Detach-aware section header label.
+    /// Detached awaiting_review tasks show "awaiting merge" instead.
+    pub fn header_label_detached(self, is_detached: bool) -> &'static str {
+        match (self, is_detached) {
+            (SubStatus::AwaitingReview, true) => "awaiting merge",
+            _ => self.header_label(),
         }
     }
 }
@@ -632,6 +650,17 @@ pub struct Task {
     pub sort_order: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Task {
+    /// Whether this task has a worktree but no tmux window (agent session ended).
+    /// Excludes conflict state which is handled separately.
+    pub fn is_detached(&self) -> bool {
+        self.worktree.is_some()
+            && self.tmux_window.is_none()
+            && matches!(self.status, TaskStatus::Running | TaskStatus::Review)
+            && self.sub_status != SubStatus::Conflict
+    }
 }
 
 // ---------------------------------------------------------------------------

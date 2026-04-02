@@ -175,6 +175,14 @@ impl App {
     pub fn my_prs_loading(&self) -> bool {
         self.review.my_prs_loading
     }
+    pub fn dispatch_pr_filter(&self) -> bool {
+        self.review.dispatch_pr_filter
+    }
+
+    /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
+    pub fn dispatch_pr_urls(&self) -> HashSet<String> {
+        self.tasks.iter().filter_map(|t| t.pr_url.clone()).collect()
+    }
 
     /// Get the review board selection state, if currently in review board mode.
     pub fn review_selection(&self) -> Option<&ReviewBoardSelection> {
@@ -284,7 +292,7 @@ impl App {
         items.sort_by_key(|item| {
             match item {
                 ColumnItem::Task(t) => {
-                    (t.sub_status.column_priority(), t.sort_order.unwrap_or(t.id.0), t.id.0)
+                    (t.sub_status.column_priority_detached(t.is_detached()), t.sort_order.unwrap_or(t.id.0), t.id.0)
                 }
                 ColumnItem::Epic(e) => {
                     let subtasks: Vec<Task> = self.tasks.iter()
@@ -548,6 +556,7 @@ impl App {
             Message::ToggleReviewRepoFilter(repo) => self.handle_toggle_review_repo_filter(repo),
             Message::ToggleAllReviewRepoFilter => self.handle_toggle_all_review_repo_filter(),
             Message::ToggleReviewRepoFilterMode => self.handle_toggle_review_repo_filter_mode(),
+            Message::ToggleDispatchPrFilter => self.handle_toggle_dispatch_pr_filter(),
             // Wrap up
             Message::StartWrapUp(id) => self.handle_start_wrap_up(id),
             Message::WrapUpRebase => self.handle_wrap_up_rebase(),
@@ -2218,7 +2227,15 @@ impl App {
     }
 
     pub fn filtered_my_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.review.filtered_my_prs()
+        let base = self.review.filtered_my_prs();
+        if self.review.dispatch_pr_filter {
+            let dispatch_urls = self.dispatch_pr_urls();
+            base.into_iter()
+                .filter(|pr| dispatch_urls.contains(&pr.url))
+                .collect()
+        } else {
+            base
+        }
     }
 
     /// Return the PR list appropriate for the current review board mode.
@@ -2698,6 +2715,12 @@ impl App {
             RepoFilterMode::Include => RepoFilterMode::Exclude,
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };
+        self.clamp_review_selection();
+        vec![]
+    }
+
+    fn handle_toggle_dispatch_pr_filter(&mut self) -> Vec<Command> {
+        self.review.dispatch_pr_filter = !self.review.dispatch_pr_filter;
         self.clamp_review_selection();
         vec![]
     }

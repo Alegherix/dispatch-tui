@@ -48,6 +48,9 @@ enum SubStatus {
 
     -- review
     awaiting_review   -- PR created, no review decision yet
+                      -- UI splits this into two visual sections based on runtime state:
+                      --   "awaiting review" — tmux window alive (agent still active)
+                      --   "awaiting merge"  — tmux window gone (detached, just waiting for merge)
     changes_requested -- reviewer requested changes
     approved          -- PR approved, ready to merge
 }
@@ -182,7 +185,7 @@ config {
 --   1 | Active           | running       | active
 --   2 | Blocked          | running       | needs_input
 --   3 | Stale            | running       | stale, crashed
---   4 | PR Created       | review        | awaiting_review
+--   4 | PR Created       | review        | awaiting_review  (split into "awaiting review" / "awaiting merge" sections by detach state)
 --   5 | Revise           | review        | changes_requested
 --   6 | Approved         | review        | approved
 --   7 | Done             | done          | none

@@ -7859,3 +7859,138 @@ fn auto_dispatch_fires_even_when_notifications_disabled() {
         .collect();
     assert_eq!(dispatch_cmds.len(), 1);
 }
+
+// --- detach-aware section headers ---
+
+#[test]
+fn detached_review_task_shows_awaiting_merge_header() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.sub_status = SubStatus::AwaitingReview;
+    task.pr_url = Some("https://github.com/org/repo/pull/10".to_string());
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None; // detached
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "awaiting merge"),
+        "detached review task should show 'awaiting merge' section header"
+    );
+}
+
+#[test]
+fn live_review_task_shows_awaiting_review_header() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.sub_status = SubStatus::AwaitingReview;
+    task.pr_url = Some("https://github.com/org/repo/pull/10".to_string());
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = Some("1-fix".to_string()); // live
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "awaiting review"),
+        "live review task should show 'awaiting review' section header"
+    );
+    assert!(
+        !buffer_contains(&buf, "awaiting merge"),
+        "live review task should not show 'awaiting merge'"
+    );
+}
+
+#[test]
+fn detached_and_live_review_tasks_get_separate_sections() {
+    // Live task (has tmux window)
+    let mut live = make_task(1, TaskStatus::Review);
+    live.sub_status = SubStatus::AwaitingReview;
+    live.pr_url = Some("https://github.com/org/repo/pull/10".to_string());
+    live.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    live.tmux_window = Some("1-fix".to_string());
+
+    // Detached task (no tmux window)
+    let mut detached = make_task(2, TaskStatus::Review);
+    detached.sub_status = SubStatus::AwaitingReview;
+    detached.pr_url = Some("https://github.com/org/repo/pull/11".to_string());
+    detached.worktree = Some("/repo/.worktrees/2-feat".to_string());
+    detached.tmux_window = None;
+
+    let mut app = App::new(vec![live, detached], TEST_TIMEOUT);
+    let buf = render_to_buffer(&mut app, 120, 20);
+    assert!(
+        buffer_contains(&buf, "awaiting review"),
+        "should show 'awaiting review' for live task"
+    );
+    assert!(
+        buffer_contains(&buf, "awaiting merge"),
+        "should show 'awaiting merge' for detached task"
+    );
+}
+
+#[test]
+fn is_detached_returns_true_for_review_without_window() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None;
+    assert!(task.is_detached());
+}
+
+#[test]
+fn is_detached_returns_false_with_window() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = Some("1-fix".to_string());
+    assert!(!task.is_detached());
+}
+
+#[test]
+fn is_detached_returns_false_for_conflict() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.sub_status = SubStatus::Conflict;
+    task.worktree = Some("/repo/.worktrees/1-fix".to_string());
+    task.tmux_window = None;
+    assert!(!task.is_detached());
+}
+
+// --- dispatch PR filter ---
+
+#[test]
+fn dispatch_pr_filter_toggles_on_d_in_author_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ToggleReviewBoardMode); // switch to Author
+    assert!(!app.dispatch_pr_filter());
+
+    app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(app.dispatch_pr_filter(), "D should toggle dispatch filter on");
+
+    app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(!app.dispatch_pr_filter(), "D again should toggle it off");
+}
+
+#[test]
+fn dispatch_pr_filter_noop_in_reviewer_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+    // Default is Reviewer mode
+    app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(!app.dispatch_pr_filter(), "D should be noop in Reviewer mode");
+}
+
+#[test]
+fn dispatch_pr_filter_filters_my_prs() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Add two PRs: one matching a dispatch task, one not
+    let matching_pr = make_review_pr(42, "me", ReviewDecision::ReviewRequired);
+    let other_pr = make_review_pr(99, "me", ReviewDecision::ReviewRequired);
+    app.review.my_prs = vec![matching_pr, other_pr];
+
+    // Without filter: both visible
+    assert_eq!(app.filtered_my_prs().len(), 2);
+
+    // With filter: only the matching one
+    app.review.dispatch_pr_filter = true;
+    let filtered = app.filtered_my_prs();
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].number, 42);
+}

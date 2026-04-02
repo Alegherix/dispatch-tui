@@ -6,7 +6,9 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
-use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UsageReport};
+use crate::models::{DispatchMode, EpicId, Task, TaskId, TaskStatus, UsageReport};
+
+use super::validation;
 
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args, JsonRpcResponse,
@@ -221,35 +223,28 @@ pub(super) fn handle_update_task(
     };
     tracing::info!(task_id = parsed.task_id, status = ?parsed.status, "MCP update_task");
 
-    let has_update = parsed.status.is_some()
-        || parsed.plan.is_some()
-        || parsed.title.is_some()
-        || parsed.description.is_some()
-        || parsed.repo_path.is_some()
-        || parsed.sort_order.is_some()
-        || parsed.pr_url.is_some()
-        || parsed.tag.is_some()
-        || parsed.sub_status.is_some()
-        || parsed.epic_id.is_some();
-
-    if !has_update {
-        return JsonRpcResponse::err(
-            id,
-            -32602,
-            "At least one of status, plan, title, description, repo_path, sort_order, pr_url, tag, sub_status, or epic_id must be provided",
-        );
+    if let Err(resp) = validation::require_some_update(
+        &[
+            ("status", parsed.status.is_some()),
+            ("plan", parsed.plan.is_some()),
+            ("title", parsed.title.is_some()),
+            ("description", parsed.description.is_some()),
+            ("repo_path", parsed.repo_path.is_some()),
+            ("sort_order", parsed.sort_order.is_some()),
+            ("pr_url", parsed.pr_url.is_some()),
+            ("tag", parsed.tag.is_some()),
+            ("sub_status", parsed.sub_status.is_some()),
+            ("epic_id", parsed.epic_id.is_some()),
+        ],
+        &id,
+    ) {
+        return resp;
     }
 
     let status = if let Some(ref status_str) = parsed.status {
-        match TaskStatus::parse(status_str) {
-            Some(s) => Some(s),
-            None => {
-                return JsonRpcResponse::err(
-                    id,
-                    -32602,
-                    format!("Unknown status: {status_str}. Valid values: backlog, running, review"),
-                )
-            }
+        match validation::parse_status_or_error(status_str, &id) {
+            Ok(s) => Some(s),
+            Err(resp) => return resp,
         }
     } else {
         None
@@ -288,22 +283,16 @@ pub(super) fn handle_update_task(
         patch = patch.pr_url(Some(url.as_str()));
     }
     if let Some(ref t) = parsed.tag {
-        match TaskTag::parse(t) {
-            Some(tag) => { patch = patch.tag(Some(tag)); }
-            None => return JsonRpcResponse::err(
-                id, -32602,
-                format!("Invalid tag: {t}. Valid values: bug, feature, chore, epic"),
-            ),
+        match validation::parse_tag_or_error(t, &id) {
+            Ok(tag) => { patch = patch.tag(Some(tag)); }
+            Err(resp) => return resp,
         }
     }
 
     if let Some(ref ss_str) = parsed.sub_status {
-        let ss = match SubStatus::parse(ss_str) {
-            Some(ss) => ss,
-            None => return JsonRpcResponse::err(
-                id, -32602,
-                format!("Invalid sub_status: {ss_str}. Valid values: none, active, needs_input, stale, crashed, awaiting_review, changes_requested, approved"),
-            ),
+        let ss = match validation::parse_substatus_or_error(ss_str, &id) {
+            Ok(ss) => ss,
+            Err(resp) => return resp,
         };
         // Validate against current (or new) status
         let effective_status = parsed
@@ -452,16 +441,13 @@ pub(super) fn handle_create_task(
                     .patch_task(task_id, &db::TaskPatch::new().sort_order(Some(so)));
             }
             if let Some(ref t) = parsed.tag {
-                match TaskTag::parse(t) {
-                    Some(tag) => {
+                match validation::parse_tag_or_error(t, &id) {
+                    Ok(tag) => {
                         let _ = state
                             .db
                             .patch_task(task_id, &db::TaskPatch::new().tag(Some(tag)));
                     }
-                    None => return JsonRpcResponse::err(
-                        id, -32602,
-                        format!("Invalid tag: {t}. Valid values: bug, feature, chore, epic"),
-                    ),
+                    Err(resp) => return resp,
                 }
             }
             state.notify();

@@ -6,6 +6,7 @@ use crate::models::{EpicId, TaskStatus};
 use crate::mcp::McpState;
 
 use super::types::{JsonRpcResponse, deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args};
+use super::validation;
 
 // ---------------------------------------------------------------------------
 // Typed argument structs
@@ -138,19 +139,18 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     };
     tracing::info!(epic_id = parsed.epic_id, "MCP update_epic");
 
-    let has_update = parsed.title.is_some()
-        || parsed.description.is_some()
-        || parsed.status.is_some()
-        || parsed.plan.is_some()
-        || parsed.sort_order.is_some()
-        || parsed.repo_path.is_some();
-
-    if !has_update {
-        return JsonRpcResponse::err(
-            id,
-            -32602,
-            "At least one of title, description, status, plan, sort_order, or repo_path must be provided",
-        );
+    if let Err(resp) = validation::require_some_update(
+        &[
+            ("title", parsed.title.is_some()),
+            ("description", parsed.description.is_some()),
+            ("status", parsed.status.is_some()),
+            ("plan", parsed.plan.is_some()),
+            ("sort_order", parsed.sort_order.is_some()),
+            ("repo_path", parsed.repo_path.is_some()),
+        ],
+        &id,
+    ) {
+        return resp;
     }
 
     let repo_path = parsed.repo_path.as_deref().map(crate::models::expand_tilde);
@@ -158,15 +158,9 @@ pub(super) fn handle_update_epic(state: &McpState, id: Option<Value>, args: Valu
     if let Some(ref t) = parsed.title { patch = patch.title(t); }
     if let Some(ref d) = parsed.description { patch = patch.description(d); }
     if let Some(ref s) = parsed.status {
-        match TaskStatus::parse(s) {
-            Some(status) => { patch = patch.status(status); }
-            None => {
-                return JsonRpcResponse::err(
-                    id,
-                    -32602,
-                    format!("Unknown status: {s}. Valid values: backlog, running, review, done"),
-                );
-            }
+        match validation::parse_status_or_error(s, &id) {
+            Ok(status) => { patch = patch.status(status); }
+            Err(resp) => return resp,
         }
     }
     if let Some(ref p) = parsed.plan { patch = patch.plan(Some(p.as_str())); }

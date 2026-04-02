@@ -2151,3 +2151,83 @@ async fn send_message_target_no_tmux_window() {
     let err = resp.error.unwrap();
     assert!(err.message.contains("no tmux window"), "Error should mention no tmux window: {}", err.message);
 }
+
+// -- Validation helper tests ------------------------------------------------
+
+mod validation_tests {
+    use crate::mcp::handlers::validation::{parse_status_or_error, parse_tag_or_error, parse_substatus_or_error};
+    use crate::models::{TaskStatus, TaskTag, SubStatus};
+
+    #[test]
+    fn parse_status_valid() {
+        let id = Some(serde_json::json!(1));
+        assert_eq!(parse_status_or_error("backlog", &id).unwrap(), TaskStatus::Backlog);
+        assert_eq!(parse_status_or_error("running", &id).unwrap(), TaskStatus::Running);
+        assert_eq!(parse_status_or_error("review", &id).unwrap(), TaskStatus::Review);
+        assert_eq!(parse_status_or_error("done", &id).unwrap(), TaskStatus::Done);
+    }
+
+    #[test]
+    fn parse_status_invalid() {
+        let id = Some(serde_json::json!(1));
+        let resp = parse_status_or_error("nope", &id).unwrap_err();
+        let err = resp.error.as_ref().unwrap();
+        assert!(err.message.contains("Unknown status: nope"));
+        assert!(err.message.contains("backlog"));
+    }
+
+    #[test]
+    fn parse_tag_valid() {
+        let id = Some(serde_json::json!(1));
+        assert_eq!(parse_tag_or_error("bug", &id).unwrap(), TaskTag::Bug);
+        assert_eq!(parse_tag_or_error("feature", &id).unwrap(), TaskTag::Feature);
+    }
+
+    #[test]
+    fn parse_tag_invalid() {
+        let id = Some(serde_json::json!(1));
+        let resp = parse_tag_or_error("nope", &id).unwrap_err();
+        let err = resp.error.as_ref().unwrap();
+        assert!(err.message.contains("Invalid tag: nope"));
+    }
+
+    #[test]
+    fn parse_substatus_valid() {
+        let id = Some(serde_json::json!(1));
+        assert_eq!(parse_substatus_or_error("active", &id).unwrap(), SubStatus::Active);
+        assert_eq!(parse_substatus_or_error("none", &id).unwrap(), SubStatus::None);
+    }
+
+    #[test]
+    fn parse_substatus_invalid() {
+        let id = Some(serde_json::json!(1));
+        let resp = parse_substatus_or_error("nope", &id).unwrap_err();
+        let err = resp.error.as_ref().unwrap();
+        assert!(err.message.contains("Invalid sub_status: nope"));
+    }
+
+    #[test]
+    fn require_some_update_with_no_fields() {
+        let id = Some(serde_json::json!(1));
+        let fields: &[(&str, bool)] = &[
+            ("status", false),
+            ("title", false),
+        ];
+        let resp = crate::mcp::handlers::validation::require_some_update(fields, &id);
+        assert!(resp.is_err());
+        let err_resp = resp.unwrap_err();
+        let err = err_resp.error.as_ref().unwrap();
+        assert!(err.message.contains("status"));
+        assert!(err.message.contains("title"));
+    }
+
+    #[test]
+    fn require_some_update_with_some_field() {
+        let id = Some(serde_json::json!(1));
+        let fields: &[(&str, bool)] = &[
+            ("status", false),
+            ("title", true),
+        ];
+        assert!(crate::mcp::handlers::validation::require_some_update(fields, &id).is_ok());
+    }
+}

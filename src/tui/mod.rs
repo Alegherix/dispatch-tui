@@ -27,6 +27,9 @@ const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Interval between review board data refreshes.
 const REVIEW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Interval between security board data refreshes (5 minutes).
+const SECURITY_POLL_INTERVAL: Duration = Duration::from_secs(300);
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
@@ -48,6 +51,7 @@ pub struct App {
     pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) review: ReviewBoardState,
+    pub(in crate::tui) security: SecurityBoardState,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
 }
@@ -81,6 +85,7 @@ impl App {
             notifications_enabled: true,
             filter: FilterState::default(),
             review: ReviewBoardState::default(),
+            security: SecurityBoardState::default(),
             usage: HashMap::new(),
             merge_queue: None,
         }
@@ -92,6 +97,7 @@ impl App {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::ReviewBoard { saved_board, .. } => saved_board,
+            ViewMode::SecurityBoard { saved_board, .. } => saved_board,
         }
     }
 
@@ -101,6 +107,7 @@ impl App {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::ReviewBoard { saved_board, .. } => saved_board,
+            ViewMode::SecurityBoard { saved_board, .. } => saved_board,
         }
     }
 
@@ -252,6 +259,94 @@ impl App {
         }
     }
 
+    pub fn security_selection(&self) -> Option<&SecurityBoardSelection> {
+        match &self.view_mode {
+            ViewMode::SecurityBoard { selection, .. } => Some(selection),
+            _ => None,
+        }
+    }
+
+    pub(in crate::tui) fn security_selection_mut(&mut self) -> Option<&mut SecurityBoardSelection> {
+        match &mut self.view_mode {
+            ViewMode::SecurityBoard { selection, .. } => Some(selection),
+            _ => None,
+        }
+    }
+
+    pub fn security_detail_visible(&self) -> bool {
+        self.security.detail_visible
+    }
+
+    pub fn security_loading(&self) -> bool {
+        self.security.loading
+    }
+
+    pub fn last_security_error(&self) -> Option<&str> {
+        self.security.last_error.as_deref()
+    }
+
+    pub fn security_kind_filter(&self) -> Option<crate::models::AlertKind> {
+        self.security.kind_filter
+    }
+
+    /// Return alerts filtered by the security board's filters.
+    pub fn filtered_security_alerts(&self) -> Vec<&crate::models::SecurityAlert> {
+        self.security.filtered_alerts()
+    }
+
+    /// Return alerts for a specific severity column using the active filter.
+    pub fn security_alerts_for_column(&self, col: usize) -> Vec<&crate::models::SecurityAlert> {
+        self.filtered_security_alerts()
+            .into_iter()
+            .filter(|a| a.severity.column_index() == col)
+            .collect()
+    }
+
+    /// Get the currently selected SecurityAlert, if in security board mode.
+    pub fn selected_security_alert(&self) -> Option<&crate::models::SecurityAlert> {
+        let sel = self.security_selection()?;
+        let col = sel.column();
+        let row = sel.row(col);
+        self.security_alerts_for_column(col).into_iter().nth(row)
+    }
+
+    pub fn active_security_repos(&self) -> &[String] {
+        &self.security.repos
+    }
+
+    pub(in crate::tui) fn navigate_security_row(&mut self, delta: isize) {
+        let (col, count) = match self.security_selection() {
+            Some(sel) => {
+                let col = sel.selected_column;
+                let count = self.security_alerts_for_column(col).len();
+                (col, count)
+            }
+            None => return,
+        };
+        if count == 0 {
+            return;
+        }
+        if let Some(sel) = self.security_selection_mut() {
+            let current = sel.selected_row[col] as isize;
+            let new = (current + delta).clamp(0, (count - 1) as isize) as usize;
+            sel.selected_row[col] = new;
+        }
+    }
+
+    pub(in crate::tui) fn clamp_security_selection(&mut self) {
+        let counts: [usize; crate::models::AlertSeverity::COLUMN_COUNT] =
+            std::array::from_fn(|col| self.security_alerts_for_column(col).len());
+        if let Some(sel) = self.security_selection_mut() {
+            for (col, &count) in counts.iter().enumerate() {
+                if count == 0 {
+                    sel.selected_row[col] = 0;
+                } else if sel.selected_row[col] >= count {
+                    sel.selected_row[col] = count - 1;
+                }
+            }
+        }
+    }
+
     pub fn set_notifications_enabled(&mut self, enabled: bool) {
         self.notifications_enabled = enabled;
     }
@@ -262,6 +357,10 @@ impl App {
 
     pub fn set_bot_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
         self.review.set_bot_prs(prs);
+    }
+
+    pub fn set_security_alerts(&mut self, alerts: Vec<crate::models::SecurityAlert>) {
+        self.security.set_alerts(alerts);
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
@@ -308,7 +407,7 @@ impl App {
                 .filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived)
                 .filter(repo_match)
                 .collect(),
-            ViewMode::ReviewBoard { .. } => vec![],
+            ViewMode::ReviewBoard { .. } | ViewMode::SecurityBoard { .. } => vec![],
         }
     }
 
@@ -750,6 +849,67 @@ impl App {
             Message::ConfirmBatchMerge => self.handle_confirm_batch_merge(),
             Message::CancelBatchOperation => {
                 self.input.mode = InputMode::Normal;
+                vec![]
+            }
+            // Security board
+            Message::SwitchToSecurityBoard => self.handle_switch_to_security_board(),
+            Message::SecurityAlertsLoaded(alerts) => self.handle_security_alerts_loaded(alerts),
+            Message::SecurityAlertsFetchFailed(err) => {
+                self.security.loading = false;
+                self.security.last_error = Some(err);
+                vec![]
+            }
+            Message::RefreshSecurityAlerts => {
+                self.security.loading = true;
+                vec![Command::FetchSecurityAlerts]
+            }
+            Message::ToggleSecurityDetail => {
+                self.security.detail_visible = !self.security.detail_visible;
+                vec![]
+            }
+            Message::ToggleSecurityKindFilter => {
+                self.security.kind_filter = match self.security.kind_filter {
+                    None => Some(crate::models::AlertKind::Dependabot),
+                    Some(crate::models::AlertKind::Dependabot) => {
+                        Some(crate::models::AlertKind::CodeScanning)
+                    }
+                    Some(crate::models::AlertKind::CodeScanning) => None,
+                };
+                self.clamp_security_selection();
+                vec![]
+            }
+            Message::StartSecurityRepoFilter => {
+                self.input.mode = InputMode::SecurityRepoFilter;
+                vec![]
+            }
+            Message::CloseSecurityRepoFilter => {
+                self.input.mode = InputMode::Normal;
+                self.clamp_security_selection();
+                vec![]
+            }
+            Message::ToggleSecurityRepoFilter(repo) => {
+                if !self.security.repo_filter.remove(&repo) {
+                    self.security.repo_filter.insert(repo);
+                }
+                self.clamp_security_selection();
+                vec![]
+            }
+            Message::ToggleAllSecurityRepoFilter => {
+                let all_repos = self.security.repos.clone();
+                if self.security.repo_filter.len() == all_repos.len() {
+                    self.security.repo_filter.clear();
+                } else {
+                    self.security.repo_filter = all_repos.into_iter().collect();
+                }
+                self.clamp_security_selection();
+                vec![]
+            }
+            Message::ToggleSecurityRepoFilterMode => {
+                self.security.repo_filter_mode = match self.security.repo_filter_mode {
+                    RepoFilterMode::Include => RepoFilterMode::Exclude,
+                    RepoFilterMode::Exclude => RepoFilterMode::Include,
+                };
+                self.clamp_security_selection();
                 vec![]
             }
             // Filter presets
@@ -2339,11 +2499,44 @@ impl App {
     // Review board handlers
     // -----------------------------------------------------------------------
 
+    fn handle_switch_to_security_board(&mut self) -> Vec<Command> {
+        let saved_board = match &self.view_mode {
+            ViewMode::Board(sel) => sel.clone(),
+            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
+            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
+            ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
+        };
+        self.view_mode = ViewMode::SecurityBoard {
+            selection: SecurityBoardSelection::new(),
+            saved_board,
+        };
+        if self.security.needs_fetch(SECURITY_POLL_INTERVAL) && !self.security.loading {
+            self.security.loading = true;
+            vec![Command::FetchSecurityAlerts]
+        } else {
+            vec![]
+        }
+    }
+
+    fn handle_security_alerts_loaded(
+        &mut self,
+        alerts: Vec<crate::models::SecurityAlert>,
+    ) -> Vec<Command> {
+        let cmds = vec![Command::PersistSecurityAlerts(alerts.clone())];
+        self.security.set_alerts(alerts);
+        self.security.loading = false;
+        self.security.last_fetch = Some(Instant::now());
+        self.security.last_error = None;
+        self.clamp_security_selection();
+        cmds
+    }
+
     fn handle_switch_to_review_board(&mut self) -> Vec<Command> {
         let saved_board = match &self.view_mode {
             ViewMode::Board(sel) => sel.clone(),
             ViewMode::Epic { saved_board, .. } => saved_board.clone(),
             ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
+            ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
         };
         self.view_mode = ViewMode::ReviewBoard {
             mode: ReviewBoardMode::Reviewer,
@@ -2359,8 +2552,12 @@ impl App {
     }
 
     fn handle_switch_to_task_board(&mut self) -> Vec<Command> {
-        if let ViewMode::ReviewBoard { saved_board, .. } = &self.view_mode {
-            self.view_mode = ViewMode::Board(saved_board.clone());
+        match &self.view_mode {
+            ViewMode::ReviewBoard { saved_board, .. }
+            | ViewMode::SecurityBoard { saved_board, .. } => {
+                self.view_mode = ViewMode::Board(saved_board.clone());
+            }
+            _ => {}
         }
         vec![]
     }
@@ -2773,6 +2970,7 @@ impl App {
             ViewMode::Board(sel) => sel.clone(),
             ViewMode::Epic { saved_board, .. } => saved_board.clone(),
             ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
+            ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
         };
         self.view_mode = ViewMode::Epic {
             epic_id,

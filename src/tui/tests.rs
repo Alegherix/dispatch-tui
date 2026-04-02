@@ -6189,6 +6189,8 @@ fn tab_switches_to_review_board() {
 fn tab_in_review_board_switches_back() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Tab)); // to review board
+    app.handle_key(make_key(KeyCode::Tab)); // to security board
+    assert!(matches!(app.view_mode(), ViewMode::SecurityBoard { .. }));
     app.handle_key(make_key(KeyCode::Tab)); // back to task board
     assert!(matches!(app.view_mode(), ViewMode::Board(_)));
 }
@@ -7725,6 +7727,8 @@ fn handle_key_review_board_tab_switches_back() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Tab)); // to review board
     assert!(matches!(app.view_mode, ViewMode::ReviewBoard { .. }));
+    app.handle_key(make_key(KeyCode::Tab)); // to security board
+    assert!(matches!(app.view_mode, ViewMode::SecurityBoard { .. }));
     app.handle_key(make_key(KeyCode::Tab)); // back to task board
     assert!(matches!(app.view_mode, ViewMode::Board(_)));
 }

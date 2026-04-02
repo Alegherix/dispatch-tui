@@ -201,7 +201,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23, "fresh DB should be at schema version 23");
+    assert_eq!(version, 24, "fresh DB should be at schema version 24");
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23);
+    assert_eq!(version, 24);
 
     // Verify Migration 1 added the plan column
     let has_plan: bool = conn.prepare("SELECT plan FROM tasks LIMIT 1").is_ok();
@@ -332,7 +332,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23);
+    assert_eq!(version, 24);
 }
 
 #[test]
@@ -1276,7 +1276,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23);
+    assert_eq!(version, 24);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1377,7 +1377,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23, "fresh DB should be at schema version 23");
+    assert_eq!(version, 24, "fresh DB should be at schema version 24");
 }
 
 #[test]
@@ -1503,7 +1503,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23);
+    assert_eq!(version, 24);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1639,4 +1639,109 @@ fn recalculate_epic_status_review_beats_running() {
     db.recalculate_epic_status(epic.id).unwrap();
     let epic = db.get_epic(epic.id).unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Review);
+}
+
+#[test]
+fn security_alerts_round_trip() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+    let db = in_memory_db();
+    let now = chrono::Utc::now();
+
+    let alerts = vec![
+        SecurityAlert {
+            number: 1,
+            repo: "acme/app".to_string(),
+            severity: AlertSeverity::Critical,
+            kind: AlertKind::Dependabot,
+            title: "CVE-2024-1234".to_string(),
+            package: Some("lodash".to_string()),
+            vulnerable_range: Some("< 4.17.21".to_string()),
+            fixed_version: Some("4.17.21".to_string()),
+            cvss_score: Some(9.8),
+            url: "https://github.com/acme/app/security/dependabot/1".to_string(),
+            created_at: now,
+            state: "open".to_string(),
+            description: "Prototype pollution".to_string(),
+        },
+        SecurityAlert {
+            number: 2,
+            repo: "acme/app".to_string(),
+            severity: AlertSeverity::Low,
+            kind: AlertKind::CodeScanning,
+            title: "SQL injection".to_string(),
+            package: None,
+            vulnerable_range: None,
+            fixed_version: None,
+            cvss_score: None,
+            url: "https://github.com/acme/app/security/code-scanning/2".to_string(),
+            created_at: now,
+            state: "open".to_string(),
+            description: "Potential SQL injection".to_string(),
+        },
+    ];
+
+    db.save_security_alerts(&alerts).unwrap();
+    let loaded = db.load_security_alerts().unwrap();
+
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(loaded[0].number, 1);
+    assert_eq!(loaded[0].repo, "acme/app");
+    assert_eq!(loaded[0].severity, AlertSeverity::Critical);
+    assert_eq!(loaded[0].kind, AlertKind::Dependabot);
+    assert_eq!(loaded[0].package.as_deref(), Some("lodash"));
+    assert_eq!(loaded[0].cvss_score, Some(9.8));
+    assert_eq!(loaded[0].description, "Prototype pollution");
+
+    assert_eq!(loaded[1].number, 2);
+    assert_eq!(loaded[1].severity, AlertSeverity::Low);
+    assert_eq!(loaded[1].kind, AlertKind::CodeScanning);
+    assert!(loaded[1].package.is_none());
+    assert!(loaded[1].cvss_score.is_none());
+}
+
+#[test]
+fn security_alerts_save_replaces_previous() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+    let db = in_memory_db();
+    let now = chrono::Utc::now();
+
+    let alerts1 = vec![SecurityAlert {
+        number: 1,
+        repo: "acme/app".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "Old alert".to_string(),
+        package: None,
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: "https://example.com/1".to_string(),
+        created_at: now,
+        state: "open".to_string(),
+        description: "".to_string(),
+    }];
+    db.save_security_alerts(&alerts1).unwrap();
+    assert_eq!(db.load_security_alerts().unwrap().len(), 1);
+
+    let alerts2 = vec![SecurityAlert {
+        number: 10,
+        repo: "acme/new".to_string(),
+        severity: AlertSeverity::Medium,
+        kind: AlertKind::CodeScanning,
+        title: "New alert".to_string(),
+        package: None,
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: "https://example.com/10".to_string(),
+        created_at: now,
+        state: "open".to_string(),
+        description: "".to_string(),
+    }];
+    db.save_security_alerts(&alerts2).unwrap();
+    let loaded = db.load_security_alerts().unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].title, "New alert");
 }

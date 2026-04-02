@@ -125,6 +125,12 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         Err(e) => tracing::warn!("Failed to load cached bot PRs: {e}"),
     }
 
+    // Load cached security alerts from database
+    match database.load_security_alerts() {
+        Ok(alerts) => app.set_security_alerts(alerts),
+        Err(e) => tracing::warn!("Failed to load cached security alerts: {e}"),
+    }
+
     // 4. Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -1157,6 +1163,30 @@ impl TuiRuntime {
         });
     }
 
+    fn exec_fetch_security_alerts(&self) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            tracing::info!("fetching security alerts via gh");
+            match crate::github::fetch_security_alerts(&*runner) {
+                Ok(alerts) => {
+                    tracing::info!(count = alerts.len(), "security alerts fetched successfully");
+                    let _ = tx.send(Message::SecurityAlertsLoaded(alerts));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "security alert fetch failed");
+                    let _ = tx.send(Message::SecurityAlertsFetchFailed(e));
+                }
+            }
+        });
+    }
+
+    fn exec_persist_security_alerts(&self, alerts: Vec<crate::models::SecurityAlert>) {
+        if let Err(e) = self.database.save_security_alerts(&alerts) {
+            tracing::warn!("Failed to persist security alerts: {e}");
+        }
+    }
+
     fn exec_dispatch_review_agent(&self, mut req: ReviewAgentRequest) {
         let mut known_paths = self.database.list_repo_paths().unwrap_or_default();
         // Also include repo paths from existing tasks as fallback
@@ -1377,6 +1407,8 @@ async fn execute_commands(
                 rt.exec_patch_sub_status(app, id, sub_status)
             }
             Command::DispatchReviewAgent(req) => rt.exec_dispatch_review_agent(req),
+            Command::FetchSecurityAlerts => rt.exec_fetch_security_alerts(),
+            Command::PersistSecurityAlerts(alerts) => rt.exec_persist_security_alerts(alerts),
         }
     }
 

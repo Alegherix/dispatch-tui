@@ -2671,12 +2671,18 @@ async fn send_message_writes_file_and_sends_keys() {
 
     // Verify message file was written in .claude-messages/ directory
     let messages_dir = tmp.path().join(".claude-messages");
-    assert!(messages_dir.is_dir(), ".claude-messages directory should exist");
+    assert!(
+        messages_dir.is_dir(),
+        ".claude-messages directory should exist"
+    );
     let entries: Vec<_> = std::fs::read_dir(&messages_dir).unwrap().collect();
     assert_eq!(entries.len(), 1, "Should have exactly one message file");
     let message_path = entries[0].as_ref().unwrap().path();
     let file_name = message_path.file_name().unwrap().to_str().unwrap();
-    assert!(file_name.starts_with(&format!("{}-", sender_id.0)), "Filename should start with sender task id");
+    assert!(
+        file_name.starts_with(&format!("{}-", sender_id.0)),
+        "Filename should start with sender task id"
+    );
     assert!(file_name.ends_with(".md"), "Filename should end with .md");
     let content = std::fs::read_to_string(&message_path).unwrap();
     assert!(

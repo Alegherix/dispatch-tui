@@ -621,6 +621,16 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         load_prs_from_table(&conn, "bot_prs")
     }
+
+    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()> {
+        let conn = self.conn()?;
+        save_security_alerts_impl(&conn, alerts)
+    }
+
+    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>> {
+        let conn = self.conn()?;
+        load_security_alerts_impl(&conn)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -781,6 +791,116 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
         });
     }
     Ok(prs)
+}
+
+// ---------------------------------------------------------------------------
+// Security alert save/load helpers
+// ---------------------------------------------------------------------------
+
+fn save_security_alerts_impl(
+    conn: &rusqlite::Connection,
+    alerts: &[crate::models::SecurityAlert],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM security_alerts", [])?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO security_alerts (repo, number, kind, severity, title, package,
+             vulnerable_range, fixed_version, cvss_score, url, created_at, state, description)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        )?;
+        for a in alerts {
+            stmt.execute(params![
+                a.repo,
+                a.number,
+                a.kind.as_db_str(),
+                a.severity.as_db_str(),
+                a.title,
+                a.package,
+                a.vulnerable_range,
+                a.fixed_version,
+                a.cvss_score,
+                a.url,
+                a.created_at.to_rfc3339(),
+                a.state,
+                a.description,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn load_security_alerts_impl(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<crate::models::SecurityAlert>> {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+    let mut stmt = conn.prepare(
+        "SELECT repo, number, kind, severity, title, package,
+                vulnerable_range, fixed_version, cvss_score, url,
+                created_at, state, description
+         FROM security_alerts",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<f64>>(8)?,
+            row.get::<_, String>(9)?,
+            row.get::<_, String>(10)?,
+            row.get::<_, String>(11)?,
+            row.get::<_, String>(12)?,
+        ))
+    })?;
+
+    let mut alerts = Vec::new();
+    for row in rows {
+        let (
+            repo,
+            number,
+            kind_str,
+            severity_str,
+            title,
+            package,
+            vulnerable_range,
+            fixed_version,
+            cvss_score,
+            url,
+            created_at_str,
+            state,
+            description,
+        ) = row?;
+
+        let kind = AlertKind::from_db_str(&kind_str).unwrap_or(AlertKind::Dependabot);
+        let severity = AlertSeverity::from_db_str(&severity_str).unwrap_or(AlertSeverity::Medium);
+        let created_at = DateTime::parse_from_rfc3339(&created_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        alerts.push(SecurityAlert {
+            number,
+            repo,
+            severity,
+            kind,
+            title,
+            package,
+            vulnerable_range,
+            fixed_version,
+            cvss_score,
+            url,
+            created_at,
+            state,
+            description,
+        });
+    }
+    Ok(alerts)
 }
 
 // ---------------------------------------------------------------------------

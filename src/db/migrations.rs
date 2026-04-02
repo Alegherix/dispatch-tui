@@ -27,6 +27,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (21, migrate_v21_create_my_prs_table),
     (22, migrate_v22_add_filter_preset_mode),
     (23, migrate_v23_create_bot_prs_table),
+    (24, migrate_v24_create_security_alerts_table),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -481,4 +482,26 @@ fn migrate_v23_create_bot_prs_table(conn: &Connection) -> Result<()> {
         )",
     )
     .context("Failed to create bot_prs table")
+}
+
+fn migrate_v24_create_security_alerts_table(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS security_alerts (
+            repo              TEXT    NOT NULL,
+            number            INTEGER NOT NULL,
+            kind              TEXT    NOT NULL,
+            severity          TEXT    NOT NULL,
+            title             TEXT    NOT NULL,
+            package           TEXT,
+            vulnerable_range  TEXT,
+            fixed_version     TEXT,
+            cvss_score        REAL,
+            url               TEXT    NOT NULL,
+            created_at        TEXT    NOT NULL,
+            state             TEXT    NOT NULL,
+            description       TEXT    NOT NULL DEFAULT '',
+            PRIMARY KEY (repo, number, kind)
+        )",
+    )
+    .context("Failed to create security_alerts table")
 }

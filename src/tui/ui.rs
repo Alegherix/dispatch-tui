@@ -138,6 +138,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         return;
     }
 
+    if matches!(app.view_mode(), ViewMode::SecurityBoard { .. }) {
+        render_security_board(frame, app, area);
+        if matches!(app.mode(), InputMode::Help) {
+            render_help_overlay(frame, app, area);
+        }
+        render_error_popup(frame, app, area);
+        return;
+    }
+
     let has_banner = matches!(app.view_mode(), ViewMode::Epic { .. });
 
     let panel_h = input_panel_height(app, area.height, has_banner);
@@ -255,11 +264,15 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(Span::styled(" Tasks ", inactive_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             spans.push(Span::styled(review_tab_label(app, " "), inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(security_tab_label(app, " "), inactive_style));
         }
         ViewMode::Board(_) => {
             spans.push(Span::styled(" \u{25b8} Tasks ", active_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             spans.push(Span::styled(review_tab_label(app, " "), inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(security_tab_label(app, " "), inactive_style));
         }
         ViewMode::ReviewBoard { mode, .. } => {
             spans.push(Span::styled(" Tasks ", inactive_style));
@@ -304,11 +317,24 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
                 ),
                 bot_style,
             ));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(security_tab_label(app, " "), inactive_style));
+        }
+        ViewMode::SecurityBoard { .. } => {
+            spans.push(Span::styled(" Tasks ", inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(review_tab_label(app, " "), inactive_style));
+            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
+            spans.push(Span::styled(
+                security_tab_label(app, " \u{25b8} "),
+                active_style,
+            ));
         }
     }
 
     let hint = match app.view_mode() {
-        ViewMode::ReviewBoard { .. } => "  [Tab] back  [S-Tab] toggle",
+        ViewMode::ReviewBoard { .. } => "  [Tab] security  [S-Tab] toggle",
+        ViewMode::SecurityBoard { .. } => "  [Tab] tasks  [Esc] back",
         _ => "  [Tab]",
     };
     spans.push(Span::styled(hint, hint_style.add_modifier(Modifier::BOLD)));
@@ -2191,6 +2217,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
+        InputMode::SecurityRepoFilter => {
+            let bar = Paragraph::new("Filter repos: 1-9 toggle, (a)ll, Enter/Esc close")
+                .style(Style::default().fg(Color::Cyan));
+            frame.render_widget(bar, area);
+        }
         InputMode::ConfirmEditTask(_) => {
             let text = app.status_message.as_deref().unwrap_or("Edit task? (y/n)");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2837,6 +2868,416 @@ fn build_review_pr_item(
     };
 
     ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
+}
+
+// ---------------------------------------------------------------------------
+// Security board rendering
+// ---------------------------------------------------------------------------
+
+use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+fn security_tab_label(app: &App, prefix: &str) -> String {
+    let count = app.filtered_security_alerts().len();
+    let loading = if app.security_loading() {
+        " \u{21bb}"
+    } else {
+        ""
+    };
+    if count > 0 {
+        format!("{prefix}Security ({count}){loading} ")
+    } else {
+        format!("{prefix}Security{loading} ")
+    }
+}
+
+fn security_column_color(severity: AlertSeverity) -> Color {
+    match severity {
+        AlertSeverity::Critical => Color::Red,
+        AlertSeverity::High => YELLOW,
+        AlertSeverity::Medium => Color::Rgb(86, 152, 194),
+        AlertSeverity::Low => Color::DarkGray,
+    }
+}
+
+fn security_cursor_bg_color(severity: AlertSeverity) -> Color {
+    match severity {
+        AlertSeverity::Critical => Color::Rgb(56, 28, 28),
+        AlertSeverity::High => Color::Rgb(52, 44, 20),
+        AlertSeverity::Medium => Color::Rgb(24, 40, 52),
+        AlertSeverity::Low => Color::Rgb(34, 34, 40),
+    }
+}
+
+fn security_column_bg_color(severity: AlertSeverity) -> Color {
+    match severity {
+        AlertSeverity::Critical => Color::Rgb(36, 26, 26),
+        AlertSeverity::High => Color::Rgb(38, 34, 26),
+        AlertSeverity::Medium => Color::Rgb(26, 32, 38),
+        AlertSeverity::Low => Color::Rgb(30, 30, 34),
+    }
+}
+
+pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
+    let detail_height = if app.security_detail_visible() { 8 } else { 0 };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),             // tab bar
+            Constraint::Length(1),             // summary row
+            Constraint::Min(1),                // board
+            Constraint::Length(detail_height), // detail panel
+            Constraint::Length(1),             // status bar
+        ])
+        .split(area);
+
+    render_tab_bar(frame, app, chunks[0]);
+    render_security_summary_row(frame, app, chunks[1]);
+
+    let filtered = app.filtered_security_alerts();
+    if filtered.is_empty() {
+        let msg = if app.security_loading() {
+            "Loading..."
+        } else if app.filtered_security_alerts().is_empty() && !app.security.alerts.is_empty() {
+            "All alerts filtered out."
+        } else {
+            "No security alerts found. Press r to refresh."
+        };
+        let p = Paragraph::new(msg)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(p, chunks[2]);
+    } else {
+        render_security_columns(frame, app, chunks[2]);
+    }
+
+    render_security_detail(frame, app, chunks[3]);
+
+    // Status bar
+    if let Some(msg) = app.status_message() {
+        let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
+        frame.render_widget(status, chunks[4]);
+    } else if let Some(err) = app.last_security_error() {
+        let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
+        frame.render_widget(status, chunks[4]);
+    } else {
+        let has_alert = app.selected_security_alert().is_some();
+        let hints = Paragraph::new(Line::from(security_action_hints(app, has_alert)));
+        frame.render_widget(hints, chunks[4]);
+    }
+
+    // Filter overlay
+    if matches!(app.mode(), InputMode::SecurityRepoFilter) {
+        render_security_repo_filter_overlay(frame, app, area);
+    }
+}
+
+fn security_action_hints(app: &App, has_alert: bool) -> Vec<Span<'static>> {
+    let key_color = Color::Cyan;
+    let label_style = Style::default().fg(MUTED);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: String| {
+        spans.push(Span::styled(
+            key,
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!(" {label}  "), label_style));
+    };
+    if has_alert {
+        push_hint(&mut spans, "Enter", "detail".into());
+        push_hint(&mut spans, "p", "open".into());
+    }
+    push_hint(&mut spans, "r", "refresh".into());
+    push_hint(&mut spans, "f", "filter".into());
+    let kind_label = match app.security_kind_filter() {
+        None => "all",
+        Some(AlertKind::Dependabot) => "deps",
+        Some(AlertKind::CodeScanning) => "code",
+    };
+    push_hint(&mut spans, "t", format!("kind:{kind_label}"));
+    push_hint(&mut spans, "Tab", "tasks".into());
+    push_hint(&mut spans, "?", "help".into());
+    spans
+}
+
+fn render_security_summary_row(frame: &mut Frame, app: &App, area: Rect) {
+    let sel = app.security_selection();
+    let selected_col = sel.map(|s| s.column()).unwrap_or(0);
+    let filtered = app.filtered_security_alerts();
+    let col_count = AlertSeverity::COLUMN_COUNT;
+
+    let segments = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
+        .split(area);
+
+    for i in 0..col_count {
+        let severity = AlertSeverity::from_column_index(i).unwrap_or(AlertSeverity::Medium);
+        let count = filtered
+            .iter()
+            .filter(|a| a.severity.column_index() == i)
+            .count();
+        let is_focused = i == selected_col;
+        let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
+        let label = format!("{prefix}{} ({count})", severity.as_str());
+
+        let color = security_column_color(severity);
+        let style = if is_focused {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let p = Paragraph::new(label).style(style);
+        frame.render_widget(p, segments[i]);
+    }
+}
+
+fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
+    let sel_col = app.security_selection().map(|s| s.column()).unwrap_or(0);
+    let col_count = AlertSeverity::COLUMN_COUNT;
+
+    let col_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
+        .split(area);
+
+    for i in 0..col_count {
+        let severity = AlertSeverity::from_column_index(i).unwrap_or(AlertSeverity::Medium);
+        let is_focused = i == sel_col;
+        let alerts: Vec<&SecurityAlert> = app.security_alerts_for_column(i);
+
+        let selected_row = app.security_selection().map(|s| s.row(i)).unwrap_or(0);
+        let items: Vec<ListItem> = alerts
+            .iter()
+            .enumerate()
+            .map(|(row, alert)| {
+                build_security_alert_item(alert, severity, is_focused && row == selected_row)
+            })
+            .collect();
+
+        let bg = if is_focused {
+            security_column_bg_color(severity)
+        } else {
+            Color::Reset
+        };
+
+        let list = List::new(items).block(Block::default().style(Style::default().bg(bg)));
+
+        let mut list_state = ListState::default();
+        if is_focused {
+            list_state.select(Some(selected_row));
+        }
+
+        frame.render_stateful_widget(list, col_areas[i], &mut list_state);
+
+        if let Some(sel) = app.security_selection_mut() {
+            sel.list_states[i] = list_state;
+        }
+    }
+}
+
+fn build_security_alert_item(
+    alert: &SecurityAlert,
+    severity: AlertSeverity,
+    is_cursor: bool,
+) -> ListItem<'static> {
+    let color = security_column_color(severity);
+    let now = Utc::now();
+    let age = format_age(alert.created_at, now);
+
+    // Line 1: stripe + repo#number + title
+    let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
+    let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
+    let header = format!("{repo_short}#{} {}", alert.number, alert.title);
+    let header_truncated = truncate(&header, 55);
+
+    let line1_style = if is_cursor {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(color)
+    };
+
+    let line1 = Line::from(vec![
+        Span::styled(stripe, Style::default().fg(color)),
+        Span::styled(header_truncated, line1_style),
+    ]);
+
+    // Line 2: kind indicator + package + CVSS + age
+    let kind_indicator = alert.kind.indicator();
+    let pkg = alert.package.as_deref().unwrap_or("-");
+    let cvss_str = alert
+        .cvss_score
+        .map(|s| format!("CVSS:{s:.1}"))
+        .unwrap_or_default();
+    let meta = format!("  [{kind_indicator}] {pkg} {cvss_str} {age}");
+
+    let meta_style = if is_cursor {
+        Style::default().fg(Color::Gray)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let line2 = Line::from(Span::styled(meta, meta_style));
+
+    let bg = if is_cursor {
+        security_cursor_bg_color(severity)
+    } else {
+        Color::Reset
+    };
+
+    ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
+}
+
+fn render_security_detail(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(BORDER));
+
+    if !app.security_detail_visible() {
+        let paragraph = Paragraph::new("").block(block);
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    let Some(alert) = app.selected_security_alert() else {
+        let paragraph = Paragraph::new("").block(block);
+        frame.render_widget(paragraph, area);
+        return;
+    };
+
+    let color = security_column_color(alert.severity);
+    let now = Utc::now();
+    let age = format_age(alert.created_at, now);
+
+    // Line 1: title
+    let line1 = Line::from(vec![Span::styled(
+        format!("{}#{} {}", alert.repo, alert.number, alert.title),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    )]);
+
+    // Line 2: kind + severity + CVSS
+    let cvss_str = alert
+        .cvss_score
+        .map(|s| format!(" CVSS:{s:.1}"))
+        .unwrap_or_default();
+    let line2 = Line::from(Span::styled(
+        format!(
+            "{} \u{00b7} {}{} \u{00b7} {} \u{00b7} {}",
+            alert.kind.as_str(),
+            alert.severity.as_str(),
+            cvss_str,
+            alert.repo,
+            age,
+        ),
+        Style::default().fg(MUTED),
+    ));
+
+    // Line 3: package info or location
+    let pkg_line = if let Some(pkg) = &alert.package {
+        let range = alert.vulnerable_range.as_deref().unwrap_or("");
+        let fix = alert
+            .fixed_version
+            .as_ref()
+            .map(|v| format!(" \u{2192} {v}"))
+            .unwrap_or_default();
+        format!("Package: {pkg} {range}{fix}")
+    } else {
+        "No package info".to_string()
+    };
+    let line3 = Line::from(Span::styled(pkg_line, Style::default().fg(MUTED_LIGHT)));
+
+    // Lines 4+: description (truncated)
+    let desc_lines: Vec<Line> = alert
+        .description
+        .lines()
+        .take(4)
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(Color::DarkGray),
+            ))
+        })
+        .collect();
+
+    let mut lines = vec![line1, line2, line3];
+    lines.extend(desc_lines);
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
+    let repos = app.active_security_repos();
+    if repos.is_empty() {
+        return;
+    }
+
+    let mode_label = match app.security_kind_filter() {
+        None => "all kinds",
+        Some(AlertKind::Dependabot) => "dependabot only",
+        Some(AlertKind::CodeScanning) => "code scanning only",
+    };
+    let _filter_label = format!("Filter ({mode_label})");
+
+    let height = (repos.len() as u16 + 4).min(area.height.saturating_sub(2));
+    let width = 50.min(area.width.saturating_sub(4));
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" Filter Repos ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(CYAN));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    let mode_str = match app.view_mode() {
+        ViewMode::SecurityBoard { .. } => match &app.security.repo_filter_mode {
+            RepoFilterMode::Include => "include",
+            RepoFilterMode::Exclude => "exclude",
+        },
+        _ => "include",
+    };
+    lines.push(Line::from(Span::styled(
+        format!(" Mode: {mode_str} [Tab to toggle]"),
+        Style::default().fg(MUTED_LIGHT),
+    )));
+    lines.push(Line::from(Span::styled(
+        " (a) toggle all",
+        Style::default().fg(MUTED),
+    )));
+
+    for (i, repo) in repos.iter().enumerate() {
+        let is_selected = app.security.repo_filter.contains(repo);
+        let marker = if is_selected { "\u{25c9}" } else { "\u{25cb}" };
+        let num = i + 1;
+        let line = Line::from(vec![
+            Span::styled(
+                format!(" {num}"),
+                Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {marker} {repo}"),
+                if is_selected {
+                    Style::default().fg(FG)
+                } else {
+                    Style::default().fg(MUTED)
+                },
+            ),
+        ]);
+        lines.push(line);
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
 }
 
 #[cfg(test)]

@@ -967,6 +967,143 @@ pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Strin
 }
 
 // ---------------------------------------------------------------------------
+// AlertSeverity — severity level for security alerts
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertSeverity {
+    Critical,
+    High,
+    Medium,
+    Low,
+}
+
+impl AlertSeverity {
+    pub const ALL: [Self; 4] = [Self::Critical, Self::High, Self::Medium, Self::Low];
+
+    pub const COLUMN_COUNT: usize = Self::ALL.len();
+
+    pub fn column_index(self) -> usize {
+        match self {
+            Self::Critical => 0,
+            Self::High => 1,
+            Self::Medium => 2,
+            Self::Low => 3,
+        }
+    }
+
+    pub fn from_column_index(idx: usize) -> Option<Self> {
+        match idx {
+            0 => Some(Self::Critical),
+            1 => Some(Self::High),
+            2 => Some(Self::Medium),
+            3 => Some(Self::Low),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Critical => "Critical",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "critical" => Some(Self::Critical),
+            "high" => Some(Self::High),
+            "medium" => Some(Self::Medium),
+            "low" => Some(Self::Low),
+            _ => None,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "critical" => Some(Self::Critical),
+            "high" => Some(Self::High),
+            "medium" | "moderate" => Some(Self::Medium),
+            "low" => Some(Self::Low),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AlertKind — type of security alert
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertKind {
+    Dependabot,
+    CodeScanning,
+}
+
+impl AlertKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dependabot => "Dependabot",
+            Self::CodeScanning => "Code Scanning",
+        }
+    }
+
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            Self::Dependabot => "dependabot",
+            Self::CodeScanning => "code_scanning",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "dependabot" => Some(Self::Dependabot),
+            "code_scanning" => Some(Self::CodeScanning),
+            _ => None,
+        }
+    }
+
+    pub fn indicator(&self) -> &'static str {
+        match self {
+            Self::Dependabot => "D",
+            Self::CodeScanning => "S",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SecurityAlert — a security vulnerability alert from GitHub
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SecurityAlert {
+    pub number: i64,
+    pub repo: String,
+    pub severity: AlertSeverity,
+    pub kind: AlertKind,
+    pub title: String,
+    pub package: Option<String>,
+    pub vulnerable_range: Option<String>,
+    pub fixed_version: Option<String>,
+    pub cvss_score: Option<f64>,
+    pub url: String,
+    pub created_at: DateTime<Utc>,
+    pub state: String,
+    pub description: String,
+}
+
+// ---------------------------------------------------------------------------
 // pr_number_from_url
 // ---------------------------------------------------------------------------
 
@@ -1978,5 +2115,86 @@ mod tests {
             DispatchMode::for_task(&make_task_with(None, None)),
             DispatchMode::Dispatch
         );
+    }
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    #[test]
+    fn alert_severity_column_count() {
+        assert_eq!(AlertSeverity::COLUMN_COUNT, 4);
+        assert_eq!(AlertSeverity::ALL.len(), 4);
+    }
+
+    #[test]
+    fn alert_severity_column_index_roundtrip() {
+        for (i, severity) in AlertSeverity::ALL.iter().enumerate() {
+            assert_eq!(severity.column_index(), i);
+            assert_eq!(AlertSeverity::from_column_index(i), Some(*severity));
+        }
+    }
+
+    #[test]
+    fn alert_severity_from_column_index_out_of_range() {
+        assert_eq!(AlertSeverity::from_column_index(4), None);
+        assert_eq!(AlertSeverity::from_column_index(999), None);
+    }
+
+    #[test]
+    fn alert_severity_db_roundtrip() {
+        for severity in AlertSeverity::ALL {
+            let s = severity.as_db_str();
+            let parsed =
+                AlertSeverity::from_db_str(s).unwrap_or_else(|| panic!("roundtrip failed: {s}"));
+            assert_eq!(parsed, severity);
+        }
+    }
+
+    #[test]
+    fn alert_severity_parse() {
+        assert_eq!(
+            AlertSeverity::parse("critical"),
+            Some(AlertSeverity::Critical)
+        );
+        assert_eq!(AlertSeverity::parse("HIGH"), Some(AlertSeverity::High));
+        assert_eq!(
+            AlertSeverity::parse("moderate"),
+            Some(AlertSeverity::Medium)
+        );
+        assert_eq!(AlertSeverity::parse("Medium"), Some(AlertSeverity::Medium));
+        assert_eq!(AlertSeverity::parse("low"), Some(AlertSeverity::Low));
+        assert_eq!(AlertSeverity::parse("bogus"), None);
+    }
+
+    #[test]
+    fn alert_kind_db_roundtrip() {
+        for kind in [AlertKind::Dependabot, AlertKind::CodeScanning] {
+            let s = kind.as_db_str();
+            let parsed =
+                AlertKind::from_db_str(s).unwrap_or_else(|| panic!("roundtrip failed: {s}"));
+            assert_eq!(parsed, kind);
+        }
+    }
+
+    #[test]
+    fn alert_kind_indicator() {
+        assert_eq!(AlertKind::Dependabot.indicator(), "D");
+        assert_eq!(AlertKind::CodeScanning.indicator(), "S");
+    }
+
+    #[test]
+    fn alert_kind_as_str() {
+        assert_eq!(AlertKind::Dependabot.as_str(), "Dependabot");
+        assert_eq!(AlertKind::CodeScanning.as_str(), "Code Scanning");
+    }
+
+    #[test]
+    fn alert_severity_as_str() {
+        assert_eq!(AlertSeverity::Critical.as_str(), "Critical");
+        assert_eq!(AlertSeverity::High.as_str(), "High");
+        assert_eq!(AlertSeverity::Medium.as_str(), "Medium");
+        assert_eq!(AlertSeverity::Low.as_str(), "Low");
     }
 }

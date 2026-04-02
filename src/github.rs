@@ -551,6 +551,205 @@ fn parse_bot_prs(json: &str) -> Result<Vec<ReviewPr>, String> {
     Ok(prs)
 }
 
+// ---------------------------------------------------------------------------
+// Security alerts
+// ---------------------------------------------------------------------------
+
+use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+/// Parse Dependabot alerts from the REST API JSON response for a single repo.
+fn parse_dependabot_alerts(json: &str, repo: &str) -> Vec<SecurityAlert> {
+    let arr: Vec<serde_json::Value> = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut alerts = Vec::new();
+    for node in &arr {
+        let state = node["state"].as_str().unwrap_or("open");
+        if state != "open" {
+            continue;
+        }
+        let number = node["number"].as_i64().unwrap_or(0);
+        let severity_str = node["security_vulnerability"]["severity"]
+            .as_str()
+            .or_else(|| node["security_advisory"]["severity"].as_str())
+            .unwrap_or("medium");
+        let severity = AlertSeverity::parse(severity_str).unwrap_or(AlertSeverity::Medium);
+
+        let title = node["security_advisory"]["summary"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let package = node["security_vulnerability"]["package"]["name"]
+            .as_str()
+            .map(|s| s.to_string());
+        let vulnerable_range = node["security_vulnerability"]["vulnerable_version_range"]
+            .as_str()
+            .map(|s| s.to_string());
+        let fixed_version = node["security_vulnerability"]["first_patched_version"]["identifier"]
+            .as_str()
+            .map(|s| s.to_string());
+        let cvss_score = node["security_advisory"]["cvss"]["score"].as_f64();
+        let url = node["html_url"].as_str().unwrap_or("").to_string();
+        let created_at = node["created_at"]
+            .as_str()
+            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+            .unwrap_or_else(Utc::now);
+        let description = node["security_advisory"]["description"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
+        alerts.push(SecurityAlert {
+            number,
+            repo: repo.to_string(),
+            severity,
+            kind: AlertKind::Dependabot,
+            title,
+            package,
+            vulnerable_range,
+            fixed_version,
+            cvss_score,
+            url,
+            created_at,
+            state: state.to_string(),
+            description,
+        });
+    }
+    alerts
+}
+
+/// Parse code scanning alerts from the REST API JSON response for a single repo.
+fn parse_code_scanning_alerts(json: &str, repo: &str) -> Vec<SecurityAlert> {
+    let arr: Vec<serde_json::Value> = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut alerts = Vec::new();
+    for node in &arr {
+        let state = node["state"].as_str().unwrap_or("open");
+        if state != "open" {
+            continue;
+        }
+        let number = node["number"].as_i64().unwrap_or(0);
+        let severity_str = node["rule"]["security_severity_level"]
+            .as_str()
+            .or_else(|| node["rule"]["severity"].as_str())
+            .unwrap_or("medium");
+        let severity = AlertSeverity::parse(severity_str).unwrap_or(AlertSeverity::Medium);
+
+        let title = node["rule"]["description"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let url = node["html_url"].as_str().unwrap_or("").to_string();
+        let created_at = node["created_at"]
+            .as_str()
+            .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+            .unwrap_or_else(Utc::now);
+        let description = node["most_recent_instance"]["message"]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let location = node["most_recent_instance"]["location"]["path"]
+            .as_str()
+            .map(|s| s.to_string());
+
+        alerts.push(SecurityAlert {
+            number,
+            repo: repo.to_string(),
+            severity,
+            kind: AlertKind::CodeScanning,
+            title,
+            package: location,
+            vulnerable_range: None,
+            fixed_version: None,
+            cvss_score: None,
+            url,
+            created_at,
+            state: state.to_string(),
+            description,
+        });
+    }
+    alerts
+}
+
+/// Fetch security alerts from GitHub for all repos the user is a collaborator on.
+///
+/// Discovers repos via `gh api /user/repos`, then fans out per-repo requests
+/// for Dependabot alerts and code scanning alerts. Silently skips 404/403 errors
+/// (repos without the feature enabled). Results are sorted by severity then CVSS desc.
+pub fn fetch_security_alerts(runner: &dyn ProcessRunner) -> Result<Vec<SecurityAlert>, String> {
+    // Discover collaborator repos
+    let output = runner
+        .run(
+            "gh",
+            &["api", "/user/repos", "--paginate", "-q", ".[].full_name"],
+        )
+        .map_err(|e| format!("Failed to run gh: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh api /user/repos failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let repos: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+
+    let mut all_alerts: Vec<SecurityAlert> = Vec::new();
+
+    for repo in &repos {
+        // Fetch Dependabot alerts
+        let dep_output = runner.run(
+            "gh",
+            &[
+                "api",
+                &format!("/repos/{repo}/dependabot/alerts?state=open&per_page=100"),
+            ],
+        );
+        if let Ok(dep) = dep_output {
+            if dep.status.success() {
+                let json = String::from_utf8_lossy(&dep.stdout);
+                all_alerts.extend(parse_dependabot_alerts(&json, repo));
+            }
+            // Silently skip 404/403
+        }
+
+        // Fetch code scanning alerts
+        let cs_output = runner.run(
+            "gh",
+            &[
+                "api",
+                &format!("/repos/{repo}/code-scanning/alerts?state=open&per_page=100"),
+            ],
+        );
+        if let Ok(cs) = cs_output {
+            if cs.status.success() {
+                let json = String::from_utf8_lossy(&cs.stdout);
+                all_alerts.extend(parse_code_scanning_alerts(&json, repo));
+            }
+            // Silently skip 404/403
+        }
+    }
+
+    // Sort by severity (critical first), then CVSS descending
+    all_alerts.sort_by(|a, b| {
+        a.severity
+            .column_index()
+            .cmp(&b.severity.column_index())
+            .then_with(|| {
+                b.cvss_score
+                    .unwrap_or(0.0)
+                    .partial_cmp(&a.cvss_score.unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
+    Ok(all_alerts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1238,5 +1437,92 @@ mod tests {
             "missing user: qualifier"
         );
         assert!(!search_query.contains("org:"), "should have no org: qualifiers");
+    }
+
+    // --- Security alert parsing tests ---
+
+    #[test]
+    fn parse_dependabot_alerts_basic() {
+        let json = r#"[
+            {
+                "number": 1,
+                "state": "open",
+                "html_url": "https://github.com/acme/app/security/dependabot/1",
+                "created_at": "2026-03-01T10:00:00Z",
+                "security_vulnerability": {
+                    "severity": "critical",
+                    "package": {"name": "lodash"},
+                    "vulnerable_version_range": "< 4.17.21",
+                    "first_patched_version": {"identifier": "4.17.21"}
+                },
+                "security_advisory": {
+                    "summary": "Prototype Pollution in lodash",
+                    "cvss": {"score": 9.8},
+                    "description": "A prototype pollution vuln."
+                }
+            },
+            {
+                "number": 2,
+                "state": "dismissed",
+                "html_url": "https://github.com/acme/app/security/dependabot/2",
+                "created_at": "2026-03-02T10:00:00Z",
+                "security_vulnerability": {
+                    "severity": "low",
+                    "package": {"name": "express"}
+                },
+                "security_advisory": {
+                    "summary": "Minor issue"
+                }
+            }
+        ]"#;
+
+        let alerts = parse_dependabot_alerts(json, "acme/app");
+        assert_eq!(alerts.len(), 1, "dismissed alert should be filtered");
+        assert_eq!(alerts[0].number, 1);
+        assert_eq!(alerts[0].severity, AlertSeverity::Critical);
+        assert_eq!(alerts[0].kind, AlertKind::Dependabot);
+        assert_eq!(alerts[0].package.as_deref(), Some("lodash"));
+        assert_eq!(alerts[0].fixed_version.as_deref(), Some("4.17.21"));
+        assert_eq!(alerts[0].cvss_score, Some(9.8));
+    }
+
+    #[test]
+    fn parse_code_scanning_alerts_basic() {
+        let json = r#"[
+            {
+                "number": 10,
+                "state": "open",
+                "html_url": "https://github.com/acme/app/security/code-scanning/10",
+                "created_at": "2026-03-01T10:00:00Z",
+                "rule": {
+                    "description": "SQL injection vulnerability",
+                    "security_severity_level": "high"
+                },
+                "most_recent_instance": {
+                    "message": {"text": "Potential SQL injection at line 42"},
+                    "location": {"path": "src/db.rs"}
+                }
+            }
+        ]"#;
+
+        let alerts = parse_code_scanning_alerts(json, "acme/app");
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].number, 10);
+        assert_eq!(alerts[0].severity, AlertSeverity::High);
+        assert_eq!(alerts[0].kind, AlertKind::CodeScanning);
+        assert_eq!(alerts[0].package.as_deref(), Some("src/db.rs"));
+        assert_eq!(alerts[0].description, "Potential SQL injection at line 42");
+    }
+
+    #[test]
+    fn parse_dependabot_alerts_invalid_json() {
+        let alerts = parse_dependabot_alerts("not json", "acme/app");
+        assert!(alerts.is_empty());
+    }
+
+    #[test]
+    fn parse_code_scanning_alerts_empty_array() {
+        let alerts = parse_code_scanning_alerts("[]", "acme/app");
+        assert!(alerts.is_empty());
     }
 }

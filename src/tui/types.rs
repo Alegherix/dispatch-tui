@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    Epic, EpicId, ReviewDecision, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    AlertKind, AlertSeverity, Epic, EpicId, ReviewDecision, SecurityAlert, SubStatus, Task, TaskId,
+    TaskStatus, TaskTag, TaskUsage,
 };
 
 // ---------------------------------------------------------------------------
@@ -267,6 +268,18 @@ pub enum Message {
     ConfirmBatchApprove,
     ConfirmBatchMerge,
     CancelBatchOperation,
+    // Security board
+    SwitchToSecurityBoard,
+    SecurityAlertsLoaded(Vec<SecurityAlert>),
+    SecurityAlertsFetchFailed(String),
+    RefreshSecurityAlerts,
+    ToggleSecurityDetail,
+    ToggleSecurityKindFilter,
+    StartSecurityRepoFilter,
+    CloseSecurityRepoFilter,
+    ToggleSecurityRepoFilter(String),
+    ToggleAllSecurityRepoFilter,
+    ToggleSecurityRepoFilterMode,
     // Filter presets
     StartSavePreset,
     SaveFilterPreset(String),
@@ -407,6 +420,8 @@ pub enum Command {
         sub_status: SubStatus,
     },
     DispatchReviewAgent(ReviewAgentRequest),
+    FetchSecurityAlerts,
+    PersistSecurityAlerts(Vec<SecurityAlert>),
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +453,7 @@ pub enum InputMode {
     Help,
     RepoFilter,
     ReviewRepoFilter,
+    SecurityRepoFilter,
     InputPresetName,
     ConfirmDeletePreset,
     ConfirmEditTask(TaskId),
@@ -845,6 +861,110 @@ impl Default for ReviewBoardSelection {
 }
 
 // ---------------------------------------------------------------------------
+// SecurityBoardSelection — column + row selection state for security board
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SecurityBoardSelection {
+    pub(in crate::tui) selected_column: usize,
+    pub(in crate::tui) selected_row: [usize; AlertSeverity::COLUMN_COUNT],
+    pub(in crate::tui) list_states: [ListState; AlertSeverity::COLUMN_COUNT],
+}
+
+impl SecurityBoardSelection {
+    pub fn new() -> Self {
+        Self {
+            selected_column: 0,
+            selected_row: [0; AlertSeverity::COLUMN_COUNT],
+            list_states: std::array::from_fn(|_| ListState::default()),
+        }
+    }
+
+    pub fn column(&self) -> usize {
+        self.selected_column
+    }
+
+    pub fn row(&self, col: usize) -> usize {
+        self.selected_row[col]
+    }
+
+    pub fn set_column(&mut self, col: usize) {
+        self.selected_column = col;
+    }
+
+    pub fn set_row(&mut self, col: usize, row: usize) {
+        self.selected_row[col] = row;
+    }
+
+    pub fn list_state_index(&self, col: usize) -> Option<usize> {
+        Some(self.selected_row[col])
+    }
+}
+
+impl Default for SecurityBoardSelection {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SecurityBoardState — security board data and loading state
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default)]
+pub struct SecurityBoardState {
+    pub alerts: Vec<SecurityAlert>,
+    pub repos: Vec<String>,
+    pub loading: bool,
+    pub last_fetch: Option<Instant>,
+    pub last_error: Option<String>,
+    pub detail_visible: bool,
+    pub repo_filter: HashSet<String>,
+    pub repo_filter_mode: RepoFilterMode,
+    pub kind_filter: Option<AlertKind>,
+}
+
+impl SecurityBoardState {
+    /// Set alerts and rebuild the cached distinct repos list.
+    pub fn set_alerts(&mut self, alerts: Vec<SecurityAlert>) {
+        self.repos = {
+            let mut set = BTreeSet::new();
+            for a in &alerts {
+                set.insert(a.repo.clone());
+            }
+            set.into_iter().collect()
+        };
+        self.alerts = alerts;
+    }
+
+    /// Return alerts filtered by repo filter and kind filter.
+    pub fn filtered_alerts(&self) -> Vec<&SecurityAlert> {
+        self.alerts
+            .iter()
+            .filter(|a| self.repo_matches(&a.repo))
+            .filter(|a| self.kind_filter.is_none() || self.kind_filter == Some(a.kind))
+            .collect()
+    }
+
+    pub fn repo_matches(&self, repo: &str) -> bool {
+        if self.repo_filter.is_empty() {
+            return true;
+        }
+        match self.repo_filter_mode {
+            RepoFilterMode::Include => self.repo_filter.contains(repo),
+            RepoFilterMode::Exclude => !self.repo_filter.contains(repo),
+        }
+    }
+
+    /// Whether alerts need a refresh given the interval.
+    pub fn needs_fetch(&self, interval: Duration) -> bool {
+        self.last_fetch
+            .map(|t| t.elapsed() > interval)
+            .unwrap_or(true)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ViewMode — board vs epic view with preserved selection state
 // ---------------------------------------------------------------------------
 
@@ -859,6 +979,10 @@ pub enum ViewMode {
     ReviewBoard {
         mode: ReviewBoardMode,
         selection: ReviewBoardSelection,
+        saved_board: BoardSelection,
+    },
+    SecurityBoard {
+        selection: SecurityBoardSelection,
         saved_board: BoardSelection,
     },
 }

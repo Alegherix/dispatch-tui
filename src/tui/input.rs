@@ -4,7 +4,9 @@ use super::{
     App, ColumnItem, Command, InputMode, Message, MoveDirection, ReviewAgentRequest,
     ReviewBoardMode, ViewMode,
 };
-use crate::models::{DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag};
+use crate::models::{
+    AlertSeverity, DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
+};
 
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
@@ -37,6 +39,7 @@ impl App {
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
             InputMode::ReviewRepoFilter => self.handle_key_review_repo_filter(key),
+            InputMode::SecurityRepoFilter => self.handle_key_security_repo_filter(key),
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
             InputMode::ConfirmBatchApprove(_) => self.handle_key_confirm_batch(key, true),
@@ -48,6 +51,10 @@ impl App {
     fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
         if self.archive.visible {
             return self.handle_key_archive(key);
+        }
+
+        if matches!(self.view_mode, ViewMode::SecurityBoard { .. }) {
+            return self.handle_key_security_board(key);
         }
 
         if matches!(self.view_mode, ViewMode::ReviewBoard { .. }) {
@@ -736,10 +743,77 @@ impl App {
         }
     }
 
-    fn handle_key_review_board(&mut self, key: KeyEvent) -> Vec<Command> {
+    fn handle_key_security_board(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('q') => self.update(Message::Quit),
             KeyCode::Tab => self.update(Message::SwitchToTaskBoard),
+            KeyCode::Esc => self.update(Message::SwitchToTaskBoard),
+
+            KeyCode::Char('h') | KeyCode::Left => {
+                if let Some(sel) = self.security_selection_mut() {
+                    let col = sel.selected_column;
+                    sel.selected_column = col.saturating_sub(1);
+                }
+                vec![]
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if let Some(sel) = self.security_selection_mut() {
+                    let col = sel.selected_column;
+                    sel.selected_column = (col + 1).min(AlertSeverity::COLUMN_COUNT - 1);
+                }
+                vec![]
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.navigate_security_row(1);
+                vec![]
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.navigate_security_row(-1);
+                vec![]
+            }
+
+            KeyCode::Enter => self.update(Message::ToggleSecurityDetail),
+
+            KeyCode::Char('p') => {
+                if let Some(alert) = self.selected_security_alert() {
+                    let url = alert.url.clone();
+                    vec![Command::OpenInBrowser { url }]
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('r') => self.update(Message::RefreshSecurityAlerts),
+            KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
+            KeyCode::Char('t') => self.update(Message::ToggleSecurityKindFilter),
+            KeyCode::Char('?') => self.update(Message::ToggleHelp),
+
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_security_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseSecurityRepoFilter),
+            KeyCode::Tab => self.update(Message::ToggleSecurityRepoFilterMode),
+            KeyCode::Char('a') => self.update(Message::ToggleAllSecurityRepoFilter),
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                let idx = (c as usize) - ('1' as usize);
+                if let Some(repo) = self.active_security_repos().get(idx) {
+                    let repo = repo.clone();
+                    self.update(Message::ToggleSecurityRepoFilter(repo))
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_review_board(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('q') => self.update(Message::Quit),
+            KeyCode::Tab => self.update(Message::SwitchToSecurityBoard),
             KeyCode::Esc => {
                 if self.has_bot_pr_selection() {
                     self.update(Message::ClearBotPrSelection)

@@ -250,6 +250,10 @@ pub trait TaskStore: Send + Sync {
     // Bot PRs (dependabot/renovate)
     fn save_bot_prs(&self, prs: &[crate::models::ReviewPr]) -> Result<()>;
     fn load_bot_prs(&self) -> Result<Vec<crate::models::ReviewPr>>;
+
+    // Security alerts
+    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()>;
+    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>>;
 }
 
 // ---------------------------------------------------------------------------

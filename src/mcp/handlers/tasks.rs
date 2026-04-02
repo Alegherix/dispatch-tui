@@ -601,11 +601,7 @@ pub(super) fn handle_send_message(
     // Write message to a uniquely-named file in target's worktree
     let messages_dir = format!("{worktree}/.claude-messages");
     if let Err(e) = std::fs::create_dir_all(&messages_dir) {
-        return JsonRpcResponse::err(
-            id,
-            -32603,
-            format!("failed to create messages dir: {e}"),
-        );
+        return JsonRpcResponse::err(id, -32603, format!("failed to create messages dir: {e}"));
     }
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

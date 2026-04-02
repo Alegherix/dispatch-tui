@@ -893,7 +893,6 @@ rule DispatchEpicSubtask {
     when: DispatchEpic(epic)
 
     requires: epic.derived_status = backlog
-    requires: epic.has_plan
 
     -- Dispatches the next backlog subtask of this epic, ordered by
     -- sort_order ascending (nulls last, tie-broken by id ascending).

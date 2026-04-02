@@ -2554,12 +2554,7 @@ impl App {
     }
 
     fn handle_auto_dispatch_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
-        let Some(epic) = self.epics.iter().find(|e| e.id == epic_id) else {
-            return vec![];
-        };
-
-        // Only auto-dispatch for epics with a plan
-        if epic.plan.is_none() {
+        if !self.epics.iter().any(|e| e.id == epic_id) {
             return vec![];
         }
 

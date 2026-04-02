@@ -7780,7 +7780,7 @@ fn auto_dispatch_epic_triggers_on_review_transition() {
 }
 
 #[test]
-fn auto_dispatch_epic_skips_planless_epic() {
+fn auto_dispatch_epic_works_without_plan() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let epic = make_epic(10); // no plan
     app.epics = vec![epic];
@@ -7805,7 +7805,7 @@ fn auto_dispatch_epic_skips_planless_epic() {
             )
         })
         .collect();
-    assert_eq!(dispatch_cmds.len(), 0);
+    assert_eq!(dispatch_cmds.len(), 1);
 }
 
 #[test]

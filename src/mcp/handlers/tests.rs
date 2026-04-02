@@ -817,9 +817,9 @@ fn tool_schemas_match_arg_structs() {
     let cases: Vec<(&str, BTreeSet<&str>, BTreeSet<&str>, Value)> = vec![
         (
             "update_task",
-            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order", "pr_url", "tag", "sub_status"]),
+            BTreeSet::from(["task_id", "status", "plan", "title", "description", "repo_path", "sort_order", "pr_url", "tag", "sub_status", "epic_id"]),
             BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug", "sub_status": "awaiting_review"}),
+            json!({"task_id": 1, "status": "review", "plan": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug", "sub_status": "awaiting_review", "epic_id": 5}),
         ),
         (
             "get_task",
@@ -835,9 +835,9 @@ fn tool_schemas_match_arg_structs() {
         ),
         (
             "list_tasks",
-            BTreeSet::from(["status"]),
+            BTreeSet::from(["status", "epic_id"]),
             BTreeSet::new(),
-            json!({"status": "backlog"}),
+            json!({"status": "backlog", "epic_id": 1}),
         ),
         (
             "claim_task",

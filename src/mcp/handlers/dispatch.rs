@@ -64,6 +64,10 @@ pub(super) fn tool_definitions() -> Value {
                             "type": "string",
                             "description": "Sub-status within the current status column. Running: active, needs_input, stale, crashed. Review: awaiting_review, changes_requested, approved. Must be valid for the task's current (or new) status.",
                             "enum": ["none", "active", "needs_input", "stale", "crashed", "awaiting_review", "changes_requested", "approved"]
+                        },
+                        "epic_id": {
+                            "type": "integer",
+                            "description": "Link this task to an epic by ID"
                         }
                     },
                     "required": ["task_id"]
@@ -124,7 +128,7 @@ pub(super) fn tool_definitions() -> Value {
             },
             {
                 "name": "list_tasks",
-                "description": "List tasks on the kanban board, optionally filtered by status.",
+                "description": "List tasks on the kanban board, optionally filtered by status and/or epic.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -134,6 +138,10 @@ pub(super) fn tool_definitions() -> Value {
                                 { "type": "string", "enum": ["backlog", "running", "review", "done", "archived"] },
                                 { "type": "array", "items": { "type": "string", "enum": ["backlog", "running", "review", "done", "archived"] } }
                             ]
+                        },
+                        "epic_id": {
+                            "type": "integer",
+                            "description": "Filter to only tasks belonging to this epic"
                         }
                     }
                 }

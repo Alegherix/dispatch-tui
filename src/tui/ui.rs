@@ -543,6 +543,16 @@ fn build_task_list_item<'a>(
     if has_message_flash {
         line1_spans.push(Span::styled(" \u{2709}", Style::default().fg(Color::Yellow)));
     }
+
+    if let Some(epic_id) = task.epic_id {
+        if let Some(epic_title) = app.epic_title(epic_id) {
+            let label = truncate(epic_title, 15);
+            line1_spans.push(Span::styled(
+                format!(" [{label}]"),
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::DIM),
+            ));
+        }
+    }
     let line1 = Line::from(line1_spans);
 
     let line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
@@ -923,6 +933,15 @@ fn render_detail(frame: &mut Frame, app: &App, area: Rect, _now: DateTime<Utc>) 
                 format!(" \u{00b7} PR: {pr_url}"),
                 Style::default().fg(Color::Cyan),
             ));
+        }
+
+        if let Some(epic_id) = task.epic_id {
+            if let Some(epic_title) = app.epic_title(epic_id) {
+                line1_spans.push(Span::styled(
+                    format!(" \u{00b7} Epic: {epic_title} (#{epic_id})"),
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
         }
 
         let mut lines = vec![

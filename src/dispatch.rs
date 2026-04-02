@@ -1,9 +1,55 @@
 use anyhow::{Context, Result};
 use std::fs;
 
+use crate::db;
 use crate::models::{DispatchResult, EpicId, ResumeResult, Task, TaskId, TaskStatus, slugify};
 use crate::process::ProcessRunner;
 use crate::tmux;
+
+/// Epic context passed to prompt builders so agents know about their epic.
+pub struct EpicContext {
+    pub epic_id: EpicId,
+    pub epic_title: String,
+    pub sibling_summaries: Vec<String>,
+}
+
+impl EpicContext {
+    /// Build epic context from the database for a task that belongs to an epic.
+    pub fn from_db(
+        task: &Task,
+        db: &dyn db::TaskStore,
+    ) -> Option<Self> {
+        let epic_id = task.epic_id?;
+        let epic = db.get_epic(epic_id).ok()??;
+        let siblings = db
+            .list_tasks_for_epic(epic_id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.id != task.id)
+            .map(|t| format!("[{}] {} ({})", t.id, t.title, t.status.as_str()))
+            .collect();
+        Some(EpicContext {
+            epic_id,
+            epic_title: epic.title,
+            sibling_summaries: siblings,
+        })
+    }
+
+    fn prompt_section(&self) -> String {
+        let mut section = format!(
+            "\n\nThis task is part of epic #{}: {}\n\
+            To find other tasks in this epic, call list_tasks with epic_id={}.",
+            self.epic_id, self.epic_title, self.epic_id
+        );
+        if !self.sibling_summaries.is_empty() {
+            section.push_str("\n\nSibling tasks:");
+            for s in &self.sibling_summaries {
+                section.push_str(&format!("\n- {s}"));
+            }
+        }
+        section
+    }
+}
 
 // ---------------------------------------------------------------------------
 // dispatch_agent
@@ -128,23 +174,45 @@ fn dispatch_with_prompt(
     })
 }
 
-pub fn dispatch_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
+pub fn dispatch_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+) -> Result<DispatchResult> {
+    let prompt = build_prompt(
+        task.id,
+        &task.title,
+        &task.description,
+        task.plan.as_deref(),
+        epic,
+    );
     dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
-pub fn brainstorm_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description);
+pub fn brainstorm_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+) -> Result<DispatchResult> {
+    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic);
     dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
-pub fn plan_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_plan_prompt(task.id, &task.title, &task.description);
+pub fn plan_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+) -> Result<DispatchResult> {
+    let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic);
     dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
-pub fn quick_dispatch_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description);
+pub fn quick_dispatch_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+) -> Result<DispatchResult> {
+    let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic);
     dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
@@ -154,20 +222,38 @@ pub fn epic_planning_agent(task: &Task, epic_id: EpicId, epic_title: &str, epic_
 }
 
 /// Dispatch a task from main (epic auto-dispatch).
-pub fn dispatch_chained_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_prompt(task.id, &task.title, &task.description, task.plan.as_deref());
+pub fn dispatch_chained_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+) -> Result<DispatchResult> {
+    let prompt = build_prompt(
+        task.id,
+        &task.title,
+        &task.description,
+        task.plan.as_deref(),
+        epic,
+    );
     dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
 }
 
 /// Plan a task from main (epic auto-dispatch).
-pub fn plan_chained_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_plan_prompt(task.id, &task.title, &task.description);
+pub fn plan_chained_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+) -> Result<DispatchResult> {
+    let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic);
     dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
 /// Brainstorm a task from main (epic auto-dispatch).
-pub fn brainstorm_chained_agent(task: &Task, runner: &dyn ProcessRunner) -> Result<DispatchResult> {
-    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description);
+pub fn brainstorm_chained_agent(
+    task: &Task,
+    runner: &dyn ProcessRunner,
+    epic: Option<&EpicContext>,
+) -> Result<DispatchResult> {
+    let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic);
     dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
@@ -408,7 +494,13 @@ fn build_tmux_window_name(task_id: TaskId) -> String {
     format!("task-{task_id}")
 }
 
-fn build_prompt(task_id: TaskId, title: &str, description: &str, plan: Option<&str>) -> String {
+fn build_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    plan: Option<&str>,
+    epic: Option<&EpicContext>,
+) -> String {
     let plan_section = match plan {
         Some(path) => format!(
             "\n\nPlan: {path}\nRead this file for the full implementation plan. Follow it step by step."
@@ -416,13 +508,16 @@ fn build_prompt(task_id: TaskId, title: &str, description: &str, plan: Option<&s
         None => String::new(),
     };
 
+    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+
     format!(
         "You are an autonomous coding agent. \
 Your task is:\n\
   ID: {task_id}\n\
   Title: {title}\n\
   Description: {description}\
-{plan_section}\n\
+{plan_section}\
+{epic_section}\n\
 \n\
 Task status transitions (running/review) are managed automatically via hooks. \
 Do not call update_task for status changes.\n\
@@ -435,14 +530,22 @@ changes and ask the user whether to rebase onto main or create a PR."
     )
 }
 
-fn build_quick_dispatch_prompt(task_id: TaskId, title: &str, description: &str) -> String {
+fn build_quick_dispatch_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+) -> String {
+    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+
     format!(
         "You are an autonomous coding agent working interactively with the user.\n\
 \n\
 Task:\n\
   ID: {task_id}\n\
   Title: {title}\n\
-  Description: {description}\n\
+  Description: {description}\
+{epic_section}\n\
 \n\
 This is a quick-dispatched task with a placeholder title. After you understand what \
 the user wants, call `update_task` with a descriptive `title` (and optionally \
@@ -455,14 +558,22 @@ Use update_task to rename this task with a descriptive title, and get_task to ch
     )
 }
 
-fn build_brainstorm_prompt(task_id: TaskId, title: &str, description: &str) -> String {
+fn build_brainstorm_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+) -> String {
+    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+
     format!(
         "You are an autonomous coding agent starting a brainstorming session.\n\
 \n\
 Task:\n\
   ID: {task_id}\n\
   Title: {title}\n\
-  Description: {description}\n\
+  Description: {description}\
+{epic_section}\n\
 \n\
 Before diving in, ask the user any clarifying questions needed to ensure you \
 fully understand the requirements and intended behaviour.\n\
@@ -479,14 +590,22 @@ Use the dispatch MCP tools to attach the plan (update_task — set the plan fiel
     )
 }
 
-fn build_plan_prompt(task_id: TaskId, title: &str, description: &str) -> String {
+fn build_plan_prompt(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    epic: Option<&EpicContext>,
+) -> String {
+    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+
     format!(
         "You are an autonomous coding agent starting a planning session.\n\
 \n\
 Task:\n\
   ID: {task_id}\n\
   Title: {title}\n\
-  Description: {description}\n\
+  Description: {description}\
+{epic_section}\n\
 \n\
 Your goal is to explore the codebase and write a focused implementation plan. \
 Use /plan mode for a structured planning session. When done, save the plan \
@@ -879,7 +998,7 @@ mod tests {
 
     #[test]
     fn build_prompt_contains_task_info() {
-        let prompt = build_prompt(TaskId(42), "Fix bug", "A nasty crash", None);
+        let prompt = build_prompt(TaskId(42), "Fix bug", "A nasty crash", None, None);
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Fix bug"));
         assert!(prompt.contains("A nasty crash"));
@@ -888,21 +1007,21 @@ mod tests {
 
     #[test]
     fn build_prompt_mentions_automatic_hooks() {
-        let prompt = build_prompt(TaskId(7), "Title", "Desc", None);
+        let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None);
         assert!(prompt.contains("automatically via hooks"));
         assert!(!prompt.contains("update the task status to 'review'"));
     }
 
     #[test]
     fn build_prompt_mentions_wrap_up_skill() {
-        let prompt = build_prompt(TaskId(7), "Title", "Desc", None);
+        let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None);
         assert!(prompt.contains("/wrap-up"), "prompt should tell agent to use /wrap-up skill");
         assert!(prompt.contains("rebase") || prompt.contains("PR"), "prompt should mention rebase/PR choice");
     }
 
     #[test]
     fn build_prompt_mentions_mcp_tools() {
-        let prompt = build_prompt(TaskId(1), "Task", "Desc", None);
+        let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
         assert!(prompt.contains("dispatch MCP tools"), "standard dispatch prompt should mention MCP tools");
     }
 
@@ -971,19 +1090,19 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_plan_path() {
-        let prompt = build_prompt(TaskId(1), "Task", "Desc", Some("docs/plans/my-plan.md"));
+        let prompt = build_prompt(TaskId(1), "Task", "Desc", Some("docs/plans/my-plan.md"), None);
         assert!(prompt.contains("Plan: docs/plans/my-plan.md"));
     }
 
     #[test]
     fn build_prompt_without_plan_omits_plan_section() {
-        let prompt = build_prompt(TaskId(1), "Task", "Desc", None);
+        let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
         assert!(!prompt.contains("Plan:"));
     }
 
     #[test]
     fn build_quick_dispatch_prompt_contains_rename_instruction() {
-        let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "");
+        let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", None);
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Quick task"));
         assert!(prompt.contains("update_task"));
@@ -993,7 +1112,7 @@ mod tests {
 
     #[test]
     fn build_quick_dispatch_prompt_mentions_mcp() {
-        let prompt = build_quick_dispatch_prompt(TaskId(1), "Quick task", "");
+        let prompt = build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None);
         assert!(prompt.contains("dispatch MCP tools"));
         assert!(prompt.contains("update_task"));
         assert!(!prompt.contains("add_note"));
@@ -1001,15 +1120,15 @@ mod tests {
 
     #[test]
     fn build_quick_dispatch_prompt_differs_from_regular() {
-        let regular = build_prompt(TaskId(1), "Task", "Desc", None);
-        let quick = build_quick_dispatch_prompt(TaskId(1), "Task", "Desc");
+        let regular = build_prompt(TaskId(1), "Task", "Desc", None, None);
+        let quick = build_quick_dispatch_prompt(TaskId(1), "Task", "Desc", None);
         assert!(quick.contains("placeholder"));
         assert!(!regular.contains("placeholder"));
     }
 
     #[test]
     fn rebase_preamble_prepended_to_all_prompts() {
-        let body = build_prompt(TaskId(1), "Task", "Desc", None);
+        let body = build_prompt(TaskId(1), "Task", "Desc", None, None);
         let full = format!("{}\n\n{body}", rebase_preamble("origin/main"));
         assert!(full.contains("rebase your branch from origin/main"));
         assert!(full.starts_with("Before starting work"));
@@ -1017,7 +1136,7 @@ mod tests {
 
     #[test]
     fn build_brainstorm_prompt_contains_task_info() {
-        let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework the auth flow");
+        let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework the auth flow", None);
         assert!(prompt.contains("7"));
         assert!(prompt.contains("Design auth"));
         assert!(prompt.contains("Rework the auth flow"));
@@ -1028,7 +1147,7 @@ mod tests {
 
     #[test]
     fn build_plan_prompt_contains_task_info() {
-        let prompt = build_plan_prompt(TaskId(8), "Add feature", "Small improvement");
+        let prompt = build_plan_prompt(TaskId(8), "Add feature", "Small improvement", None);
         assert!(prompt.contains("8"));
         assert!(prompt.contains("Add feature"));
         assert!(prompt.contains("Small improvement"));
@@ -1038,8 +1157,8 @@ mod tests {
 
     #[test]
     fn build_plan_prompt_differs_from_brainstorm() {
-        let plan = build_plan_prompt(TaskId(1), "T", "D");
-        let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D");
+        let plan = build_plan_prompt(TaskId(1), "T", "D", None);
+        let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None);
         assert_ne!(plan, brainstorm);
         assert!(plan.contains("planning"));
         assert!(brainstorm.contains("brainstorm"));
@@ -1067,7 +1186,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        dispatch_agent(&task, &mock).unwrap();
+        dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
@@ -1096,7 +1215,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        dispatch_agent(&task, &mock).unwrap();
+        dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         // The literal send-keys call (index 4) carries the claude invocation
@@ -1127,7 +1246,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        dispatch_agent(&task, &mock).unwrap();
+        dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
@@ -1154,7 +1273,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        plan_agent(&task, &mock).unwrap();
+        plan_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
@@ -1334,7 +1453,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        dispatch_agent(&task, &mock).unwrap();
+        dispatch_agent(&task, &mock, None).unwrap();
 
         // Verify the prompt uses the detected branch
         let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1354,7 +1473,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        let result = dispatch_agent(&task, &mock);
+        let result = dispatch_agent(&task, &mock, None);
         assert!(result.is_err());
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 2, "detect_default_branch and git worktree add should have been called");
@@ -1378,7 +1497,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        brainstorm_agent(&task, &mock).unwrap();
+        brainstorm_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
@@ -1403,7 +1522,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        brainstorm_agent(&task, &mock).unwrap();
+        brainstorm_agent(&task, &mock, None).unwrap();
 
         // Verify the prompt file was written with brainstorm content
         let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1430,7 +1549,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        quick_dispatch_agent(&task, &mock).unwrap();
+        quick_dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
         assert!(calls.iter().all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))), "git worktree add should be skipped for existing worktree");
@@ -1455,7 +1574,7 @@ mod tests {
         ]);
 
         let task = make_task(&repo_path);
-        quick_dispatch_agent(&task, &mock).unwrap();
+        quick_dispatch_agent(&task, &mock, None).unwrap();
 
         let prompt_file = worktree_dir.join(".claude-prompt");
         let prompt = std::fs::read_to_string(prompt_file).unwrap();

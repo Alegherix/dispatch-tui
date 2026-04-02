@@ -342,7 +342,7 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
             let id = task.id;
-            match dispatch::quick_dispatch_agent(&task, &*runner) {
+            match dispatch::quick_dispatch_agent(&task, &*runner, None) {
                 Ok(result) => {
                     let _ = tx.send(Message::Dispatched {
                         id,
@@ -421,15 +421,30 @@ impl TuiRuntime {
     }
 
     fn exec_dispatch(&self, task: models::Task) {
-        self.spawn_dispatch(task, dispatch::dispatch_agent, "Dispatch");
+        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        self.spawn_dispatch(
+            task,
+            move |t, r| dispatch::dispatch_agent(t, r, epic_ctx.as_ref()),
+            "Dispatch",
+        );
     }
 
     fn exec_brainstorm(&self, task: models::Task) {
-        self.spawn_dispatch(task, dispatch::brainstorm_agent, "Brainstorm");
+        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        self.spawn_dispatch(
+            task,
+            move |t, r| dispatch::brainstorm_agent(t, r, epic_ctx.as_ref()),
+            "Brainstorm",
+        );
     }
 
     fn exec_plan(&self, task: models::Task) {
-        self.spawn_dispatch(task, dispatch::plan_agent, "Plan");
+        let epic_ctx = dispatch::EpicContext::from_db(&task, &*self.database);
+        self.spawn_dispatch(
+            task,
+            move |t, r| dispatch::plan_agent(t, r, epic_ctx.as_ref()),
+            "Plan",
+        );
     }
 
     fn exec_capture_tmux(&self, id: TaskId, window: String) {

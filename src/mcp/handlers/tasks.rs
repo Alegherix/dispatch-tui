@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -36,6 +38,8 @@ pub(super) struct UpdateTaskArgs {
     pub(super) tag: Option<String>,
     #[serde(default)]
     pub(super) sub_status: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) epic_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -48,6 +52,8 @@ pub(super) struct GetTaskArgs {
 pub(super) struct ListTasksArgs {
     #[serde(default)]
     pub(super) status: Option<Value>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) epic_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -106,7 +112,17 @@ pub(super) struct SendMessageArgs {
 // Response formatting
 // ---------------------------------------------------------------------------
 
-fn format_task_detail(task: &Task) -> String {
+fn build_epic_titles(state: &McpState) -> HashMap<EpicId, String> {
+    state
+        .db
+        .list_epics()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.id, e.title))
+        .collect()
+}
+
+fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
     let mut text = format!(
         "Task {id}: {title}\nStatus: {status}\nRepo: {repo}\nDescription: {desc}",
         id = task.id,
@@ -116,8 +132,12 @@ fn format_task_detail(task: &Task) -> String {
         desc = task.description,
     );
     text.push_str(&format!("\nSub-status: {}", task.sub_status.as_str()));
-    if let Some(ref epic_id) = task.epic_id {
-        text.push_str(&format!("\nEpic: {epic_id}"));
+    if let Some(epic_id) = task.epic_id {
+        let epic_label = match epic_titles.get(&epic_id) {
+            Some(title) => format!("{title} (#{epic_id})"),
+            None => format!("#{epic_id}"),
+        };
+        text.push_str(&format!("\nEpic: {epic_label}"));
     }
     if let Some(ref tag) = task.tag {
         text.push_str(&format!("\nTag: {tag}"));
@@ -148,7 +168,7 @@ fn format_task_detail(task: &Task) -> String {
     text
 }
 
-fn format_task_line(t: &Task) -> String {
+fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>) -> String {
     let desc_preview = if t.description.len() > 200 {
         let end = t
             .description
@@ -167,7 +187,10 @@ fn format_task_line(t: &Task) -> String {
         None => String::new(),
     };
     let epic_indicator = match t.epic_id {
-        Some(eid) => format!(" (epic:{eid})"),
+        Some(eid) => match epic_titles.get(&eid) {
+            Some(title) => format!(" (epic:{eid} {title})"),
+            None => format!(" (epic:{eid})"),
+        },
         None => String::new(),
     };
     format!(
@@ -206,13 +229,14 @@ pub(super) fn handle_update_task(
         || parsed.sort_order.is_some()
         || parsed.pr_url.is_some()
         || parsed.tag.is_some()
-        || parsed.sub_status.is_some();
+        || parsed.sub_status.is_some()
+        || parsed.epic_id.is_some();
 
     if !has_update {
         return JsonRpcResponse::err(
             id,
             -32602,
-            "At least one of status, plan, title, description, repo_path, sort_order, pr_url, tag, or sub_status must be provided",
+            "At least one of status, plan, title, description, repo_path, sort_order, pr_url, tag, sub_status, or epic_id must be provided",
         );
     }
 
@@ -314,6 +338,27 @@ pub(super) fn handle_update_task(
         return JsonRpcResponse::err(id, -32603, format!("Database error: {e}"));
     }
 
+    // Update epic linkage if requested
+    if let Some(new_epic_id) = parsed.epic_id {
+        // Recalculate old epic before reassignment
+        if let Ok(Some(task)) = state.db.get_task(TaskId(parsed.task_id)) {
+            if let Some(old_epic_id) = task.epic_id {
+                let _ = state.db.recalculate_epic_status(old_epic_id);
+            }
+        }
+        if let Err(e) = state
+            .db
+            .set_task_epic_id(TaskId(parsed.task_id), Some(EpicId(new_epic_id)))
+        {
+            return JsonRpcResponse::err(
+                id,
+                -32603,
+                format!("Failed to link task to epic: {e}"),
+            );
+        }
+        let _ = state.db.recalculate_epic_status(EpicId(new_epic_id));
+    }
+
     // Recalculate parent epic status if subtask status changed
     if parsed.status.is_some() {
         if let Ok(Some(task)) = state.db.get_task(TaskId(parsed.task_id)) {
@@ -352,6 +397,9 @@ pub(super) fn handle_update_task(
     }
     if parsed.sub_status.is_some() {
         updated.push("sub_status".to_string());
+    }
+    if parsed.epic_id.is_some() {
+        updated.push("epic_id".to_string());
     }
 
     JsonRpcResponse::ok(
@@ -434,7 +482,8 @@ pub(super) fn handle_get_task(state: &McpState, id: Option<Value>, args: Value) 
     tracing::info!(task_id = parsed.task_id, "MCP get_task");
     match state.db.get_task(TaskId(parsed.task_id)) {
         Ok(Some(task)) => {
-            let text = format_task_detail(&task);
+            let epic_titles = build_epic_titles(state);
+            let text = format_task_detail(&task, &epic_titles);
             JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
         Ok(None) => JsonRpcResponse::err(id, -32602, format!("Task {} not found", parsed.task_id)),
@@ -491,13 +540,19 @@ pub(super) fn handle_list_tasks(
         Err(e) => return JsonRpcResponse::err(id, -32603, format!("Database error: {e}")),
     };
 
-    let filtered: Vec<_> = match &status_filter {
-        Some(statuses) => tasks
-            .into_iter()
-            .filter(|t| statuses.contains(&t.status))
-            .collect(),
-        None => tasks,
-    };
+    let epic_filter = parsed.epic_id.map(EpicId);
+
+    let filtered: Vec<_> = tasks
+        .into_iter()
+        .filter(|t| match &status_filter {
+            Some(statuses) => statuses.contains(&t.status),
+            None => true,
+        })
+        .filter(|t| match epic_filter {
+            Some(eid) => t.epic_id == Some(eid),
+            None => true,
+        })
+        .collect();
 
     if filtered.is_empty() {
         return JsonRpcResponse::ok(
@@ -506,7 +561,11 @@ pub(super) fn handle_list_tasks(
         );
     }
 
-    let lines: Vec<String> = filtered.iter().map(format_task_line).collect();
+    let epic_titles = build_epic_titles(state);
+    let lines: Vec<String> = filtered
+        .iter()
+        .map(|t| format_task_line(t, &epic_titles))
+        .collect();
 
     let text = lines.join("\n");
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
@@ -909,10 +968,17 @@ fn auto_dispatch_next(
         "auto-dispatching next epic subtask"
     );
 
+    let epic_ctx = dispatch::EpicContext::from_db(&next_task, db);
     let result = match DispatchMode::for_task(&next_task) {
-        DispatchMode::Dispatch => dispatch::dispatch_chained_agent(&next_task, runner),
-        DispatchMode::Brainstorm => dispatch::brainstorm_chained_agent(&next_task, runner),
-        DispatchMode::Plan => dispatch::plan_chained_agent(&next_task, runner),
+        DispatchMode::Dispatch => {
+            dispatch::dispatch_chained_agent(&next_task, runner, epic_ctx.as_ref())
+        }
+        DispatchMode::Brainstorm => {
+            dispatch::brainstorm_chained_agent(&next_task, runner, epic_ctx.as_ref())
+        }
+        DispatchMode::Plan => {
+            dispatch::plan_chained_agent(&next_task, runner, epic_ctx.as_ref())
+        }
     };
 
     match result {

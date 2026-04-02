@@ -508,6 +508,7 @@ fn build_prompt(
         None => String::new(),
     };
 
+    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
     let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
 
     format!(
@@ -516,6 +517,7 @@ Your task is:\n\
   ID: {task_id}\n\
   Title: {title}\n\
   Description: {description}\
+{epic_id_line}\
 {plan_section}\
 {epic_section}\n\
 \n\
@@ -536,6 +538,7 @@ fn build_quick_dispatch_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
+    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
     let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
 
     format!(
@@ -545,6 +548,7 @@ Task:\n\
   ID: {task_id}\n\
   Title: {title}\n\
   Description: {description}\
+{epic_id_line}\
 {epic_section}\n\
 \n\
 This is a quick-dispatched task with a placeholder title. After you understand what \
@@ -564,6 +568,7 @@ fn build_brainstorm_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
+    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
     let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
 
     format!(
@@ -573,6 +578,7 @@ Task:\n\
   ID: {task_id}\n\
   Title: {title}\n\
   Description: {description}\
+{epic_id_line}\
 {epic_section}\n\
 \n\
 Before diving in, ask the user any clarifying questions needed to ensure you \
@@ -596,6 +602,7 @@ fn build_plan_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
+    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
     let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
 
     format!(
@@ -605,6 +612,7 @@ Task:\n\
   ID: {task_id}\n\
   Title: {title}\n\
   Description: {description}\
+{epic_id_line}\
 {epic_section}\n\
 \n\
 Your goal is to explore the codebase and write a focused implementation plan. \

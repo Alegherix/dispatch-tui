@@ -1589,13 +1589,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_review_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
-    // Collect distinct repos sorted alphabetically
-    let repos: Vec<String> = app.active_review_prs().iter()
-        .map(|pr| pr.repo.clone())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
-
+    let repos = app.active_review_repos();
     let repo_count = repos.len();
     let popup_height = (repo_count as u16 + 5).clamp(7, area.height.saturating_sub(4));
     let popup_width = (area.width * 70 / 100).clamp(30, 60);

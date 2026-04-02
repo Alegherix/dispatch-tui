@@ -620,13 +620,9 @@ impl App {
             KeyCode::Char('a') => self.update(Message::ToggleAllReviewRepoFilter),
             KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
                 let idx = (c as usize) - ('1' as usize);
-                let repos: Vec<String> = self.review.prs.iter()
-                    .map(|pr| pr.repo.clone())
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .into_iter()
-                    .collect();
-                if let Some(repo) = repos.get(idx) {
-                    self.update(Message::ToggleReviewRepoFilter(repo.clone()))
+                if let Some(repo) = self.active_review_repos().get(idx) {
+                    let repo = repo.clone();
+                    self.update(Message::ToggleReviewRepoFilter(repo))
                 } else {
                     vec![]
                 }

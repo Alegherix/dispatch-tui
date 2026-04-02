@@ -196,7 +196,7 @@ impl App {
     }
 
     pub fn set_review_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
-        self.review.prs = prs;
+        self.review.set_prs(prs);
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
@@ -2152,7 +2152,7 @@ impl App {
 
     fn handle_review_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
         let cmds = vec![Command::PersistReviewPrs(prs.clone())];
-        self.review.prs = prs;
+        self.review.set_prs(prs);
         self.review.loading = false;
         self.review.last_fetch = Some(Instant::now());
         self.review.last_error = None;
@@ -2189,7 +2189,7 @@ impl App {
 
     fn handle_my_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
         let cmds = vec![Command::PersistMyPrs(prs.clone())];
-        self.review.my_prs = prs;
+        self.review.set_my_prs(prs);
         self.review.my_prs_loading = false;
         self.review.last_my_prs_fetch = Some(Instant::now());
         self.clamp_review_selection();
@@ -2229,6 +2229,14 @@ impl App {
         match &self.view_mode {
             ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => self.filtered_my_prs(),
             _ => self.filtered_review_prs(),
+        }
+    }
+
+    /// Sorted distinct repos for the currently active review board mode.
+    pub fn active_review_repos(&self) -> &[String] {
+        match &self.view_mode {
+            ViewMode::ReviewBoard { mode: ReviewBoardMode::Author, .. } => &self.review.my_prs_repos,
+            _ => &self.review.repos,
         }
     }
 
@@ -2675,13 +2683,11 @@ impl App {
     }
 
     fn handle_toggle_all_review_repo_filter(&mut self) -> Vec<Command> {
-        let all_repos: HashSet<String> = self.review.prs.iter()
-            .map(|pr| pr.repo.clone())
-            .collect();
+        let all_repos = self.active_review_repos();
         if self.review.repo_filter.len() == all_repos.len() {
             self.review.repo_filter.clear();
         } else {
-            self.review.repo_filter = all_repos;
+            self.review.repo_filter = all_repos.iter().cloned().collect();
         }
         self.clamp_review_selection();
         vec![]

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use ratatui::widgets::ListState;
@@ -388,6 +388,7 @@ pub struct ArchiveState {
 #[derive(Debug, Default)]
 pub struct ReviewBoardState {
     pub prs: Vec<crate::models::ReviewPr>,
+    pub repos: Vec<String>,
     pub loading: bool,
     pub last_fetch: Option<Instant>,
     pub last_error: Option<String>,
@@ -395,6 +396,7 @@ pub struct ReviewBoardState {
     pub repo_filter: HashSet<String>,
     pub repo_filter_mode: RepoFilterMode,
     pub my_prs: Vec<crate::models::ReviewPr>,
+    pub my_prs_repos: Vec<String>,
     pub my_prs_loading: bool,
     pub last_my_prs_fetch: Option<Instant>,
     pub my_prs_repo_filter: HashSet<String>,
@@ -402,6 +404,18 @@ pub struct ReviewBoardState {
 }
 
 impl ReviewBoardState {
+    /// Set review PRs and rebuild the cached distinct repos list.
+    pub fn set_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
+        self.repos = distinct_repos(&prs);
+        self.prs = prs;
+    }
+
+    /// Set author PRs and rebuild the cached distinct repos list.
+    pub fn set_my_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
+        self.my_prs_repos = distinct_repos(&prs);
+        self.my_prs = prs;
+    }
+
     /// Return review PRs filtered by repo filter. Empty filter means all PRs.
     pub fn filtered_prs(&self) -> Vec<&crate::models::ReviewPr> {
         self.prs
@@ -451,6 +465,15 @@ impl ReviewBoardState {
             .map(|t| t.elapsed() > interval)
             .unwrap_or(true)
     }
+}
+
+/// Compute a sorted, deduplicated list of repo names from a slice of review PRs.
+fn distinct_repos(prs: &[crate::models::ReviewPr]) -> Vec<String> {
+    prs.iter()
+        .map(|pr| pr.repo.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

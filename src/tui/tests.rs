@@ -1711,11 +1711,11 @@ fn toggle_repo_filter_adds_and_removes() {
     app.input.mode = InputMode::RepoFilter;
 
     app.update(Message::ToggleRepoFilter("/repo-a".to_string()));
-    assert!(app.repo_filter.contains("/repo-a"));
-    assert!(!app.repo_filter.contains("/repo-b"));
+    assert!(app.filter.repos.contains("/repo-a"));
+    assert!(!app.filter.repos.contains("/repo-b"));
 
     app.update(Message::ToggleRepoFilter("/repo-a".to_string()));
-    assert!(!app.repo_filter.contains("/repo-a"));
+    assert!(!app.filter.repos.contains("/repo-a"));
 }
 
 #[test]
@@ -1726,11 +1726,11 @@ fn toggle_all_repo_filter_selects_all_then_clears() {
 
     // Toggle all on
     app.update(Message::ToggleAllRepoFilter);
-    assert_eq!(app.repo_filter.len(), 2);
+    assert_eq!(app.filter.repos.len(), 2);
 
     // Toggle all off
     app.update(Message::ToggleAllRepoFilter);
-    assert!(app.repo_filter.is_empty());
+    assert!(app.filter.repos.is_empty());
 }
 
 #[test]
@@ -2010,11 +2010,11 @@ fn space_toggles_task_selection() {
     let mut app = make_app();
     // Select task 1 in Backlog
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.selected_tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(1)));
 
     // Toggle off
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(!app.selected_tasks.contains(&TaskId(1)));
+    assert!(!app.select.tasks.contains(&TaskId(1)));
 }
 
 #[test]
@@ -2023,7 +2023,7 @@ fn space_on_empty_column_is_noop() {
     // Navigate to Review column (empty)
     app.update(Message::NavigateColumn(2));
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
@@ -2031,10 +2031,10 @@ fn esc_clears_selection() {
     let mut app = make_app();
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
-    assert_eq!(app.selected_tasks.len(), 2);
+    assert_eq!(app.select.tasks.len(), 2);
 
     app.handle_key(make_key(KeyCode::Esc));
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
@@ -2071,7 +2071,7 @@ fn batch_move_clears_selection() {
 
     app.handle_key(make_key(KeyCode::Char('m')));
 
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
@@ -2128,7 +2128,7 @@ fn batch_archive_archives_all_and_clears_selection() {
     assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Archived);
     assert_eq!(app.find_task(TaskId(3)).unwrap().status, TaskStatus::Backlog);
     // Selection should be cleared after archive
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
     // Should have PersistTask commands
     let persist_count = cmds.iter().filter(|c| matches!(c, Command::PersistTask(_))).count();
     assert_eq!(persist_count, 2);
@@ -2160,13 +2160,13 @@ fn confirm_archive_with_selection_dispatches_batch() {
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Archived);
     assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Archived);
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
 fn single_task_operations_work_without_selection() {
     let mut app = make_app();
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 
     // Single move should still work
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
@@ -2183,8 +2183,8 @@ fn refresh_tasks_prunes_stale_selections() {
     // Refresh with only task 1
     app.update(Message::RefreshTasks(vec![make_task(1, TaskStatus::Backlog)]));
 
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(!app.selected_tasks.contains(&TaskId(99)));
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(!app.select.tasks.contains(&TaskId(99)));
 }
 
 // ---------------------------------------------------------------------------
@@ -4348,31 +4348,31 @@ fn select_all_column_selects_all_tasks_in_column() {
     let mut app = make_app();
     // Cursor is on Backlog (column 0) which has tasks 1, 2
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(app.selected_tasks.contains(&TaskId(2)));
-    assert_eq!(app.selected_tasks.len(), 2);
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+    assert_eq!(app.select.tasks.len(), 2);
 }
 
 #[test]
 fn select_all_column_deselects_when_all_selected() {
     let mut app = make_app();
     app.update(Message::SelectAllColumn);
-    assert_eq!(app.selected_tasks.len(), 2);
+    assert_eq!(app.select.tasks.len(), 2);
 
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
 fn select_all_column_selects_remaining_when_partially_selected() {
     let mut app = make_app();
     app.update(Message::ToggleSelect(TaskId(1)));
-    assert_eq!(app.selected_tasks.len(), 1);
+    assert_eq!(app.select.tasks.len(), 1);
 
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(app.selected_tasks.contains(&TaskId(2)));
-    assert_eq!(app.selected_tasks.len(), 2);
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+    assert_eq!(app.select.tasks.len(), 2);
 }
 
 #[test]
@@ -4381,7 +4381,7 @@ fn select_all_column_noop_on_empty_column() {
     // Navigate to Review column (empty in make_app)
     app.update(Message::NavigateColumn(2));
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
@@ -4391,10 +4391,10 @@ fn select_all_column_only_affects_current_column() {
     app.update(Message::ToggleSelect(TaskId(3)));
     // SelectAllColumn selects all in current (Backlog) column
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(app.selected_tasks.contains(&TaskId(2)));
-    assert!(app.selected_tasks.contains(&TaskId(3)));
-    assert_eq!(app.selected_tasks.len(), 3);
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
+    assert!(app.select.tasks.contains(&TaskId(3)));
+    assert_eq!(app.select.tasks.len(), 3);
 }
 
 #[test]
@@ -4402,28 +4402,28 @@ fn select_all_deselect_only_affects_current_column() {
     let mut app = make_app();
     app.update(Message::ToggleSelect(TaskId(3)));
     app.update(Message::SelectAllColumn);
-    assert_eq!(app.selected_tasks.len(), 3);
+    assert_eq!(app.select.tasks.len(), 3);
 
     app.update(Message::SelectAllColumn);
-    assert_eq!(app.selected_tasks.len(), 1);
-    assert!(app.selected_tasks.contains(&TaskId(3)));
+    assert_eq!(app.select.tasks.len(), 1);
+    assert!(app.select.tasks.contains(&TaskId(3)));
 }
 
 #[test]
 fn key_a_selects_all_in_column() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(app.selected_tasks.contains(&TaskId(2)));
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
 }
 
 #[test]
 fn key_a_toggles_off_when_all_selected() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('a')));
-    assert_eq!(app.selected_tasks.len(), 2);
+    assert_eq!(app.select.tasks.len(), 2);
     app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
@@ -4458,8 +4458,8 @@ fn enter_on_toggle_triggers_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(app.selected_tasks.contains(&TaskId(2)));
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.tasks.contains(&TaskId(2)));
 }
 
 #[test]
@@ -4469,7 +4469,7 @@ fn esc_clears_selection_and_exits_toggle() {
     app.handle_key(make_key(KeyCode::Char('k')));
     assert!(app.on_select_all());
     app.handle_key(make_key(KeyCode::Esc));
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
     assert!(!app.on_select_all());
 }
 
@@ -4478,7 +4478,7 @@ fn space_is_noop_when_on_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
@@ -4937,7 +4937,7 @@ fn repo_filter_hides_non_matching_tasks() {
     let mut t2 = make_task(2, TaskStatus::Backlog);
     t2.repo_path = "/repo-b".to_string();
     app.tasks = vec![t1, t2];
-    app.repo_filter.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-a".to_string());
 
     let visible = app.tasks_for_current_view();
     assert_eq!(visible.len(), 1);
@@ -4958,7 +4958,7 @@ fn repo_filter_applies_to_epics_in_column_items() {
             repo_path: "/repo-b".into(), status: TaskStatus::Backlog, plan: None, sort_order: None, created_at: now, updated_at: now,
         },
     ];
-    app.repo_filter.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-a".to_string());
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(items.len(), 1); // only epic A
@@ -4972,7 +4972,7 @@ fn repo_filter_applies_to_archived_tasks() {
     let mut t2 = make_task(2, TaskStatus::Archived);
     t2.repo_path = "/repo-b".to_string();
     app.tasks = vec![t1, t2];
-    app.repo_filter.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-a".to_string());
 
     let archived = app.archived_tasks();
     assert_eq!(archived.len(), 1);
@@ -4996,10 +4996,10 @@ fn repo_filter_number_key_toggles_repo() {
     app.input.mode = InputMode::RepoFilter;
 
     app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(app.repo_filter.contains("/repo-a"));
+    assert!(app.filter.repos.contains("/repo-a"));
 
     app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(!app.repo_filter.contains("/repo-a"));
+    assert!(!app.filter.repos.contains("/repo-a"));
 }
 
 #[test]
@@ -5009,7 +5009,7 @@ fn repo_filter_a_key_toggles_all() {
     app.input.mode = InputMode::RepoFilter;
 
     app.handle_key(make_key(KeyCode::Char('a')));
-    assert_eq!(app.repo_filter.len(), 2);
+    assert_eq!(app.filter.repos.len(), 2);
 }
 
 #[test]
@@ -5036,15 +5036,15 @@ fn repo_filter_out_of_range_number_ignored() {
     app.input.mode = InputMode::RepoFilter;
 
     app.handle_key(make_key(KeyCode::Char('5')));
-    assert!(app.repo_filter.is_empty());
+    assert!(app.filter.repos.is_empty());
 }
 
 #[test]
 fn summary_row_shows_filter_indicator() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
-    app.repo_filter.insert("/a".to_string());
-    app.repo_filter.insert("/b".to_string());
+    app.filter.repos.insert("/a".to_string());
+    app.filter.repos.insert("/b".to_string());
 
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "2/3 repos"), "Expected filter indicator in summary");
@@ -5060,8 +5060,8 @@ fn repo_filter_exclude_hides_matching_tasks() {
     let mut t2 = make_task(2, TaskStatus::Backlog);
     t2.repo_path = "/repo-b".to_string();
     app.tasks = vec![t1, t2];
-    app.repo_filter.insert("/repo-a".to_string());
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.repos.insert("/repo-a".to_string());
+    app.filter.mode = RepoFilterMode::Exclude;
 
     let visible = app.tasks_for_current_view();
     assert_eq!(visible.len(), 1);
@@ -5076,7 +5076,7 @@ fn repo_filter_exclude_empty_shows_all() {
     let mut t2 = make_task(2, TaskStatus::Backlog);
     t2.repo_path = "/repo-b".to_string();
     app.tasks = vec![t1, t2];
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.mode = RepoFilterMode::Exclude;
 
     let visible = app.tasks_for_current_view();
     assert_eq!(visible.len(), 2);
@@ -5096,8 +5096,8 @@ fn repo_filter_exclude_applies_to_epics() {
             repo_path: "/repo-b".into(), status: TaskStatus::Backlog, plan: None, sort_order: None, created_at: now, updated_at: now,
         },
     ];
-    app.repo_filter.insert("/repo-a".to_string());
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.repos.insert("/repo-a".to_string());
+    app.filter.mode = RepoFilterMode::Exclude;
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(items.len(), 1);
@@ -5115,8 +5115,8 @@ fn repo_filter_exclude_applies_to_archived() {
     let mut t2 = make_task(2, TaskStatus::Archived);
     t2.repo_path = "/repo-b".to_string();
     app.tasks = vec![t1, t2];
-    app.repo_filter.insert("/repo-a".to_string());
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.repos.insert("/repo-a".to_string());
+    app.filter.mode = RepoFilterMode::Exclude;
 
     let archived = app.archived_tasks();
     assert_eq!(archived.len(), 1);
@@ -5126,11 +5126,11 @@ fn repo_filter_exclude_applies_to_archived() {
 #[test]
 fn toggle_repo_filter_mode_switches() {
     let mut app = make_app();
-    assert_eq!(app.repo_filter_mode, RepoFilterMode::Include);
+    assert_eq!(app.filter.mode, RepoFilterMode::Include);
     app.update(Message::ToggleRepoFilterMode);
-    assert_eq!(app.repo_filter_mode, RepoFilterMode::Exclude);
+    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
     app.update(Message::ToggleRepoFilterMode);
-    assert_eq!(app.repo_filter_mode, RepoFilterMode::Include);
+    assert_eq!(app.filter.mode, RepoFilterMode::Include);
 }
 
 #[test]
@@ -5139,13 +5139,13 @@ fn tab_key_toggles_repo_filter_mode() {
     app.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::RepoFilter;
     app.handle_key(make_key(KeyCode::Tab));
-    assert_eq!(app.repo_filter_mode, RepoFilterMode::Exclude);
+    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
 }
 
 #[test]
 fn close_repo_filter_persists_mode() {
     let mut app = make_app();
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::RepoFilter;
     let cmds = app.update(Message::CloseRepoFilter);
     assert!(cmds.iter().any(|c| matches!(c,
@@ -5157,12 +5157,12 @@ fn close_repo_filter_persists_mode() {
 fn save_filter_preset_stores_mode() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo-a".to_string()];
-    app.repo_filter.insert("/repo-a".to_string());
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.repos.insert("/repo-a".to_string());
+    app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::InputPresetName;
 
     let cmds = app.update(Message::SaveFilterPreset("excl-preset".to_string()));
-    assert_eq!(app.filter_presets[0].2, RepoFilterMode::Exclude);
+    assert_eq!(app.filter.presets[0].2, RepoFilterMode::Exclude);
     assert!(cmds.iter().any(|c| matches!(c,
         Command::PersistFilterPreset { mode: RepoFilterMode::Exclude, .. }
     )));
@@ -5173,19 +5173,19 @@ fn load_filter_preset_restores_mode() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo-a".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.filter_presets = vec![("excl".to_string(), repos, RepoFilterMode::Exclude)];
+    app.filter.presets = vec![("excl".to_string(), repos, RepoFilterMode::Exclude)];
 
     app.update(Message::LoadFilterPreset("excl".to_string()));
-    assert_eq!(app.repo_filter_mode, RepoFilterMode::Exclude);
-    assert!(app.repo_filter.contains("/repo-a"));
+    assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
+    assert!(app.filter.repos.contains("/repo-a"));
 }
 
 #[test]
 fn summary_row_shows_excl_prefix_in_exclude_mode() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
-    app.repo_filter.insert("/a".to_string());
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.repos.insert("/a".to_string());
+    app.filter.mode = RepoFilterMode::Exclude;
 
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(buffer_contains(&buf, "excl 1/3 repos"), "Expected excl prefix in filter indicator");
@@ -5195,7 +5195,7 @@ fn summary_row_shows_excl_prefix_in_exclude_mode() {
 fn repo_filter_overlay_shows_mode_in_title() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo-a".to_string()];
-    app.repo_filter_mode = RepoFilterMode::Exclude;
+    app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::RepoFilter;
 
     let buf = render_to_buffer(&mut app, 80, 25);
@@ -5804,21 +5804,21 @@ fn handle_refresh_usage_stores_by_task_id() {
 fn load_filter_preset_replaces_repo_filter() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.repo_filter.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-a".to_string());
 
     let preset_repos: HashSet<String> = ["/repo-b".to_string()].into_iter().collect();
-    app.filter_presets = vec![("backend".to_string(), preset_repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("backend".to_string(), preset_repos, RepoFilterMode::Include)];
 
     app.update(Message::LoadFilterPreset("backend".to_string()));
-    assert!(app.repo_filter.contains("/repo-b"));
-    assert!(!app.repo_filter.contains("/repo-a"));
+    assert!(app.filter.repos.contains("/repo-b"));
+    assert!(!app.filter.repos.contains("/repo-a"));
 }
 
 #[test]
 fn save_filter_preset_stores_and_persists() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.repo_filter.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-a".to_string());
     app.input.mode = InputMode::RepoFilter;
 
     app.update(Message::StartSavePreset);
@@ -5826,9 +5826,9 @@ fn save_filter_preset_stores_and_persists() {
 
     let cmds = app.update(Message::SaveFilterPreset("frontend".to_string()));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
-    assert_eq!(app.filter_presets.len(), 1);
-    assert_eq!(app.filter_presets[0].0, "frontend");
-    assert!(app.filter_presets[0].1.contains("/repo-a"));
+    assert_eq!(app.filter.presets.len(), 1);
+    assert_eq!(app.filter.presets[0].0, "frontend");
+    assert!(app.filter.presets[0].1.contains("/repo-a"));
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistFilterPreset { .. })));
 }
 
@@ -5838,7 +5838,7 @@ fn save_filter_preset_empty_name_cancels() {
     app.input.mode = InputMode::InputPresetName;
     app.update(Message::SaveFilterPreset("  ".to_string()));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
-    assert!(app.filter_presets.is_empty());
+    assert!(app.filter.presets.is_empty());
 }
 
 #[test]
@@ -5846,23 +5846,23 @@ fn save_filter_preset_overwrites_existing() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     let old: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.filter_presets = vec![("frontend".to_string(), old, RepoFilterMode::Include)];
+    app.filter.presets = vec![("frontend".to_string(), old, RepoFilterMode::Include)];
 
-    app.repo_filter.insert("/repo-b".to_string());
+    app.filter.repos.insert("/repo-b".to_string());
     app.update(Message::SaveFilterPreset("frontend".to_string()));
-    assert_eq!(app.filter_presets.len(), 1);
-    assert!(app.filter_presets[0].1.contains("/repo-b"));
+    assert_eq!(app.filter.presets.len(), 1);
+    assert!(app.filter.presets[0].1.contains("/repo-b"));
 }
 
 #[test]
 fn delete_filter_preset_removes_and_returns_command() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.filter_presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
 
     let cmds = app.update(Message::DeleteFilterPreset("frontend".to_string()));
-    assert!(app.filter_presets.is_empty());
+    assert!(app.filter.presets.is_empty());
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(cmds.iter().any(|c| matches!(c, Command::DeleteFilterPreset(_))));
 }
@@ -5882,16 +5882,16 @@ fn filter_presets_loaded_sets_state() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.update(Message::FilterPresetsLoaded(vec![("frontend".to_string(), repos.clone(), RepoFilterMode::Include)]));
-    assert_eq!(app.filter_presets.len(), 1);
-    assert_eq!(app.filter_presets[0].0, "frontend");
+    assert_eq!(app.filter.presets.len(), 1);
+    assert_eq!(app.filter.presets[0].0, "frontend");
 }
 
 #[test]
 fn load_filter_preset_unknown_name_is_noop() {
     let mut app = make_app();
-    app.repo_filter.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-a".to_string());
     app.update(Message::LoadFilterPreset("nonexistent".to_string()));
-    assert!(app.repo_filter.contains("/repo-a"));
+    assert!(app.filter.repos.contains("/repo-a"));
 }
 
 #[test]
@@ -5900,11 +5900,11 @@ fn load_filter_preset_skips_stale_paths() {
     app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     // Preset contains a path that no longer exists in repo_paths
     let preset_repos: HashSet<String> = ["/repo-a".to_string(), "/gone".to_string()].into_iter().collect();
-    app.filter_presets = vec![("stale".to_string(), preset_repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("stale".to_string(), preset_repos, RepoFilterMode::Include)];
 
     app.update(Message::LoadFilterPreset("stale".to_string()));
-    assert!(app.repo_filter.contains("/repo-a"));
-    assert!(!app.repo_filter.contains("/gone"), "Stale path should be excluded");
+    assert!(app.filter.repos.contains("/repo-a"));
+    assert!(!app.filter.repos.contains("/gone"), "Stale path should be excluded");
 }
 
 #[test]
@@ -5928,7 +5928,7 @@ fn repo_filter_s_key_starts_save_preset() {
 fn repo_filter_x_key_starts_delete_preset() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo".to_string()].into_iter().collect();
-    app.filter_presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::RepoFilter;
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_eq!(app.input.mode, InputMode::ConfirmDeletePreset);
@@ -5939,23 +5939,23 @@ fn repo_filter_shift_a_loads_first_preset() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     let repos: HashSet<String> = ["/repo-b".to_string()].into_iter().collect();
-    app.filter_presets = vec![("backend".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("backend".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::RepoFilter;
     app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
-    assert!(app.repo_filter.contains("/repo-b"));
-    assert!(!app.repo_filter.contains("/repo-a"));
+    assert!(app.filter.repos.contains("/repo-b"));
+    assert!(!app.filter.repos.contains("/repo-a"));
 }
 
 #[test]
 fn input_preset_name_enter_saves() {
     let mut app = make_app();
     app.repo_paths = vec!["/repo-a".to_string()];
-    app.repo_filter.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-a".to_string());
     app.input.mode = InputMode::InputPresetName;
     app.input.buffer = "mypreset".to_string();
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
-    assert_eq!(app.filter_presets.len(), 1);
+    assert_eq!(app.filter.presets.len(), 1);
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistFilterPreset { .. })));
 }
 
@@ -5983,10 +5983,10 @@ fn input_preset_name_typing_works() {
 fn confirm_delete_preset_letter_deletes() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo".to_string()].into_iter().collect();
-    app.filter_presets = vec![("alpha".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("alpha".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
-    assert!(app.filter_presets.is_empty());
+    assert!(app.filter.presets.is_empty());
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(cmds.iter().any(|c| matches!(c, Command::DeleteFilterPreset(_))));
 }
@@ -5995,22 +5995,22 @@ fn confirm_delete_preset_letter_deletes() {
 fn confirm_delete_preset_esc_cancels() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo".to_string()].into_iter().collect();
-    app.filter_presets = vec![("alpha".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("alpha".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
-    assert_eq!(app.filter_presets.len(), 1);
+    assert_eq!(app.filter.presets.len(), 1);
 }
 
 #[test]
 fn confirm_delete_preset_out_of_range_ignored() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo".to_string()].into_iter().collect();
-    app.filter_presets = vec![("alpha".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("alpha".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
     app.handle_key(KeyEvent::new(KeyCode::Char('B'), KeyModifiers::SHIFT));
     assert_eq!(app.input.mode, InputMode::ConfirmDeletePreset);
-    assert_eq!(app.filter_presets.len(), 1);
+    assert_eq!(app.filter.presets.len(), 1);
 }
 
 // --- Overlay rendering tests ---
@@ -6020,7 +6020,7 @@ fn repo_filter_overlay_shows_presets() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.filter_presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::RepoFilter;
 
     let buf = render_to_buffer(&mut app, 80, 25);
@@ -6045,7 +6045,7 @@ fn repo_filter_overlay_shows_delete_help() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.repo_paths = vec!["/repo-a".to_string()];
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.filter_presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
+    app.filter.presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
 
     let buf = render_to_buffer(&mut app, 80, 25);
@@ -6878,7 +6878,7 @@ fn handle_key_repo_filter_toggle() {
     app.input.mode = InputMode::RepoFilter;
 
     app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(app.repo_filter.contains("/repo"));
+    assert!(app.filter.repos.contains("/repo"));
 }
 
 #[test]
@@ -7051,7 +7051,7 @@ fn handle_key_input_preset_name_esc_cancels() {
 #[test]
 fn handle_key_confirm_delete_preset_selects() {
     let mut app = make_app();
-    app.filter_presets = vec![("preset-a".to_string(), std::collections::HashSet::new(), RepoFilterMode::Include)];
+    app.filter.presets = vec![("preset-a".to_string(), std::collections::HashSet::new(), RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
 
     let cmds = app.handle_key(make_key(KeyCode::Char('A')));
@@ -7079,7 +7079,7 @@ fn space_toggles_epic_selection() {
     app.selection_mut().set_row(0, 0);
 
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.selected_epics.contains(&EpicId(10)));
+    assert!(app.select.epics.contains(&EpicId(10)));
 }
 
 #[test]
@@ -7091,11 +7091,11 @@ fn space_on_epic_toggle_off() {
 
     // Select
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.selected_epics.contains(&EpicId(10)));
+    assert!(app.select.epics.contains(&EpicId(10)));
 
     // Deselect
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(!app.selected_epics.contains(&EpicId(10)));
+    assert!(!app.select.epics.contains(&EpicId(10)));
 }
 
 #[test]
@@ -7104,8 +7104,8 @@ fn space_on_empty_column_no_epics_is_noop() {
     // Navigate to Review column (empty)
     app.update(Message::NavigateColumn(2));
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.selected_epics.is_empty());
-    assert!(app.selected_tasks.is_empty());
+    assert!(app.select.epics.is_empty());
+    assert!(app.select.tasks.is_empty());
 }
 
 #[test]
@@ -7116,8 +7116,8 @@ fn select_all_column_includes_epics() {
     app.epics = vec![make_epic(10)];
 
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.contains(&TaskId(1)));
-    assert!(app.selected_epics.contains(&EpicId(10)));
+    assert!(app.select.tasks.contains(&TaskId(1)));
+    assert!(app.select.epics.contains(&EpicId(10)));
 }
 
 #[test]
@@ -7129,13 +7129,13 @@ fn select_all_deselects_all_including_epics() {
 
     // Select all
     app.update(Message::SelectAllColumn);
-    assert_eq!(app.selected_tasks.len(), 1);
-    assert_eq!(app.selected_epics.len(), 1);
+    assert_eq!(app.select.tasks.len(), 1);
+    assert_eq!(app.select.epics.len(), 1);
 
     // Deselect all
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.is_empty());
-    assert!(app.selected_epics.is_empty());
+    assert!(app.select.tasks.is_empty());
+    assert!(app.select.epics.is_empty());
 }
 
 #[test]
@@ -7144,10 +7144,10 @@ fn select_all_column_with_only_epics() {
     app.epics = vec![make_epic(10), make_epic(20)];
 
     app.update(Message::SelectAllColumn);
-    assert!(app.selected_tasks.is_empty());
-    assert_eq!(app.selected_epics.len(), 2);
-    assert!(app.selected_epics.contains(&EpicId(10)));
-    assert!(app.selected_epics.contains(&EpicId(20)));
+    assert!(app.select.tasks.is_empty());
+    assert_eq!(app.select.epics.len(), 2);
+    assert!(app.select.epics.contains(&EpicId(10)));
+    assert!(app.select.epics.contains(&EpicId(20)));
 }
 
 #[test]
@@ -7155,10 +7155,10 @@ fn esc_clears_epic_selection() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelectEpic(EpicId(10)));
-    assert_eq!(app.selected_epics.len(), 1);
+    assert_eq!(app.select.epics.len(), 1);
 
     app.handle_key(make_key(KeyCode::Esc));
-    assert!(app.selected_epics.is_empty());
+    assert!(app.select.epics.is_empty());
 }
 
 #[test]
@@ -7171,8 +7171,8 @@ fn esc_clears_mixed_selection() {
     app.update(Message::ToggleSelectEpic(EpicId(10)));
 
     app.handle_key(make_key(KeyCode::Esc));
-    assert!(app.selected_tasks.is_empty());
-    assert!(app.selected_epics.is_empty());
+    assert!(app.select.tasks.is_empty());
+    assert!(app.select.epics.is_empty());
 }
 
 #[test]
@@ -7214,8 +7214,8 @@ fn batch_archive_mixed_tasks_and_epics() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Archived);
     assert!(app.epics.is_empty(), "Epic should be removed");
-    assert!(app.selected_tasks.is_empty());
-    assert!(app.selected_epics.is_empty());
+    assert!(app.select.tasks.is_empty());
+    assert!(app.select.epics.is_empty());
     assert!(!cmds.is_empty());
 }
 
@@ -7228,7 +7228,7 @@ fn confirm_archive_y_archives_selected_epics() {
 
     app.handle_key(make_key(KeyCode::Char('y')));
     assert!(app.epics.is_empty());
-    assert!(app.selected_epics.is_empty());
+    assert!(app.select.epics.is_empty());
 }
 
 #[test]
@@ -7316,8 +7316,8 @@ fn refresh_epics_prunes_stale_epic_selections() {
 
     // Refresh with only epic 10
     app.update(Message::RefreshEpics(vec![make_epic(10)]));
-    assert!(app.selected_epics.contains(&EpicId(10)));
-    assert!(!app.selected_epics.contains(&EpicId(99)));
+    assert!(app.select.epics.contains(&EpicId(10)));
+    assert!(!app.select.epics.contains(&EpicId(99)));
 }
 
 #[test]
@@ -7582,8 +7582,8 @@ fn repo_filter_space_toggles_cursor_repo() {
     app.input.mode = InputMode::RepoFilter;
     app.input.repo_cursor = 1; // pointing at /repo-b
     app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.repo_filter.contains("/repo-b"), "cursor repo should be toggled");
-    assert!(!app.repo_filter.contains("/repo-a"));
+    assert!(app.filter.repos.contains("/repo-b"), "cursor repo should be toggled");
+    assert!(!app.filter.repos.contains("/repo-a"));
 }
 
 #[test]

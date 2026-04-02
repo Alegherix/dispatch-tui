@@ -197,7 +197,7 @@ impl App {
 
             KeyCode::Char('x') => {
                 if self.has_selection() {
-                    let count = self.selected_tasks.len() + self.selected_epics.len();
+                    let count = self.select.tasks.len() + self.select.epics.len();
                     self.input.mode = InputMode::ConfirmArchive;
                     self.set_status(format!("Archive {} items? (y/n)", count));
                     vec![]
@@ -241,8 +241,8 @@ impl App {
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
             KeyCode::Char('T') => {
-                if !self.selected_tasks.is_empty() {
-                    let ids: Vec<_> = self.selected_tasks.iter().copied().collect();
+                if !self.select.tasks.is_empty() {
+                    let ids: Vec<_> = self.select.tasks.iter().copied().collect();
                     self.update(Message::BatchDetachTmux(ids))
                 } else if let Some(task) = self.selected_task() {
                     if task.status == TaskStatus::Review && task.tmux_window.is_some() {
@@ -370,13 +370,13 @@ impl App {
     /// Handle 'm'/'M' key: move selected task(s) forward or backward.
     fn handle_key_move(&mut self, direction: MoveDirection) -> Vec<Command> {
         if self.has_selection() {
-            if self.selected_tasks.is_empty() {
+            if self.select.tasks.is_empty() {
                 // Only epics selected — can't move since status is derived
                 return self.update(Message::StatusInfo(
                     "Epic status is derived from subtasks".to_string(),
                 ));
             }
-            let ids: Vec<_> = self.selected_tasks.iter().copied().collect();
+            let ids: Vec<_> = self.select.tasks.iter().copied().collect();
             self.update(Message::BatchMoveTasks { ids, direction })
         } else if let Some(task) = self.selected_task() {
             let id = task.id;
@@ -518,12 +518,12 @@ impl App {
         self.confirm_dialog(key, |s| {
             if s.has_selection() {
                 let mut cmds = Vec::new();
-                if !s.selected_tasks.is_empty() {
-                    let ids: Vec<_> = s.selected_tasks.iter().copied().collect();
+                if !s.select.tasks.is_empty() {
+                    let ids: Vec<_> = s.select.tasks.iter().copied().collect();
                     cmds.extend(s.update(Message::BatchArchiveTasks(ids)));
                 }
-                if !s.selected_epics.is_empty() {
-                    let ids: Vec<_> = s.selected_epics.iter().copied().collect();
+                if !s.select.epics.is_empty() {
+                    let ids: Vec<_> = s.select.epics.iter().copied().collect();
                     cmds.extend(s.update(Message::BatchArchiveEpics(ids)));
                 }
                 cmds
@@ -603,8 +603,8 @@ impl App {
             KeyCode::Char('x') => self.update(Message::StartDeletePreset),
             KeyCode::Char(c @ 'A'..='Z') => {
                 let idx = (c as usize) - ('A' as usize);
-                if idx < self.filter_presets.len() {
-                    let name = self.filter_presets[idx].0.clone();
+                if idx < self.filter.presets.len() {
+                    let name = self.filter.presets[idx].0.clone();
                     self.update(Message::LoadFilterPreset(name))
                 } else {
                     vec![]
@@ -649,8 +649,8 @@ impl App {
         match key.code {
             KeyCode::Char(c @ 'A'..='Z') => {
                 let idx = (c as usize) - ('A' as usize);
-                if idx < self.filter_presets.len() {
-                    let name = self.filter_presets[idx].0.clone();
+                if idx < self.filter.presets.len() {
+                    let name = self.filter.presets[idx].0.clone();
                     self.update(Message::DeleteFilterPreset(name))
                 } else {
                     vec![]

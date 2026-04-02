@@ -43,14 +43,9 @@ pub struct App {
     pub(in crate::tui) input: InputState,
     pub(in crate::tui) agents: AgentTracking,
     pub(in crate::tui) archive: ArchiveState,
-    pub(in crate::tui) selected_tasks: HashSet<TaskId>,
-    pub(in crate::tui) selected_epics: HashSet<EpicId>,
-    pub(in crate::tui) selected_bot_prs: HashSet<String>,
-    pub(in crate::tui) pending_done_tasks: Vec<TaskId>,
+    pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) notifications_enabled: bool,
-    pub(in crate::tui) repo_filter: HashSet<String>,
-    pub(in crate::tui) repo_filter_mode: RepoFilterMode,
-    pub(in crate::tui) filter_presets: Vec<(String, HashSet<String>, RepoFilterMode)>,
+    pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) review: ReviewBoardState,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
@@ -81,14 +76,9 @@ impl App {
             input: InputState::default(),
             agents: AgentTracking::new(inactivity_timeout),
             archive: ArchiveState::default(),
-            selected_tasks: HashSet::new(),
-            selected_epics: HashSet::new(),
-            selected_bot_prs: HashSet::new(),
-            pending_done_tasks: Vec::new(),
+            select: SelectionState::default(),
             notifications_enabled: true,
-            repo_filter: HashSet::new(),
-            repo_filter_mode: RepoFilterMode::default(),
-            filter_presets: Vec::new(),
+            filter: FilterState::default(),
             review: ReviewBoardState::default(),
             usage: HashMap::new(),
             merge_queue: None,
@@ -133,10 +123,10 @@ impl App {
     pub fn inactivity_timeout(&self) -> Duration { self.agents.inactivity_timeout }
     pub fn show_archived(&self) -> bool { self.archive.visible }
     pub fn selected_archive_row(&self) -> usize { self.archive.selected_row }
-    pub fn selected_tasks(&self) -> &HashSet<TaskId> { &self.selected_tasks }
-    pub fn selected_epics(&self) -> &HashSet<EpicId> { &self.selected_epics }
+    pub fn selected_tasks(&self) -> &HashSet<TaskId> { &self.select.tasks }
+    pub fn selected_epics(&self) -> &HashSet<EpicId> { &self.select.epics }
     pub fn on_select_all(&self) -> bool { self.selection().on_select_all }
-    pub fn has_selection(&self) -> bool { !self.selected_tasks.is_empty() || !self.selected_epics.is_empty() }
+    pub fn has_selection(&self) -> bool { self.select.has_selection() }
 
     pub fn merge_queue(&self) -> Option<&MergeQueue> {
         self.merge_queue.as_ref()
@@ -145,13 +135,13 @@ impl App {
         self.notifications_enabled
     }
     pub fn repo_filter(&self) -> &HashSet<String> {
-        &self.repo_filter
+        &self.filter.repos
     }
     pub fn repo_filter_mode(&self) -> RepoFilterMode {
-        self.repo_filter_mode
+        self.filter.mode
     }
     pub fn filter_presets(&self) -> &[(String, HashSet<String>, RepoFilterMode)] {
-        &self.filter_presets
+        &self.filter.presets
     }
     pub fn review_prs(&self) -> &[crate::models::ReviewPr] {
         &self.review.prs
@@ -187,10 +177,10 @@ impl App {
         self.review.bot_prs_loading
     }
     pub fn selected_bot_prs(&self) -> &HashSet<String> {
-        &self.selected_bot_prs
+        &self.select.bot_prs
     }
     pub fn has_bot_pr_selection(&self) -> bool {
-        !self.selected_bot_prs.is_empty()
+        self.select.has_bot_pr_selection()
     }
 
     /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
@@ -226,12 +216,12 @@ impl App {
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
-        self.repo_filter = filter;
+        self.filter.repos = filter;
         self.clamp_selection();
     }
 
     pub fn set_repo_filter_mode(&mut self, mode: RepoFilterMode) {
-        self.repo_filter_mode = mode;
+        self.filter.mode = mode;
         self.clamp_selection();
     }
 
@@ -248,13 +238,7 @@ impl App {
     }
 
     fn repo_matches(&self, repo_path: &str) -> bool {
-        if self.repo_filter.is_empty() {
-            return true;
-        }
-        match self.repo_filter_mode {
-            RepoFilterMode::Include => self.repo_filter.contains(repo_path),
-            RepoFilterMode::Exclude => !self.repo_filter.contains(repo_path),
-        }
+        self.filter.matches(repo_path)
     }
 
     /// Return tasks visible in the current view.
@@ -336,7 +320,7 @@ impl App {
         }
         let epic_count = self.epics.iter()
             .filter(|e| {
-                (self.repo_filter.is_empty() || self.repo_filter.contains(&e.repo_path))
+                self.filter.matches(&e.repo_path)
                     && epic_status(e) == status
             })
             .count();
@@ -648,14 +632,14 @@ impl App {
                 vec![]
             }
             Message::ToggleSelectBotPr(url) => {
-                if !self.selected_bot_prs.remove(&url) {
-                    self.selected_bot_prs.insert(url);
+                if !self.select.bot_prs.remove(&url) {
+                    self.select.bot_prs.insert(url);
                 }
                 vec![]
             }
             Message::SelectAllBotPrColumn => self.handle_select_all_bot_pr_column(),
             Message::ClearBotPrSelection => {
-                self.selected_bot_prs.clear();
+                self.select.bot_prs.clear();
                 vec![]
             }
             Message::StartBatchApprove => self.handle_start_batch_approve(),
@@ -893,8 +877,8 @@ impl App {
     }
 
     fn handle_confirm_done(&mut self) -> Vec<Command> {
-        let ids = if !self.pending_done_tasks.is_empty() {
-            std::mem::take(&mut self.pending_done_tasks)
+        let ids = if !self.select.pending_done.is_empty() {
+            std::mem::take(&mut self.select.pending_done)
         } else {
             match self.input.mode {
                 InputMode::ConfirmDone(id) => vec![id],
@@ -921,7 +905,7 @@ impl App {
                 cmds.push(Command::PersistTask(task_clone));
             }
         }
-        self.selected_tasks.clear();
+        self.select.tasks.clear();
         self.clamp_selection();
         cmds
     }
@@ -929,7 +913,7 @@ impl App {
     fn handle_cancel_done(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        self.pending_done_tasks.clear();
+        self.select.pending_done.clear();
         vec![]
     }
 
@@ -1130,7 +1114,7 @@ impl App {
         // Merge DB state into in-memory state, preserving tmux_outputs
         // Prune selections for tasks that no longer exist
         let valid_ids: HashSet<TaskId> = new_tasks.iter().map(|t| t.id).collect();
-        self.selected_tasks.retain(|id| valid_ids.contains(id));
+        self.select.tasks.retain(|id| valid_ids.contains(id));
         self.tasks = new_tasks;
         self.clamp_selection();
         cmds
@@ -1452,26 +1436,26 @@ impl App {
     }
 
     fn handle_toggle_select(&mut self, id: TaskId) -> Vec<Command> {
-        if self.selected_tasks.contains(&id) {
-            self.selected_tasks.remove(&id);
+        if self.select.tasks.contains(&id) {
+            self.select.tasks.remove(&id);
         } else {
-            self.selected_tasks.insert(id);
+            self.select.tasks.insert(id);
         }
         vec![]
     }
 
     fn handle_toggle_select_epic(&mut self, id: EpicId) -> Vec<Command> {
-        if self.selected_epics.contains(&id) {
-            self.selected_epics.remove(&id);
+        if self.select.epics.contains(&id) {
+            self.select.epics.remove(&id);
         } else {
-            self.selected_epics.insert(id);
+            self.select.epics.insert(id);
         }
         vec![]
     }
 
     fn handle_clear_selection(&mut self) -> Vec<Command> {
-        self.selected_tasks.clear();
-        self.selected_epics.clear();
+        self.select.tasks.clear();
+        self.select.epics.clear();
         self.selection_mut().on_select_all = false;
         vec![]
     }
@@ -1493,21 +1477,21 @@ impl App {
         if task_ids.is_empty() && epic_ids.is_empty() {
             return vec![];
         }
-        let all_tasks_selected = task_ids.iter().all(|id| self.selected_tasks.contains(id));
-        let all_epics_selected = epic_ids.iter().all(|id| self.selected_epics.contains(id));
+        let all_tasks_selected = task_ids.iter().all(|id| self.select.tasks.contains(id));
+        let all_epics_selected = epic_ids.iter().all(|id| self.select.epics.contains(id));
         if all_tasks_selected && all_epics_selected {
             for id in &task_ids {
-                self.selected_tasks.remove(id);
+                self.select.tasks.remove(id);
             }
             for id in &epic_ids {
-                self.selected_epics.remove(id);
+                self.select.epics.remove(id);
             }
         } else {
             for id in task_ids {
-                self.selected_tasks.insert(id);
+                self.select.tasks.insert(id);
             }
             for id in epic_ids {
-                self.selected_epics.insert(id);
+                self.select.epics.insert(id);
             }
         }
         vec![]
@@ -1518,8 +1502,8 @@ impl App {
         for id in ids {
             cmds.extend(self.handle_archive_epic(id));
         }
-        self.selected_epics.clear();
-        self.selected_tasks.clear();
+        self.select.epics.clear();
+        self.select.tasks.clear();
         cmds
     }
 
@@ -1538,9 +1522,9 @@ impl App {
                     }
                 }
                 // Enter confirmation for Review→Done tasks
-                self.pending_done_tasks = review_ids;
-                let count = self.pending_done_tasks.len();
-                self.input.mode = InputMode::ConfirmDone(self.pending_done_tasks[0]);
+                self.select.pending_done = review_ids;
+                let count = self.select.pending_done.len();
+                self.input.mode = InputMode::ConfirmDone(self.select.pending_done[0]);
                 self.set_status(format!(
                     "Move {} {} to Done? (y/n)",
                     count,
@@ -1554,7 +1538,7 @@ impl App {
         for id in ids {
             cmds.extend(self.handle_move_task(id, direction));
         }
-        self.selected_tasks.clear();
+        self.select.tasks.clear();
         cmds
     }
 
@@ -1563,7 +1547,7 @@ impl App {
         for id in ids {
             cmds.extend(self.handle_archive_task(id));
         }
-        self.selected_tasks.clear();
+        self.select.tasks.clear();
         cmds
     }
 
@@ -2324,35 +2308,35 @@ impl App {
             .filter(|pr| mode.pr_column(pr) == sel)
             .map(|pr| pr.url.clone())
             .collect();
-        let all_selected = column_urls.iter().all(|u| self.selected_bot_prs.contains(u));
+        let all_selected = column_urls.iter().all(|u| self.select.bot_prs.contains(u));
         if all_selected {
             for u in &column_urls {
-                self.selected_bot_prs.remove(u);
+                self.select.bot_prs.remove(u);
             }
         } else {
             for u in column_urls {
-                self.selected_bot_prs.insert(u);
+                self.select.bot_prs.insert(u);
             }
         }
         vec![]
     }
 
     fn handle_start_batch_approve(&mut self) -> Vec<Command> {
-        if self.selected_bot_prs.is_empty() {
+        if self.select.bot_prs.is_empty() {
             return vec![];
         }
-        let urls: Vec<String> = self.selected_bot_prs.iter().cloned().collect();
+        let urls: Vec<String> = self.select.bot_prs.iter().cloned().collect();
         self.input.mode = InputMode::ConfirmBatchApprove(urls);
         vec![]
     }
 
     fn handle_start_batch_merge(&mut self) -> Vec<Command> {
-        if self.selected_bot_prs.is_empty() {
+        if self.select.bot_prs.is_empty() {
             return vec![];
         }
         // Only merge PRs that are CI-passing and approved
         let eligible: Vec<String> = self.review.bot_prs.iter()
-            .filter(|pr| self.selected_bot_prs.contains(&pr.url))
+            .filter(|pr| self.select.bot_prs.contains(&pr.url))
             .filter(|pr| {
                 pr.ci_status == crate::models::CiStatus::Success
                     && pr.review_decision == crate::models::ReviewDecision::Approved
@@ -2375,7 +2359,7 @@ impl App {
                 return vec![];
             }
         };
-        self.selected_bot_prs.clear();
+        self.select.bot_prs.clear();
         self.set_status(format!("Approving {} PRs...", urls.len()));
         vec![Command::BatchApprovePrs(urls)]
     }
@@ -2388,7 +2372,7 @@ impl App {
                 return vec![];
             }
         };
-        self.selected_bot_prs.clear();
+        self.select.bot_prs.clear();
         self.set_status(format!("Merging {} PRs...", urls.len()));
         vec![Command::BatchMergePrs(urls)]
     }
@@ -2611,7 +2595,7 @@ impl App {
     fn handle_refresh_epics(&mut self, epics: Vec<Epic>) -> Vec<Command> {
         self.epics = epics;
         let valid_ids: HashSet<EpicId> = self.epics.iter().map(|e| e.id).collect();
-        self.selected_epics.retain(|id| valid_ids.contains(id));
+        self.select.epics.retain(|id| valid_ids.contains(id));
         vec![]
     }
 
@@ -2817,10 +2801,10 @@ impl App {
     fn handle_close_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.clamp_selection();
-        let mut paths: Vec<_> = self.repo_filter.iter().cloned().collect();
+        let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
         let value = paths.join("\n");
-        let mode_value = match self.repo_filter_mode {
+        let mode_value = match self.filter.mode {
             RepoFilterMode::Include => "include",
             RepoFilterMode::Exclude => "exclude",
         };
@@ -2837,27 +2821,27 @@ impl App {
     }
 
     fn handle_toggle_repo_filter(&mut self, path: String) -> Vec<Command> {
-        if self.repo_filter.contains(&path) {
-            self.repo_filter.remove(&path);
+        if self.filter.repos.contains(&path) {
+            self.filter.repos.remove(&path);
         } else {
-            self.repo_filter.insert(path);
+            self.filter.repos.insert(path);
         }
         self.clamp_selection();
         vec![]
     }
 
     fn handle_toggle_all_repo_filter(&mut self) -> Vec<Command> {
-        if self.repo_filter.len() == self.repo_paths.len() {
-            self.repo_filter.clear();
+        if self.filter.repos.len() == self.repo_paths.len() {
+            self.filter.repos.clear();
         } else {
-            self.repo_filter = self.repo_paths.iter().cloned().collect();
+            self.filter.repos = self.repo_paths.iter().cloned().collect();
         }
         self.clamp_selection();
         vec![]
     }
 
     fn handle_toggle_repo_filter_mode(&mut self) -> Vec<Command> {
-        self.repo_filter_mode = match self.repo_filter_mode {
+        self.filter.mode = match self.filter.mode {
             RepoFilterMode::Include => RepoFilterMode::Exclude,
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };
@@ -2922,20 +2906,20 @@ impl App {
             self.input.mode = InputMode::RepoFilter;
             return vec![];
         }
-        let repos: HashSet<String> = self.repo_filter.clone();
-        let mode = self.repo_filter_mode;
+        let repos: HashSet<String> = self.filter.repos.clone();
+        let mode = self.filter.mode;
         // Update or insert in the presets list
-        if let Some(existing) = self.filter_presets.iter_mut().find(|(n, _, _)| *n == name) {
+        if let Some(existing) = self.filter.presets.iter_mut().find(|(n, _, _)| *n == name) {
             existing.1.clone_from(&repos);
             existing.2 = mode;
         } else {
-            self.filter_presets.push((name.clone(), repos, mode));
-            self.filter_presets.sort_by(|a, b| a.0.cmp(&b.0));
+            self.filter.presets.push((name.clone(), repos, mode));
+            self.filter.presets.sort_by(|a, b| a.0.cmp(&b.0));
         }
         self.input.buffer.clear();
         self.input.mode = InputMode::RepoFilter;
         self.set_status(format!("Saved preset \"{name}\""));
-        let mut paths: Vec<_> = self.repo_filter.iter().cloned().collect();
+        let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
         vec![Command::PersistFilterPreset {
             name,
@@ -2945,11 +2929,11 @@ impl App {
     }
 
     fn handle_load_filter_preset(&mut self, name: String) -> Vec<Command> {
-        if let Some((_, repos, mode)) = self.filter_presets.iter().find(|(n, _, _)| *n == name) {
+        if let Some((_, repos, mode)) = self.filter.presets.iter().find(|(n, _, _)| *n == name) {
             // Intersect with known repo_paths to skip stale entries
             let known: HashSet<&String> = self.repo_paths.iter().collect();
-            self.repo_filter = repos.iter().filter(|p| known.contains(p)).cloned().collect();
-            self.repo_filter_mode = *mode;
+            self.filter.repos = repos.iter().filter(|p| known.contains(p)).cloned().collect();
+            self.filter.mode = *mode;
             self.clamp_selection();
             self.set_status(format!("Loaded preset \"{name}\""));
         }
@@ -2957,7 +2941,7 @@ impl App {
     }
 
     fn handle_start_delete_preset(&mut self) -> Vec<Command> {
-        if self.filter_presets.is_empty() {
+        if self.filter.presets.is_empty() {
             return vec![];
         }
         self.input.mode = InputMode::ConfirmDeletePreset;
@@ -2965,7 +2949,7 @@ impl App {
     }
 
     fn handle_delete_filter_preset(&mut self, name: String) -> Vec<Command> {
-        self.filter_presets.retain(|(n, _, _)| *n != name);
+        self.filter.presets.retain(|(n, _, _)| *n != name);
         self.input.mode = InputMode::RepoFilter;
         self.set_status(format!("Deleted preset \"{name}\""));
         vec![Command::DeleteFilterPreset(name)]
@@ -2978,7 +2962,7 @@ impl App {
     }
 
     fn handle_filter_presets_loaded(&mut self, presets: Vec<(String, HashSet<String>, RepoFilterMode)>) -> Vec<Command> {
-        self.filter_presets = presets;
+        self.filter.presets = presets;
         vec![]
     }
 

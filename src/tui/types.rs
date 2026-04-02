@@ -451,6 +451,56 @@ pub struct ArchiveState {
 }
 
 // ---------------------------------------------------------------------------
+// SelectionState — multi-select state for batch operations
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct SelectionState {
+    pub tasks: HashSet<TaskId>,
+    pub epics: HashSet<EpicId>,
+    pub bot_prs: HashSet<String>,
+    pub pending_done: Vec<TaskId>,
+}
+
+impl SelectionState {
+    pub fn has_selection(&self) -> bool {
+        !self.tasks.is_empty() || !self.epics.is_empty()
+    }
+
+    pub fn has_bot_pr_selection(&self) -> bool {
+        !self.bot_prs.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.tasks.clear();
+        self.epics.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FilterState — repo filter and presets for the task board
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct FilterState {
+    pub repos: HashSet<String>,
+    pub mode: RepoFilterMode,
+    pub presets: Vec<(String, HashSet<String>, RepoFilterMode)>,
+}
+
+impl FilterState {
+    pub fn matches(&self, repo_path: &str) -> bool {
+        if self.repos.is_empty() {
+            return true;
+        }
+        match self.mode {
+            RepoFilterMode::Include => self.repos.contains(repo_path),
+            RepoFilterMode::Exclude => !self.repos.contains(repo_path),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ReviewBoardState — review board data and loading state
 // ---------------------------------------------------------------------------
 

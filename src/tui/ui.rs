@@ -533,7 +533,7 @@ fn build_task_list_item<'a>(
     is_cursor: bool,
     col_color: Color,
 ) -> ListItem<'a> {
-    let is_batch_selected = app.selected_tasks.contains(&task.id);
+    let is_batch_selected = app.selected_tasks().contains(&task.id);
     let select_prefix = if is_batch_selected { "* " } else { "  " };
 
     let title_text = format_task_title(task, 32);

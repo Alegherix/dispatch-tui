@@ -350,6 +350,7 @@ pub enum InputMode {
     ReviewRepoFilter,
     InputPresetName,
     ConfirmDeletePreset,
+    ConfirmEditTask(TaskId),
     // Dependabot batch operations
     ConfirmBatchApprove(Vec<String>),
     ConfirmBatchMerge(Vec<String>),

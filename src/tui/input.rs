@@ -30,6 +30,7 @@ impl App {
             InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
             InputMode::ConfirmEpicWrapUp(_) => self.handle_key_confirm_epic_wrap_up(key),
             InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
+            InputMode::ConfirmEditTask(id) => self.handle_key_confirm_edit_task(key, id),
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
             InputMode::ReviewRepoFilter => self.handle_key_review_repo_filter(key),
@@ -179,7 +180,12 @@ impl App {
 
             KeyCode::Char('e') => {
                 match self.selected_column_item() {
-                    Some(ColumnItem::Task(task)) => vec![Command::EditTaskInEditor(task.clone())],
+                    Some(ColumnItem::Task(task)) => {
+                        let title = super::truncate_title(&task.title, 30);
+                        self.input.mode = InputMode::ConfirmEditTask(task.id);
+                        self.set_status(format!("Edit {title}? (y/n)"));
+                        vec![]
+                    }
                     Some(ColumnItem::Epic(epic)) => {
                         let id = epic.id;
                         self.update(Message::EnterEpic(id))
@@ -299,10 +305,11 @@ impl App {
             KeyCode::Char('e') => {
                 let archived = self.archived_tasks();
                 if let Some(task) = archived.get(self.archive.selected_row) {
-                    vec![Command::EditTaskInEditor((*task).clone())]
-                } else {
-                    vec![]
+                    let title = super::truncate_title(&task.title, 30);
+                    self.input.mode = InputMode::ConfirmEditTask(task.id);
+                    self.set_status(format!("Edit {title}? (y/n)"));
                 }
+                vec![]
             }
             KeyCode::Char('q') => self.update(Message::Quit),
             _ => vec![],
@@ -667,6 +674,16 @@ impl App {
             _ => return vec![],
         };
         self.confirm_dialog(key, |s| s.detach_tmux_panels(ids))
+    }
+
+    fn handle_key_confirm_edit_task(&mut self, key: KeyEvent, id: TaskId) -> Vec<Command> {
+        self.confirm_dialog(key, |s| {
+            if let Some(task) = s.tasks.iter().find(|t| t.id == id) {
+                vec![Command::EditTaskInEditor(task.clone())]
+            } else {
+                vec![]
+            }
+        })
     }
 
     fn handle_key_confirm_wrap_up(&mut self, key: KeyEvent) -> Vec<Command> {

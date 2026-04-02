@@ -1897,6 +1897,13 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmEditTask(_) => {
+            let text = app.status_message.as_deref()
+                .unwrap_or("Edit task? (y/n)");
+            let bar = Paragraph::new(text)
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
         InputMode::ConfirmBatchApprove(ref urls) => {
             let text = format!("Approve {} PRs? (y/n)", urls.len());
             let bar = Paragraph::new(text)

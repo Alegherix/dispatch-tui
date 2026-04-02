@@ -1466,12 +1466,35 @@ fn epic_action_hints_done() {
 // --- Edit key ---
 
 #[test]
-fn e_key_emits_edit_task_in_editor() {
+fn e_key_enters_confirm_edit_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(TaskId(1))));
+    assert!(app.status_message.is_some());
+}
+
+#[test]
+fn e_key_confirm_y_emits_edit_task() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    app.selection_mut().set_column(0);
+    app.handle_key(make_key(KeyCode::Char('e')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn e_key_confirm_n_cancels() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+    app.selection_mut().set_column(0);
+    app.handle_key(make_key(KeyCode::Char('e')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.status_message.is_none());
 }
 
 #[test]
@@ -2753,9 +2776,12 @@ fn enter_on_task_still_toggles_detail() {
 }
 
 #[test]
-fn e_on_task_still_edits() {
+fn e_on_task_enters_confirm_then_edits() {
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(_)));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds.iter().any(|c| matches!(c, Command::EditTaskInEditor(_))));
 }
 
@@ -3115,6 +3141,9 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
     app.selection_mut().set_row(0, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(TaskId(1))));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1, "expected exactly one command");
     assert!(
         matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)),
@@ -3795,6 +3824,9 @@ fn archive_panel_e_edits_task() {
     ], TEST_TIMEOUT);
     app.archive.visible = true;
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(TaskId(1))));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)));
 }

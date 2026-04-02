@@ -60,6 +60,43 @@ jobs:
       - name: Run clippy
         run: cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Run coverage
+        run: cargo tarpaulin --target x86_64-unknown-linux-gnu --out xml --output-dir coverage/
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/cobertura.xml
+
+      - name: Coverage summary
+        run: cargo tarpaulin --target x86_64-unknown-linux-gnu --out stdout --skip-clean
+
   fmt:
     name: Format
     runs-on: ubuntu-latest

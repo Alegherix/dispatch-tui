@@ -9998,3 +9998,95 @@ fn render_review_repo_filter_overlay_shows_repos() {
         "review repo filter overlay should show 'acme/app' repo from loaded PRs"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tab bar mode tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_tab_bar_epic_mode_shows_epic_title() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.title = "Platform Work".to_string();
+    app.epics = vec![epic];
+    app.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Platform Work"),
+        "tab bar in epic mode should show the epic title"
+    );
+}
+
+#[test]
+fn render_tab_bar_board_mode_shows_tasks_label() {
+    let mut app = make_app();
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Tasks"),
+        "tab bar in board mode should show 'Tasks' label"
+    );
+}
+
+#[test]
+fn render_tab_bar_review_board_shows_reviews_active() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Reviews"),
+        "tab bar in review board mode should show 'Reviews' label"
+    );
+}
+
+#[test]
+fn render_tab_bar_review_board_shows_pr_count() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![
+        make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
+        make_review_pr(2, "bob", ReviewDecision::ReviewRequired),
+    ]));
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Reviews (2)"),
+        "tab bar in review board mode should show 'Reviews (2)' when 2 PRs loaded"
+    );
+}
+
+#[test]
+fn render_tab_bar_review_board_my_prs_tab() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::MyPrsLoaded(vec![make_review_pr(
+        1,
+        "me",
+        ReviewDecision::Approved,
+    )]));
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "My PRs (1)"),
+        "tab bar in review board mode should show 'My PRs (1)' when 1 author PR loaded"
+    );
+}
+
+#[test]
+fn render_tab_bar_review_board_dependabot_tab() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    app.update(Message::BotPrsLoaded(vec![
+        make_review_pr(1, "dependabot", ReviewDecision::ReviewRequired),
+        make_review_pr(2, "dependabot", ReviewDecision::ReviewRequired),
+    ]));
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "Dependabot (2)"),
+        "tab bar in review board mode should show 'Dependabot (2)' when 2 bot PRs loaded"
+    );
+}

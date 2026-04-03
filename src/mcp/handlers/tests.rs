@@ -3645,3 +3645,60 @@ async fn list_tasks_truncates_long_descriptions() {
         "truncated output should be shorter than full description"
     );
 }
+
+#[tokio::test]
+async fn list_tasks_excludes_archived_by_default() {
+    let state = test_state();
+    state
+        .db
+        .create_task("Active Task", "desc", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    state
+        .db
+        .create_task("Archived Task", "desc", "/repo", None, TaskStatus::Archived)
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_tasks", "arguments": {} })),
+    )
+    .await;
+    assert!(resp.error.is_none());
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Active Task"), "should show active task");
+    assert!(
+        !text.contains("Archived Task"),
+        "should not show archived task: {text}"
+    );
+}
+
+#[tokio::test]
+async fn list_epics_excludes_archived() {
+    let state = test_state();
+    state.db.create_epic("Active Epic", "desc", "/repo").unwrap();
+    let archived_epic = state
+        .db
+        .create_epic("Archived Epic", "desc", "/repo")
+        .unwrap();
+    state
+        .db
+        .patch_epic(
+            archived_epic.id,
+            &db::EpicPatch::new().status(TaskStatus::Archived),
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "list_epics", "arguments": {} })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Active Epic"), "should show active epic");
+    assert!(
+        !text.contains("Archived Epic"),
+        "should not show archived epic: {text}"
+    );
+}

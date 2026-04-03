@@ -346,7 +346,7 @@ impl TaskService {
             .into_iter()
             .filter(|t| match &filter.statuses {
                 Some(statuses) => statuses.contains(&t.status),
-                None => true,
+                None => t.status != TaskStatus::Archived,
             })
             .filter(|t| match filter.epic_id {
                 Some(eid) => t.epic_id == Some(eid),
@@ -590,6 +590,7 @@ impl EpicService {
         let epics = self.list_epics()?;
         let result = epics
             .into_iter()
+            .filter(|e| e.status != TaskStatus::Archived)
             .map(|e| {
                 let subtasks = self.db.list_tasks_for_epic(e.id).unwrap_or_default();
                 let done = subtasks

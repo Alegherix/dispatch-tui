@@ -27,7 +27,9 @@ use crate::editor::{
 };
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
-use crate::tui::{self, App, Command, Message, RepoFilterMode, ReviewAgentRequest};
+use crate::tui::{
+    self, App, Command, Message, RepoFilterMode, ReviewAgentRequest, ReviewBoardMode,
+};
 use crate::{db, dispatch, mcp, models, tmux};
 
 // ---------------------------------------------------------------------------
@@ -56,6 +58,11 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     app.update(Message::RepoPathsUpdated(paths));
     let usage = database.get_all_usage().unwrap_or_default();
     app.update(Message::RefreshUsage(usage));
+
+    // Seed default GitHub query strings (no-op if already set)
+    if let Err(e) = database.seed_github_query_defaults() {
+        tracing::warn!("Failed to seed GitHub query defaults: {e}");
+    }
 
     // Load notification preference
     let notif_enabled = database
@@ -281,6 +288,23 @@ struct TuiRuntime {
 impl TuiRuntime {
     fn db_error(action: &str, e: impl std::fmt::Display) -> String {
         format!("DB error {action}: {e}")
+    }
+
+    /// Load GitHub query strings for a given settings key, split by newline.
+    /// Returns an empty vec if the setting is missing.
+    fn load_github_queries(&self, key: &str) -> Vec<String> {
+        self.database
+            .get_setting_string(key)
+            .ok()
+            .flatten()
+            .map(|s| {
+                s.lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn create_task(
@@ -745,6 +769,63 @@ impl TuiRuntime {
         Ok(())
     }
 
+    fn exec_edit_github_queries(
+        &self,
+        app: &mut App,
+        mode: ReviewBoardMode,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
+    ) -> Result<()> {
+        let key = match mode {
+            ReviewBoardMode::Reviewer => "github_queries_review",
+            ReviewBoardMode::Author => "github_queries_my_prs",
+            ReviewBoardMode::Dependabot => "github_queries_bot",
+        };
+
+        let current = self
+            .database
+            .get_setting_string(key)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
+        let header = format!(
+            "# GitHub queries for: {}\n# One search query per line. Blank lines and lines starting with # are ignored.\n# See: https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests\n\n",
+            match mode {
+                ReviewBoardMode::Reviewer => "Review PRs",
+                ReviewBoardMode::Author => "My PRs",
+                ReviewBoardMode::Dependabot => "Bot PRs",
+            }
+        );
+        let content = format!("{header}{current}\n");
+
+        let Some(edited) = self.run_editor(terminal, key_rx, "github-queries-", &content)? else {
+            return Ok(());
+        };
+
+        // Strip comments and blank lines
+        let queries: String = edited
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if let Err(e) = self.database.set_setting_string(key, &queries) {
+            app.update(Message::Error(Self::db_error("saving github queries", e)));
+            return Ok(());
+        }
+
+        // Trigger a refresh for the affected category
+        let refresh_msg = match mode {
+            ReviewBoardMode::Reviewer => Message::RefreshReviewPrs,
+            ReviewBoardMode::Author => Message::RefreshReviewPrs,
+            ReviewBoardMode::Dependabot => Message::RefreshBotPrs,
+        };
+        app.update(refresh_msg);
+        Ok(())
+    }
+
     fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
         if let Err(e) = self.database.delete_epic(id) {
             app.update(Message::Error(Self::db_error("deleting epic", e)));
@@ -1075,9 +1156,10 @@ impl TuiRuntime {
     fn exec_fetch_review_prs(&self) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
+        let queries = self.load_github_queries("github_queries_review");
         tokio::task::spawn_blocking(move || {
             tracing::info!("fetching review PRs via gh");
-            match crate::github::fetch_review_prs(&*runner) {
+            match crate::github::fetch_prs(&*runner, &queries) {
                 Ok(prs) => {
                     tracing::info!(count = prs.len(), "review PRs fetched successfully");
                     let _ = tx.send(Message::ReviewPrsLoaded(prs));
@@ -1099,9 +1181,10 @@ impl TuiRuntime {
     fn exec_fetch_my_prs(&self) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
+        let queries = self.load_github_queries("github_queries_my_prs");
         tokio::task::spawn_blocking(move || {
             tracing::info!("fetching my PRs via gh");
-            match crate::github::fetch_my_prs(&*runner) {
+            match crate::github::fetch_prs(&*runner, &queries) {
                 Ok(prs) => {
                     tracing::info!(count = prs.len(), "my PRs fetched successfully");
                     let _ = tx.send(Message::MyPrsLoaded(prs));
@@ -1123,9 +1206,10 @@ impl TuiRuntime {
     fn exec_fetch_bot_prs(&self) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
+        let queries = self.load_github_queries("github_queries_bot");
         tokio::task::spawn_blocking(move || {
             tracing::info!("fetching bot PRs via gh");
-            match crate::github::fetch_bot_prs(&*runner) {
+            match crate::github::fetch_prs(&*runner, &queries) {
                 Ok(prs) => {
                     tracing::info!(count = prs.len(), "bot PRs fetched successfully");
                     let _ = tx.send(Message::BotPrsLoaded(prs));
@@ -1520,6 +1604,9 @@ async fn execute_commands(
                     package,
                     fixed_version,
                 );
+            }
+            Command::EditGithubQueries(mode) => {
+                rt.exec_edit_github_queries(app, mode, terminal, key_rx)?
             }
         }
     }

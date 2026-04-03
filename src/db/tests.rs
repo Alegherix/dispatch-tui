@@ -1745,3 +1745,47 @@ fn security_alerts_save_replaces_previous() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].title, "New alert");
 }
+
+#[test]
+fn seed_github_query_defaults_sets_all_three() {
+    let db = in_memory_db();
+    db.seed_github_query_defaults().unwrap();
+
+    let review = db
+        .get_setting_string("github_queries_review")
+        .unwrap()
+        .expect("review queries should be set");
+    assert!(review.contains("review-requested:@me"));
+
+    let my_prs = db
+        .get_setting_string("github_queries_my_prs")
+        .unwrap()
+        .expect("my_prs queries should be set");
+    assert!(my_prs.contains("author:@me"));
+
+    let bot = db
+        .get_setting_string("github_queries_bot")
+        .unwrap()
+        .expect("bot queries should be set");
+    assert!(bot.contains("app/dependabot"));
+    assert!(bot.contains("app/renovate"));
+}
+
+#[test]
+fn seed_github_query_defaults_does_not_overwrite_user_edits() {
+    let db = in_memory_db();
+    db.seed_github_query_defaults().unwrap();
+
+    // User edits the review queries
+    db.set_setting_string("github_queries_review", "my custom query")
+        .unwrap();
+
+    // Re-seed should not overwrite
+    db.seed_github_query_defaults().unwrap();
+
+    let review = db
+        .get_setting_string("github_queries_review")
+        .unwrap()
+        .unwrap();
+    assert_eq!(review, "my custom query");
+}

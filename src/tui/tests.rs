@@ -10132,6 +10132,8 @@ fn render_tab_bar_review_board_my_prs_tab() {
         "me",
         ReviewDecision::Approved,
     )]));
+    // Toggle to Author mode so My PRs tab is active
+    app.update(Message::ToggleReviewBoardMode);
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "My PRs (1)"),
@@ -10148,6 +10150,9 @@ fn render_tab_bar_review_board_dependabot_tab() {
         make_review_pr(1, "dependabot", ReviewDecision::ReviewRequired),
         make_review_pr(2, "dependabot", ReviewDecision::ReviewRequired),
     ]));
+    // Toggle to Dependabot mode (Reviewer → Author → Dependabot)
+    app.update(Message::ToggleReviewBoardMode);
+    app.update(Message::ToggleReviewBoardMode);
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Dependabot (2)"),

@@ -1627,7 +1627,9 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             ]),
             Line::from(vec![
                 Span::styled("  f", key),
-                Span::styled(" filter repos", desc),
+                Span::styled(" filter repos          ", desc),
+                Span::styled("e", key),
+                Span::styled(" edit search queries", desc),
             ]),
             Line::from(""),
             Line::from(Span::styled("  General", header)),
@@ -2427,6 +2429,7 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>>
         push_hint("Enter", "open PR");
     }
     push_hint("r", "refresh");
+    push_hint("e", "edit queries");
     if is_author_mode {
         push_hint("D", "dispatch filter");
     }

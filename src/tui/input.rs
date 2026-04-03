@@ -992,6 +992,14 @@ impl App {
                 }
             }
 
+            KeyCode::Char('e') => {
+                if let ViewMode::ReviewBoard { mode, .. } = self.view_mode {
+                    vec![Command::EditGithubQueries(mode)]
+                } else {
+                    vec![]
+                }
+            }
+
             _ => vec![],
         }
     }

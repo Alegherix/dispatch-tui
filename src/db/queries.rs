@@ -447,6 +447,34 @@ impl TaskStore for Database {
         Ok(())
     }
 
+    fn seed_github_query_defaults(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let defaults: &[(&str, &str)] = &[
+            (
+                "github_queries_review",
+                "is:pr is:open review-requested:@me -is:draft -author:app/dependabot -author:app/renovate archived:false\n\
+                 is:pr is:open reviewed-by:@me -author:@me -is:draft -author:app/dependabot -author:app/renovate archived:false\n\
+                 is:pr is:open commenter:@me -author:@me -is:draft -author:app/dependabot -author:app/renovate archived:false",
+            ),
+            (
+                "github_queries_my_prs",
+                "is:pr is:open author:@me -is:draft archived:false",
+            ),
+            (
+                "github_queries_bot",
+                "is:pr is:open author:app/dependabot -is:draft\n\
+                 is:pr is:open author:app/renovate -is:draft",
+            ),
+        ];
+        for (key, value) in defaults {
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )?;
+        }
+        Ok(())
+    }
+
     fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(

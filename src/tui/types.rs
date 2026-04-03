@@ -461,6 +461,7 @@ pub enum Command {
         package: Option<String>,
         fixed_version: Option<String>,
     },
+    EditGithubQueries(ReviewBoardMode),
 }
 
 // ---------------------------------------------------------------------------

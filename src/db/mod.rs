@@ -229,6 +229,10 @@ pub trait TaskStore: Send + Sync {
     fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
     fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
 
+    /// Seed default GitHub query strings if not already set.
+    /// Uses INSERT OR IGNORE so user edits are never overwritten.
+    fn seed_github_query_defaults(&self) -> Result<()>;
+
     // Usage tracking
     fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
 

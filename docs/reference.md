@@ -69,6 +69,8 @@ Press `Tab` to switch to the Review Board, which shows GitHub PRs where you are 
 
 Three columns: **Needs Review** → **Changes Requested** → **Approved**
 
+Press `e` to edit the GitHub search queries for the current tab in `$EDITOR`. Each line is a separate GitHub search query. Queries are stored per-category (Review PRs, My PRs, Bot PRs) and persist across sessions.
+
 Requires `gh` CLI authenticated:
 
 ```bash

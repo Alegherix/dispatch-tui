@@ -32,6 +32,7 @@ impl App {
             InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
 
             InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
+            InputMode::ConfirmMergePr(_) => self.handle_key_confirm_merge_pr(key),
             InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
             InputMode::ConfirmEpicWrapUp(_) => self.handle_key_confirm_epic_wrap_up(key),
             InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
@@ -179,6 +180,14 @@ impl App {
                     } else {
                         self.update(Message::StatusInfo("No PR URL".to_string()))
                     }
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('P') => {
+                if let Some(task) = self.selected_task() {
+                    let id = task.id;
+                    self.update(Message::StartMergePr(id))
                 } else {
                     vec![]
                 }
@@ -586,6 +595,13 @@ impl App {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmDone),
             _ => self.update(Message::CancelDone),
+        }
+    }
+
+    fn handle_key_confirm_merge_pr(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::ConfirmMergePr),
+            _ => self.update(Message::CancelMergePr),
         }
     }
 

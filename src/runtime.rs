@@ -1032,6 +1032,25 @@ impl TuiRuntime {
         });
     }
 
+    fn exec_merge_pr(&self, id: TaskId, pr_url: String) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+
+        tokio::task::spawn_blocking(move || {
+            match dispatch::merge_pr(&pr_url, &*runner) {
+                Ok(()) => {
+                    let _ = tx.send(Message::PrMerged(id));
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::MergePrFailed {
+                        id,
+                        error: e.to_string(),
+                    });
+                }
+            }
+        });
+    }
+
     fn exec_fetch_review_prs(&self) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
@@ -1428,6 +1447,7 @@ async fn execute_commands(
                 description,
             } => rt.exec_create_pr(id, repo_path, branch, title, description),
             Command::CheckPrStatus { id, pr_url } => rt.exec_check_pr_status(id, pr_url),
+            Command::MergePr { id, pr_url } => rt.exec_merge_pr(id, pr_url),
             Command::PersistStringSetting { key, value } => {
                 rt.exec_persist_string_setting(app, &key, &value)
             }

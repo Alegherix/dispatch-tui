@@ -10200,3 +10200,109 @@ fn render_review_board_dependabot_empty_shows_no_prs() {
         "dependabot mode with no bot-PRs should show 'No PRs found'"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Merge PR tests
+// ---------------------------------------------------------------------------
+
+fn make_approved_review_task(id: i64) -> Task {
+    let mut task = make_task(id, TaskStatus::Review);
+    task.pr_url = Some(format!("https://github.com/owner/repo/pull/{id}"));
+    task.sub_status = SubStatus::Approved;
+    task.worktree = Some(format!("/repo/.worktrees/{id}-task-{id}"));
+    task
+}
+
+#[test]
+fn merge_pr_key_on_approved_task_enters_confirm_mode() {
+    let mut app = App::new(vec![make_approved_review_task(1)], TEST_TIMEOUT);
+    // Navigate to review column
+    app.update(Message::NavigateColumn(1)); // running
+    app.update(Message::NavigateColumn(1)); // review
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.input.mode, InputMode::ConfirmMergePr(TaskId(1))));
+}
+
+#[test]
+fn merge_pr_key_on_non_review_task_shows_status() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("not in review"));
+}
+
+#[test]
+fn merge_pr_key_on_review_without_pr_url_shows_status() {
+    let mut app = App::new(
+        vec![{
+            let mut t = make_task(1, TaskStatus::Review);
+            t.sub_status = SubStatus::Approved;
+            t
+        }],
+        TEST_TIMEOUT,
+    );
+    app.update(Message::NavigateColumn(1)); // running
+    app.update(Message::NavigateColumn(1)); // review
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("no PR"));
+}
+
+#[test]
+fn merge_pr_key_on_awaiting_review_shows_status() {
+    let mut app = App::new(
+        vec![{
+            let mut t = make_task(1, TaskStatus::Review);
+            t.pr_url = Some("https://github.com/owner/repo/pull/1".to_string());
+            t.sub_status = SubStatus::AwaitingReview;
+            t
+        }],
+        TEST_TIMEOUT,
+    );
+    app.update(Message::NavigateColumn(1)); // running
+    app.update(Message::NavigateColumn(1)); // review
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("awaiting review"));
+}
+
+#[test]
+fn confirm_merge_pr_emits_merge_command() {
+    let mut app = App::new(vec![make_approved_review_task(1)], TEST_TIMEOUT);
+    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(
+        &cmds[0],
+        Command::MergePr { id: TaskId(1), pr_url } if pr_url == "https://github.com/owner/repo/pull/1"
+    ));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn cancel_merge_pr_resets_mode() {
+    let mut app = App::new(vec![make_approved_review_task(1)], TEST_TIMEOUT);
+    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn merge_pr_failed_sets_status_message() {
+    let mut app = App::new(vec![make_approved_review_task(1)], TEST_TIMEOUT);
+
+    let cmds = app.update(Message::MergePrFailed {
+        id: TaskId(1),
+        error: "CI checks failing".to_string(),
+    });
+    assert!(cmds.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("CI checks failing"));
+}

@@ -1708,6 +1708,12 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled("(Review tasks, supports batch)", note),
             ]),
             Line::from(vec![
+                Span::styled("  P", key),
+                Span::styled(" merge PR  ", desc),
+                Span::styled("p", key),
+                Span::styled(" open PR in browser", desc),
+            ]),
+            Line::from(vec![
                 Span::styled("  J/K", key),
                 Span::styled(" reorder item up/down in column", desc),
             ]),
@@ -2160,6 +2166,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmMergePr(_) => {
+            let text = app
+                .status_message
+                .as_deref()
+                .unwrap_or("Merge PR? (y/n)");
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Green));
+            frame.render_widget(bar, area);
+        }
         InputMode::ConfirmWrapUp(_) => {
             let text = app
                 .status_message
@@ -2290,6 +2304,9 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
         }
         if task.pr_url.is_some() {
             push_hint("p", "open PR");
+            if task.sub_status == SubStatus::Approved {
+                push_hint("P", "merge");
+            }
         }
     }
 

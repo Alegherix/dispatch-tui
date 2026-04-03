@@ -211,6 +211,13 @@ pub enum Message {
         error: String,
     },
     PrMerged(TaskId),
+    StartMergePr(TaskId),
+    ConfirmMergePr,
+    CancelMergePr,
+    MergePrFailed {
+        id: TaskId,
+        error: String,
+    },
     PrReviewState {
         id: TaskId,
         review_decision: Option<crate::dispatch::PrReviewDecision>,
@@ -421,6 +428,10 @@ pub enum Command {
         id: TaskId,
         pr_url: String,
     },
+    MergePr {
+        id: TaskId,
+        pr_url: String,
+    },
     FetchReviewPrs,
     PersistReviewPrs(Vec<crate::models::ReviewPr>),
     FetchMyPrs,
@@ -466,6 +477,7 @@ pub enum InputMode {
     ConfirmRetry(TaskId),
     ConfirmArchive,
     ConfirmDone(TaskId),
+    ConfirmMergePr(TaskId),
     ConfirmWrapUp(TaskId),
     ConfirmDetachTmux(Vec<TaskId>),
     // Epic input modes

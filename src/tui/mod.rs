@@ -735,6 +735,10 @@ impl App {
             Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
             Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
+            Message::StartMergePr(id) => self.handle_start_merge_pr(id),
+            Message::ConfirmMergePr => self.handle_confirm_merge_pr(),
+            Message::CancelMergePr => self.handle_cancel_merge_pr(),
+            Message::MergePrFailed { id, error } => self.handle_merge_pr_failed(id, error),
             Message::PrReviewState {
                 id,
                 review_decision,
@@ -2256,6 +2260,71 @@ impl App {
         }
 
         cmds
+    }
+
+    fn handle_start_merge_pr(&mut self, id: TaskId) -> Vec<Command> {
+        let task = match self.find_task(id) {
+            Some(t) => t,
+            None => return vec![],
+        };
+
+        if task.status != TaskStatus::Review {
+            return self.update(Message::StatusInfo("Task is not in review".to_string()));
+        }
+        if task.pr_url.is_none() {
+            return self.update(Message::StatusInfo("Task has no PR".to_string()));
+        }
+        if task.sub_status != SubStatus::Approved {
+            let label = match task.sub_status {
+                SubStatus::AwaitingReview => "awaiting review",
+                SubStatus::ChangesRequested => "changes requested",
+                _ => "not approved",
+            };
+            return self.update(Message::StatusInfo(format!("Cannot merge: PR is {label}")));
+        }
+
+        let pr_label = task
+            .pr_url
+            .as_deref()
+            .and_then(crate::models::pr_number_from_url)
+            .map_or("PR".to_string(), |n| format!("PR #{n}"));
+        let title = truncate_title(&task.title, 30);
+
+        self.input.mode = InputMode::ConfirmMergePr(id);
+        self.set_status(format!("Merge {pr_label} for {title}? (y/n)"));
+        vec![]
+    }
+
+    fn handle_confirm_merge_pr(&mut self) -> Vec<Command> {
+        let id = match self.input.mode {
+            InputMode::ConfirmMergePr(id) => id,
+            _ => return vec![],
+        };
+        self.input.mode = InputMode::Normal;
+
+        let pr_url = match self.find_task(id).and_then(|t| t.pr_url.clone()) {
+            Some(url) => url,
+            None => {
+                self.clear_status();
+                return vec![];
+            }
+        };
+
+        let pr_label = crate::models::pr_number_from_url(&pr_url)
+            .map_or("PR".to_string(), |n| format!("PR #{n}"));
+        self.set_status(format!("Merging {pr_label}..."));
+        vec![Command::MergePr { id, pr_url }]
+    }
+
+    fn handle_cancel_merge_pr(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clear_status();
+        vec![]
+    }
+
+    fn handle_merge_pr_failed(&mut self, _id: TaskId, error: String) -> Vec<Command> {
+        self.set_status(format!("Merge failed: {error}"));
+        vec![]
     }
 
     fn handle_pr_review_state(

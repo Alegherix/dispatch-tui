@@ -9695,3 +9695,184 @@ fn render_epic_banner_not_shown_in_board_view() {
         "epic banner should not be shown in Board view"
     );
 }
+
+// --- render_detail tests (task and epic) ---
+
+#[test]
+fn render_detail_task_with_tag_shows_tag() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Bug);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "[bug]"),
+        "detail panel should show '[bug]' tag for a task with tag=Bug"
+    );
+}
+
+#[test]
+fn render_detail_task_with_pr_url() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Navigate to Review column (index 2)
+    app.update(Message::NavigateColumn(2));
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 160, 30);
+    assert!(
+        buffer_contains(&buf, "PR: https://github.com/acme/app/pull/42"),
+        "detail panel should show the PR URL"
+    );
+}
+
+#[test]
+fn render_detail_task_with_epic_reference() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.epic_id = Some(EpicId(10));
+    let mut epic = make_epic(10);
+    epic.title = "Auth Epic".to_string();
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.epics = vec![epic];
+    // Switch to Epic view so the subtask is visible (Board view hides epic subtasks)
+    app.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 160, 30);
+    assert!(
+        buffer_contains(&buf, "Epic: Auth Epic"),
+        "detail panel should show 'Epic: Auth Epic' for a task linked to that epic"
+    );
+}
+
+#[test]
+fn render_detail_task_with_usage_shows_cost() {
+    use crate::models::TaskUsage;
+    let task = make_task(1, TaskStatus::Running);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // Navigate to Running column (index 1)
+    app.update(Message::NavigateColumn(1));
+    app.detail_visible = true;
+    app.usage.insert(
+        TaskId(1),
+        TaskUsage {
+            task_id: TaskId(1),
+            cost_usd: 1.23,
+            input_tokens: 50_000,
+            output_tokens: 10_000,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            updated_at: chrono::Utc::now(),
+        },
+    );
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "$1.23"),
+        "detail panel should show usage cost '$1.23'"
+    );
+}
+
+#[test]
+fn render_detail_epic_shows_title_and_id() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.title = "Platform Migration".to_string();
+    app.epics = vec![epic];
+    // Epic is the only item in Backlog column (no standalone tasks)
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Platform Migration"),
+        "epic detail should show the title 'Platform Migration'"
+    );
+    assert!(
+        buffer_contains(&buf, "#10"),
+        "epic detail should show the id '#10'"
+    );
+}
+
+#[test]
+fn render_detail_epic_with_plan_shows_path() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.plan = Some("docs/plans/migration.md".to_string());
+    app.epics = vec![epic];
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "plan: docs/plans/migration.md"),
+        "epic detail should show 'plan: docs/plans/migration.md'"
+    );
+}
+
+#[test]
+fn render_detail_epic_shows_subtask_list() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let epic = make_epic(10);
+    app.epics = vec![epic];
+
+    let mut t1 = make_task(101, TaskStatus::Done);
+    t1.title = "Subtask Alpha".to_string();
+    t1.epic_id = Some(EpicId(10));
+    let mut t2 = make_task(102, TaskStatus::Running);
+    t2.title = "Subtask Beta".to_string();
+    t2.epic_id = Some(EpicId(10));
+    app.tasks = vec![t1, t2];
+
+    // Epic is in Backlog; subtasks are in other columns so won't appear as
+    // standalone items in column 0. The epic itself is the first item.
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Subtask Alpha"),
+        "epic detail should list subtask 'Subtask Alpha'"
+    );
+    assert!(
+        buffer_contains(&buf, "Subtask Beta"),
+        "epic detail should list subtask 'Subtask Beta'"
+    );
+}
+
+#[test]
+fn render_detail_epic_subtask_conflict_shows_warning() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let epic = make_epic(10);
+    app.epics = vec![epic];
+
+    let mut t1 = make_task(201, TaskStatus::Running);
+    t1.title = "Conflicted Task".to_string();
+    t1.epic_id = Some(EpicId(10));
+    t1.sub_status = SubStatus::Conflict;
+    app.tasks = vec![t1];
+
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "conflict"),
+        "epic detail should show 'conflict' warning for subtask with Conflict sub_status"
+    );
+}
+
+#[test]
+fn render_detail_no_selection_shows_message() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.detail_visible = true;
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "No task selected"),
+        "detail panel should show 'No task selected' when there are no items"
+    );
+}

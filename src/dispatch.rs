@@ -6,6 +6,10 @@ use crate::models::{slugify, DispatchResult, EpicId, ResumeResult, Task, TaskId,
 use crate::process::ProcessRunner;
 use crate::tmux;
 
+/// Plugin dir flag added to all Claude agent invocations so dispatched agents
+/// discover the dispatch plugin's skills and commands (e.g. /wrap-up).
+const DISPATCH_PLUGIN_DIR: &str = "--plugin-dir ~/.claude/plugins/local/dispatch";
+
 /// Epic context passed to prompt builders so agents know about their epic.
 pub struct EpicContext {
     pub epic_id: EpicId,
@@ -167,7 +171,7 @@ fn dispatch_with_prompt(
         .with_context(|| format!("failed to write {prompt_file}"))?;
     let claude_cmd = format!(
         "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt \
-         && claude --permission-mode {} \"$prompt\"'",
+         && claude {DISPATCH_PLUGIN_DIR} --permission-mode {} \"$prompt\"'",
         mode.as_flag()
     );
     tmux::send_keys(&provision.tmux_window, &claude_cmd, runner)
@@ -494,8 +498,12 @@ pub fn resume_agent(
         .context("failed to set tmux window dispatch dir")?;
     tmux::ensure_split_hook(runner).context("failed to ensure tmux split hook")?;
 
-    tmux::send_keys(&tmux_window, "claude --continue", runner)
-        .context("failed to send resume keys to tmux window")?;
+    tmux::send_keys(
+        &tmux_window,
+        &format!("claude {DISPATCH_PLUGIN_DIR} --continue"),
+        runner,
+    )
+    .context("failed to send resume keys to tmux window")?;
 
     tracing::info!(task_id = task_id.0, %tmux_window, "agent resumed");
 
@@ -968,7 +976,7 @@ pub fn dispatch_review_agent(
     };
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &prompt).with_context(|| format!("failed to write {prompt_file}"))?;
-    let claude_cmd = "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude --permission-mode acceptEdits \"$prompt\"'";
+    let claude_cmd = &format!("bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude {DISPATCH_PLUGIN_DIR} --permission-mode acceptEdits \"$prompt\"'");
     tmux::send_keys(&tmux_window, claude_cmd, runner)
         .context("failed to send keys to tmux window")?;
 
@@ -1113,7 +1121,7 @@ pub fn dispatch_fix_agent(
     );
     let prompt_file = format!("{worktree_path}/.claude-prompt");
     fs::write(&prompt_file, &prompt).with_context(|| format!("failed to write {prompt_file}"))?;
-    let claude_cmd = "bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude --permission-mode acceptEdits \"$prompt\"'";
+    let claude_cmd = &format!("bash -c 'prompt=$(cat .claude-prompt) && rm -f .claude-prompt && claude {DISPATCH_PLUGIN_DIR} --permission-mode acceptEdits \"$prompt\"'");
     tmux::send_keys(&tmux_window, claude_cmd, runner)
         .context("failed to send keys to tmux window")?;
 
@@ -2471,6 +2479,96 @@ mod tests {
         assert!(
             send_keys_arg.contains("--permission-mode acceptEdits"),
             "review agent should use acceptEdits mode, got: {send_keys_arg}"
+        );
+    }
+
+    // --- plugin-dir tests ---
+
+    #[test]
+    fn dispatch_agent_includes_plugin_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(),                   // tmux set-hook
+            MockProcessRunner::ok(),                   // tmux send-keys -l
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]);
+
+        let task = make_task(&repo_path);
+        dispatch_agent(&task, &mock, None).unwrap();
+
+        let calls = mock.recorded_calls();
+        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
+        assert!(
+            send_keys_arg.contains("--plugin-dir"),
+            "dispatch_agent should include --plugin-dir, got: {send_keys_arg}"
+        );
+        assert!(
+            send_keys_arg.contains(".claude/plugins/local/dispatch"),
+            "plugin-dir should point to local dispatch plugin, got: {send_keys_arg}"
+        );
+    }
+
+    #[test]
+    fn resume_agent_includes_plugin_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let worktree_path = dir.path().to_str().unwrap().to_string();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
+        ]);
+
+        resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        assert!(
+            send_keys_arg.contains("--plugin-dir"),
+            "resume_agent should include --plugin-dir, got: {send_keys_arg}"
+        );
+        assert!(
+            send_keys_arg.contains(".claude/plugins/local/dispatch"),
+            "plugin-dir should point to local dispatch plugin, got: {send_keys_arg}"
+        );
+    }
+
+    #[test]
+    fn review_agent_includes_plugin_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("review-99");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+            MockProcessRunner::ok(),                  // git fetch
+            MockProcessRunner::ok(),                  // tmux new-window
+            MockProcessRunner::ok(),                  // tmux send-keys -l
+            MockProcessRunner::ok(),                  // tmux send-keys Enter
+        ]);
+
+        dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", false, &mock)
+            .unwrap();
+
+        let calls = mock.recorded_calls();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        assert!(
+            send_keys_arg.contains("--plugin-dir"),
+            "review_agent should include --plugin-dir, got: {send_keys_arg}"
+        );
+        assert!(
+            send_keys_arg.contains(".claude/plugins/local/dispatch"),
+            "plugin-dir should point to local dispatch plugin, got: {send_keys_arg}"
         );
     }
 

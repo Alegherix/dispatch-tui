@@ -158,7 +158,7 @@ fn dispatch_with_prompt(
     let resolved = match base_branch {
         Some(b) => b,
         None => {
-            detected = format!("origin/{}", detect_default_branch(&repo_path, runner));
+            detected = detect_default_branch(&repo_path, runner);
             &detected
         }
     };

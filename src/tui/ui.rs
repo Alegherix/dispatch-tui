@@ -277,46 +277,12 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         ViewMode::ReviewBoard { mode, .. } => {
             spans.push(Span::styled(" Tasks ", inactive_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            let (reviewer_style, author_style, bot_style) = match mode {
-                ReviewBoardMode::Reviewer => (active_style, inactive_style, inactive_style),
-                ReviewBoardMode::Author => (inactive_style, active_style, inactive_style),
-                ReviewBoardMode::Dependabot => (inactive_style, inactive_style, active_style),
+            let label = match mode {
+                ReviewBoardMode::Reviewer => review_tab_label(app, " \u{25b8} "),
+                ReviewBoardMode::Author => my_prs_tab_label(app, " \u{25b8} "),
+                ReviewBoardMode::Dependabot => bot_prs_tab_label(app, " \u{25b8} "),
             };
-            spans.push(Span::styled(
-                review_tab_label(
-                    app,
-                    if matches!(mode, ReviewBoardMode::Reviewer) {
-                        " \u{25b8} "
-                    } else {
-                        " "
-                    },
-                ),
-                reviewer_style,
-            ));
-            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            spans.push(Span::styled(
-                my_prs_tab_label(
-                    app,
-                    if matches!(mode, ReviewBoardMode::Author) {
-                        " \u{25b8} "
-                    } else {
-                        " "
-                    },
-                ),
-                author_style,
-            ));
-            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            spans.push(Span::styled(
-                bot_prs_tab_label(
-                    app,
-                    if matches!(mode, ReviewBoardMode::Dependabot) {
-                        " \u{25b8} "
-                    } else {
-                        " "
-                    },
-                ),
-                bot_style,
-            ));
+            spans.push(Span::styled(label, active_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             spans.push(Span::styled(security_tab_label(app, " "), inactive_style));
         }

@@ -3299,6 +3299,81 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::TaskTag;
+    use crate::tui::types::TaskDraft;
+    use std::time::Duration;
+
+    fn make_test_app() -> App {
+        App::new(vec![], Duration::from_secs(300))
+    }
+
+    fn dummy_style() -> Style {
+        Style::default()
+    }
+
+    #[test]
+    fn input_description_shows_tag_when_set() {
+        let mut app = make_test_app();
+        app.input.task_draft = Some(TaskDraft {
+            title: "My task".into(),
+            tag: Some(TaskTag::Bug),
+            ..Default::default()
+        });
+        app.input.buffer = "some desc".into();
+        let lines = input_description_lines(&app, dummy_style(), dummy_style(), dummy_style());
+        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Tag: bug"), "expected tag line, got:\n{text}");
+        assert!(text.contains("Title: My task"));
+        assert!(text.contains("Description: some desc_"));
+    }
+
+    #[test]
+    fn input_description_shows_none_when_no_tag() {
+        let mut app = make_test_app();
+        app.input.task_draft = Some(TaskDraft {
+            title: "No tag task".into(),
+            tag: None,
+            ..Default::default()
+        });
+        let lines = input_description_lines(&app, dummy_style(), dummy_style(), dummy_style());
+        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Tag: none"), "expected 'Tag: none', got:\n{text}");
+    }
+
+    #[test]
+    fn input_repo_path_shows_tag_when_set() {
+        let mut app = make_test_app();
+        app.input.task_draft = Some(TaskDraft {
+            title: "Feature task".into(),
+            description: "A description".into(),
+            tag: Some(TaskTag::Feature),
+            ..Default::default()
+        });
+        app.input.buffer = "/some/path".into();
+        let area = Rect::new(0, 0, 80, 24);
+        let lines = input_repo_path_lines(&app, area, dummy_style(), dummy_style(), dummy_style());
+        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Tag: feature"), "expected tag line, got:\n{text}");
+        assert!(text.contains("Title: Feature task"));
+        assert!(text.contains("Description: A description"));
+        assert!(text.contains("Repo path: /some/path_"));
+    }
+
+    #[test]
+    fn input_repo_path_shows_none_when_no_tag() {
+        let mut app = make_test_app();
+        app.input.task_draft = Some(TaskDraft {
+            title: "Plain task".into(),
+            description: "desc".into(),
+            tag: None,
+            ..Default::default()
+        });
+        app.input.buffer.clear();
+        let area = Rect::new(0, 0, 80, 24);
+        let lines = input_repo_path_lines(&app, area, dummy_style(), dummy_style(), dummy_style());
+        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Tag: none"), "expected 'Tag: none', got:\n{text}");
+    }
 
     #[test]
     fn format_tokens_below_1000() {

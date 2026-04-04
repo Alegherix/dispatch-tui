@@ -3702,3 +3702,245 @@ async fn list_epics_excludes_archived() {
         "should not show archived epic: {text}"
     );
 }
+
+// -- dispatch_next tests ------------------------------------------------------
+
+#[tokio::test]
+async fn dispatch_next_epic_not_found_returns_error() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_next",
+            "arguments": { "epic_id": 9999 }
+        })),
+    )
+    .await;
+    assert_error(&resp, "not found");
+}
+
+#[tokio::test]
+async fn dispatch_next_no_backlog_returns_success_noop() {
+    let state = test_state();
+    let epic = state.db.create_epic("Test Epic", "desc", "/repo").unwrap();
+
+    // Add a task that's already Running (not Backlog)
+    let task_id = state
+        .db
+        .create_task("Running Task", "desc", "/repo", None, TaskStatus::Running)
+        .unwrap();
+    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_next",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("no backlog tasks"),
+        "Expected noop message, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_next_picks_first_backlog_subtask() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail(""),  // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok(),      // tmux new-window
+        MockProcessRunner::ok(),      // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),      // tmux set-hook
+        MockProcessRunner::ok(),      // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(),      // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
+    let task1_id = db
+        .create_task("Task 1", "first", &repo_path, Some("docs/plan.md"), TaskStatus::Backlog)
+        .unwrap();
+    let task2_id = db
+        .create_task("Task 2", "second", &repo_path, None, TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task2_id, Some(epic.id)).unwrap();
+
+    // Pre-create the worktree directory (mocked git won't create it)
+    std::fs::create_dir_all(
+        dir.path()
+            .join(".worktrees")
+            .join(format!("{}-task-1", task1_id.0)),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_next",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains(&format!("#{}", task1_id.0)),
+        "Expected first task ID in response, got: {text}"
+    );
+
+    // Wait for spawn_blocking to complete
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Verify the task was dispatched
+    let task1 = db.get_task(task1_id).unwrap().unwrap();
+    assert_eq!(task1.status, TaskStatus::Running);
+    assert!(task1.worktree.is_some());
+    assert!(task1.tmux_window.is_some());
+
+    // task2 should still be Backlog
+    let task2 = db.get_task(task2_id).unwrap().unwrap();
+    assert_eq!(task2.status, TaskStatus::Backlog);
+}
+
+#[tokio::test]
+async fn dispatch_next_respects_sort_order() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail(""),  // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok(),      // tmux new-window
+        MockProcessRunner::ok(),      // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),      // tmux set-hook
+        MockProcessRunner::ok(),      // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(),      // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
+
+    // task1 has higher ID but lower sort_order — should be picked second
+    let task1_id = db
+        .create_task("Task A", "first by id", &repo_path, Some("docs/plan.md"), TaskStatus::Backlog)
+        .unwrap();
+    let task2_id = db
+        .create_task("Task B", "second by id", &repo_path, Some("docs/plan.md"), TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(task2_id, Some(epic.id)).unwrap();
+
+    // Give task2 a lower sort_order so it should be picked first
+    db.patch_task(task2_id, &db::TaskPatch::new().sort_order(Some(1))).unwrap();
+    db.patch_task(task1_id, &db::TaskPatch::new().sort_order(Some(2))).unwrap();
+
+    // Pre-create worktree dir for task2 (the one that should be dispatched)
+    std::fs::create_dir_all(
+        dir.path()
+            .join(".worktrees")
+            .join(format!("{}-task-b", task2_id.0)),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_next",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains(&format!("#{}", task2_id.0)),
+        "Expected task2 (lower sort_order) to be dispatched, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_next_respects_tag_routing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail(""),  // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok(),      // tmux new-window
+        MockProcessRunner::ok(),      // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),      // tmux set-hook
+        MockProcessRunner::ok(),      // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(),      // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
+
+    // Create a feature-tagged task with no plan — should use Plan mode
+    let task_id = db
+        .create_task("Feature Task", "a feature", &repo_path, None, TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Feature)),
+    )
+    .unwrap();
+
+    // Pre-create worktree dir
+    std::fs::create_dir_all(
+        dir.path()
+            .join(".worktrees")
+            .join(format!("{}-feature-task", task_id.0)),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_next",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains(&format!("#{}", task_id.0)),
+        "Expected feature task to be dispatched, got: {text}"
+    );
+
+    // Wait for spawn_blocking
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+}

@@ -71,6 +71,8 @@ Three columns: **Needs Review** → **Changes Requested** → **Approved**
 
 Press `e` to edit the GitHub search queries for the current tab in `$EDITOR`. Each line is a separate GitHub search query. Queries are stored per-category (Review PRs, My PRs, Bot PRs) and persist across sessions.
 
+**Bot PRs tip:** The default bot queries have no org scope, so results may be dominated by public repos. Add `org:your-org` to scope them (e.g. `is:pr is:open author:app/dependabot -is:draft archived:false org:my-org`).
+
 Requires `gh` CLI authenticated:
 
 ```bash

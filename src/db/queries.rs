@@ -462,8 +462,8 @@ impl TaskStore for Database {
             ),
             (
                 "github_queries_bot",
-                "is:pr is:open author:app/dependabot -is:draft\n\
-                 is:pr is:open author:app/renovate -is:draft",
+                "is:pr is:open author:app/dependabot -is:draft archived:false\n\
+                 is:pr is:open author:app/renovate -is:draft archived:false",
             ),
         ];
         for (key, value) in defaults {

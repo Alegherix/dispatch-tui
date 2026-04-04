@@ -165,7 +165,13 @@ fn dispatch_with_prompt(
 
     let provision = provision_worktree(task, runner, Some(resolved))?;
 
-    let full_prompt = format!("{}\n\n{prompt}", rebase_preamble(resolved));
+    let full_prompt = format!(
+        "{}\n\n\
+         Always work from this worktree folder — do not `cd` to the parent repo \
+         or other directories.\n\n\
+         {prompt}",
+        rebase_preamble(resolved)
+    );
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)
         .with_context(|| format!("failed to write {prompt_file}"))?;
@@ -1372,9 +1378,16 @@ mod tests {
     #[test]
     fn rebase_preamble_prepended_to_all_prompts() {
         let body = build_prompt(TaskId(1), "Task", "Desc", None, None);
-        let full = format!("{}\n\n{body}", rebase_preamble("origin/main"));
+        let full = format!(
+            "{}\n\n\
+             Always work from this worktree folder — do not `cd` to the parent repo \
+             or other directories.\n\n\
+             {body}",
+            rebase_preamble("origin/main")
+        );
         assert!(full.contains("rebase your branch from origin/main"));
         assert!(full.starts_with("Before starting work"));
+        assert!(full.contains("Always work from this worktree folder"));
     }
 
     #[test]

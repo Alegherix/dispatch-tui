@@ -18,6 +18,10 @@ Pre-commit hook runs `cargo fmt --check` and `cargo clippy -- -D warnings` autom
 
 `docs/specs/dispatch.allium` is the **source of truth** for domain logic: task lifecycle, status transitions, sub-status invariants, dispatch rules, and epic behavior. Consult it before changing core behavior. Use `allium:tend` and `allium:weed` skills to keep spec and code aligned.
 
+## Agent Working Directory
+
+Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. This is enforced in `dispatch_with_prompt()` in `src/dispatch.rs`.
+
 ## Architecture
 
 Key patterns that aren't obvious from reading the code:

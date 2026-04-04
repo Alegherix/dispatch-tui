@@ -11,8 +11,8 @@ use crate::process::{MockProcessRunner, ProcessRunner};
 use super::dispatch::{handle_mcp, tool_definitions};
 use super::epics::{CreateEpicArgs, GetEpicArgs, UpdateEpicArgs};
 use super::tasks::{
-    ClaimTaskArgs, CreateTaskWithEpicArgs, GetTaskArgs, ListTasksArgs, ReportUsageArgs,
-    SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
+    ClaimTaskArgs, CreateTaskWithEpicArgs, DispatchNextArgs, GetTaskArgs, ListTasksArgs,
+    ReportUsageArgs, SendMessageArgs, UpdateTaskArgs, WrapUpArgs,
 };
 use super::types::{JsonRpcRequest, JsonRpcResponse};
 
@@ -1151,6 +1151,12 @@ fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["from_task_id", "to_task_id", "body"]),
             json!({"from_task_id": 1, "to_task_id": 2, "body": "Hello from task 1"}),
         ),
+        (
+            "dispatch_next",
+            BTreeSet::from(["epic_id"]),
+            BTreeSet::from(["epic_id"]),
+            json!({"epic_id": 1}),
+        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -1206,6 +1212,9 @@ fn tool_schemas_match_arg_structs() {
             }
             "send_message" => {
                 serde_json::from_value::<SendMessageArgs>(payload.clone()).unwrap();
+            }
+            "dispatch_next" => {
+                serde_json::from_value::<DispatchNextArgs>(payload.clone()).unwrap();
             }
             other => panic!("No deserialization check for tool: {other}"),
         }

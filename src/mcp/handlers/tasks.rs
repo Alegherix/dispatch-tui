@@ -447,30 +447,6 @@ pub(super) async fn handle_wrap_up(
     let notify_tx = state.notify_tx.clone();
     let task_id = task.id;
 
-    // Gather auto-dispatch context for epic subtasks.
-    let next_epic_task =
-        task.epic_id
-            .and_then(|epic_id| match state.db.list_tasks_for_epic(epic_id) {
-                Ok(tasks) => tasks.into_iter().find(|t| t.status == TaskStatus::Backlog),
-                Err(e) => {
-                    tracing::warn!(
-                        epic_id = epic_id.0,
-                        "auto-dispatch: failed to list epic tasks: {e}"
-                    );
-                    None
-                }
-            });
-
-    let auto_dispatch_msg = next_epic_task
-        .as_ref()
-        .map(|t| {
-            format!(
-                "; next epic task #{} '{}' will be dispatched",
-                t.id, t.title
-            )
-        })
-        .unwrap_or_default();
-
     match parsed.action.as_str() {
         "rebase" => {
             let db = state.db.clone();
@@ -502,14 +478,13 @@ pub(super) async fn handle_wrap_up(
                         if let Some(window) = &tmux_window {
                             let _ = crate::tmux::kill_window(window, &*ad_runner);
                         }
-                        auto_dispatch_next(next_epic_task, &*db, &*ad_runner);
                         if let Some(tx) = notify_tx {
                             let _ = tx.send(crate::mcp::McpEvent::Refresh);
                         }
                     });
                     JsonRpcResponse::ok(
                         id,
-                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase){auto_dispatch_msg}", parsed.task_id)}]}),
+                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: rebase)", parsed.task_id)}]}),
                     )
                 }
                 Err(e) => {
@@ -562,14 +537,13 @@ pub(super) async fn handle_wrap_up(
                                 );
                             }
                         }
-                        auto_dispatch_next(next_epic_task, &*db, &*ad_runner);
                         if let Some(tx) = notify_tx {
                             let _ = tx.send(crate::mcp::McpEvent::Refresh);
                         }
                     });
                     JsonRpcResponse::ok(
                         id,
-                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: pr, pr_url: {}){auto_dispatch_msg}", parsed.task_id, pr_url)}]}),
+                        json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: pr, pr_url: {})", parsed.task_id, pr_url)}]}),
                     )
                 }
                 Err(e) => {
@@ -763,54 +737,6 @@ pub(super) fn handle_send_message(
             to_task.id.0, to_task.title
         )}]}),
     )
-}
-
-/// Auto-dispatch the next epic subtask from main.
-fn auto_dispatch_next(
-    next_task: Option<Task>,
-    db: &dyn db::TaskStore,
-    runner: &dyn crate::process::ProcessRunner,
-) {
-    let Some(next_task) = next_task else { return };
-    let next_id = next_task.id;
-
-    tracing::info!(
-        next_task_id = next_id.0,
-        has_plan = next_task.plan_path.is_some(),
-        "auto-dispatching next epic subtask"
-    );
-
-    let epic_ctx = dispatch::EpicContext::from_db(&next_task, db);
-    let result = match DispatchMode::for_task(&next_task) {
-        DispatchMode::Dispatch => {
-            dispatch::dispatch_chained_agent(&next_task, runner, epic_ctx.as_ref())
-        }
-        DispatchMode::Brainstorm => {
-            dispatch::brainstorm_chained_agent(&next_task, runner, epic_ctx.as_ref())
-        }
-        DispatchMode::Plan => dispatch::plan_chained_agent(&next_task, runner, epic_ctx.as_ref()),
-    };
-
-    match result {
-        Ok(dispatch_result) => {
-            let patch = db::TaskPatch::new()
-                .status(TaskStatus::Running)
-                .worktree(Some(&dispatch_result.worktree_path))
-                .tmux_window(Some(&dispatch_result.tmux_window));
-            if let Err(e) = db.patch_task(next_id, &patch) {
-                tracing::warn!(
-                    task_id = next_id.0,
-                    "auto-dispatch: failed to update task: {e}"
-                );
-            }
-            if let Some(epic_id) = next_task.epic_id {
-                let _ = db.recalculate_epic_status(epic_id);
-            }
-        }
-        Err(e) => {
-            tracing::warn!(task_id = next_id.0, "auto-dispatch: dispatch failed: {e:#}");
-        }
-    }
 }
 
 pub(super) fn handle_report_usage(

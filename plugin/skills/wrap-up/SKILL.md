@@ -30,7 +30,15 @@ Extract the leading integer from the `{id}-{slug}` pattern (e.g. `42-fix-login-b
 If the branch does not match the `{id}-{slug}` pattern, stop and tell the user:
 > "This branch doesn't follow the dispatch naming convention (`{id}-{slug}`). Cannot determine task ID."
 
-## Step 2: Commit uncommitted changes
+## Step 2: Dispatch next epic subtask
+
+Call the `dispatch` MCP tool `get_task` with the task ID from Step 1.
+
+If the task has an `epic_id`, call the `dispatch` MCP tool `dispatch_next` with that `epic_id`. This fires the next agent immediately — before any user interaction.
+
+If the task does not have an `epic_id`, skip this step.
+
+## Step 3: Commit uncommitted changes
 
 Run:
 ```bash
@@ -47,9 +55,9 @@ If there are changes, commit them inline — do NOT invoke a commit skill or del
 
 Do NOT spend time perfecting the commit message. The goal is to capture the changes, not write a polished commit. Once committed, proceed immediately to Step 3.
 
-## Step 3: Ask the user to choose — MANDATORY
+## Step 4: Ask the user to choose — MANDATORY
 
-**You MUST use the `AskUserQuestion` tool here.** Do NOT skip this step. Do NOT assume a default. Do NOT proceed to Step 4 without an explicit answer from the user.
+**You MUST use the `AskUserQuestion` tool here.** Do NOT skip this step. Do NOT assume a default. Do NOT proceed to Step 5 without an explicit answer from the user.
 
 Use the `AskUserQuestion` tool with a question like:
 
@@ -60,11 +68,9 @@ Use the `AskUserQuestion` tool with a question like:
 
 If the user cancels or says no, exit without calling any tool.
 
-## Step 4: Execute the chosen action
+## Step 5: Execute the chosen action
 
 The task is automatically moved to "done" on success. Do not update the task status yourself.
-
-**Epic auto-dispatch:** If this task belongs to an epic, the next backlog subtask will be automatically dispatched after wrap-up (both rebase and PR). The next task's worktree branches from this task's branch. No extra action is needed.
 
 ### If rebase:
 

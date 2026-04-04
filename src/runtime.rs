@@ -20,6 +20,9 @@ use tempfile::Builder as TempfileBuilder;
 /// Interval between TUI tick events (captures tmux output, checks staleness, etc.).
 const TICK_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Name used for the TUI's tmux window (visible in tmux status bar).
+const TUI_WINDOW_NAME: &str = "TUI";
+
 use crate::db::{EpicPatch, TaskStore};
 use crate::editor::{
     format_description_for_editor, format_editor_content, format_epic_for_editor,
@@ -31,6 +34,24 @@ use crate::tui::{
     self, App, Command, Message, RepoFilterMode, ReviewAgentRequest, ReviewBoardMode,
 };
 use crate::{db, dispatch, mcp, models, tmux};
+
+/// Set up tmux for the TUI: rename the current window and bind Prefix+g to jump back.
+fn setup_tmux_for_tui(runner: &dyn ProcessRunner) {
+    let _ = tmux::rename_window("", TUI_WINDOW_NAME, runner);
+    let _ = tmux::bind_key(
+        "g",
+        &format!("select-window -t {TUI_WINDOW_NAME}"),
+        runner,
+    );
+}
+
+/// Tear down tmux TUI state: unbind the key and restore the original window name.
+fn teardown_tmux_for_tui(original_name: Option<&str>, runner: &dyn ProcessRunner) {
+    let _ = tmux::unbind_key("g", runner);
+    if let Some(name) = original_name {
+        let _ = tmux::rename_window(TUI_WINDOW_NAME, name, runner);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // run_tui — entry point for the TUI mode
@@ -150,8 +171,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     // Best-effort: failures don't prevent the TUI from starting.
     let tmux_runner = runner.clone();
     let original_window_name = tmux::current_window_name(&*tmux_runner).ok();
-    let _ = tmux::rename_window("", "dispatch", &*tmux_runner);
-    let _ = tmux::bind_key("g", "select-window -t dispatch", &*tmux_runner);
+    setup_tmux_for_tui(&*tmux_runner);
 
     // 5. Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -202,10 +222,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     .await;
 
     // Tear down tmux keybinding and restore the original window name.
-    let _ = tmux::unbind_key("g", &*tmux_runner);
-    if let Some(ref name) = original_window_name {
-        let _ = tmux::rename_window("dispatch", name, &*tmux_runner);
-    }
+    teardown_tmux_for_tui(original_window_name.as_deref(), &*tmux_runner);
 
     // 8. Cleanup terminal
     disable_raw_mode()?;
@@ -1627,6 +1644,56 @@ mod tests {
             TuiRuntime::db_error("creating task", "disk full"),
             "DB error creating task: disk full"
         );
+    }
+
+    #[test]
+    fn setup_tmux_for_tui_renames_window_and_binds_key() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // rename_window
+            MockProcessRunner::ok(), // bind_key
+        ]);
+        setup_tmux_for_tui(&mock);
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[0].1,
+            vec!["rename-window", "-t", "", TUI_WINDOW_NAME]
+        );
+        assert_eq!(
+            calls[1].1,
+            vec![
+                "bind-key",
+                "g",
+                &format!("select-window -t {TUI_WINDOW_NAME}")
+            ]
+        );
+    }
+
+    #[test]
+    fn teardown_tmux_for_tui_unbinds_and_restores_name() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // unbind_key
+            MockProcessRunner::ok(), // rename_window
+        ]);
+        teardown_tmux_for_tui(Some("my-shell"), &mock);
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
+        assert_eq!(
+            calls[1].1,
+            vec!["rename-window", "-t", TUI_WINDOW_NAME, "my-shell"]
+        );
+    }
+
+    #[test]
+    fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // unbind_key
+        ]);
+        teardown_tmux_for_tui(None, &mock);
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
     }
 
     fn test_runtime() -> (TuiRuntime, App) {

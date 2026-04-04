@@ -9191,8 +9191,8 @@ fn render_status_bar_input_description() {
     app.input.mode = InputMode::InputDescription;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Creating task: enter description"),
-        "InputDescription mode should show 'Creating task: enter description'"
+        buffer_contains(&buf, "Creating task: opening $EDITOR for description"),
+        "InputDescription mode should show 'Creating task: opening $EDITOR for description'"
     );
 }
 
@@ -9320,8 +9320,8 @@ fn render_status_bar_epic_description() {
     app.input.mode = InputMode::InputEpicDescription;
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        buffer_contains(&buf, "Creating epic: enter description"),
-        "InputEpicDescription should show 'Creating epic: enter description'"
+        buffer_contains(&buf, "Creating epic: opening $EDITOR for description"),
+        "InputEpicDescription should show 'Creating epic: opening $EDITOR for description'"
     );
 }
 
@@ -9495,19 +9495,14 @@ fn render_input_form_description_shows_completed_title() {
         title: "Draft title".to_string(),
         ..Default::default()
     });
-    app.input.buffer = "Some desc".to_string();
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "Draft title"),
         "completed title 'Draft title' should be visible"
     );
     assert!(
-        buffer_contains(&buf, "Description:"),
-        "'Description:' label should be visible"
-    );
-    assert!(
-        buffer_contains(&buf, "Some desc"),
-        "buffer text 'Some desc' should be visible"
+        buffer_contains(&buf, "Description: opening $EDITOR"),
+        "'Description: opening $EDITOR...' should be visible"
     );
 }
 

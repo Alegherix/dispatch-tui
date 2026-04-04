@@ -3333,7 +3333,7 @@ mod tests {
         let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
         assert!(text.contains("Tag: bug"), "expected tag line, got:\n{text}");
         assert!(text.contains("Title: My task"));
-        assert!(text.contains("Description: some desc_"));
+        assert!(text.contains("Description: opening $EDITOR"));
     }
 
     #[test]

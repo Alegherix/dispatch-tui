@@ -1750,16 +1750,18 @@ mod tests {
         let task = make_task(&repo_path);
         dispatch_agent(&task, &mock, None).unwrap();
 
-        // Verify the prompt uses the detected branch
+        // Verify the prompt uses the detected branch.
+        // detect_default_branch strips the refs/remotes/origin/ prefix,
+        // returning just "master".
         let prompt_file = worktree_dir.join(".claude-prompt");
         let prompt = std::fs::read_to_string(prompt_file).unwrap();
         assert!(
-            prompt.contains("origin/master"),
-            "prompt should reference origin/master, got: {prompt}"
+            prompt.contains("rebase your branch from master"),
+            "prompt should reference master, got: {prompt}"
         );
         assert!(
-            !prompt.contains("origin/main"),
-            "prompt should not reference origin/main"
+            !prompt.contains("rebase your branch from main"),
+            "prompt should not reference main as default branch"
         );
     }
 

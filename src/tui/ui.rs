@@ -10,8 +10,8 @@ use ratatui::{
 use super::{App, ColumnItem, ColumnLayout, InputMode, RepoFilterMode, ReviewBoardMode, ViewMode};
 use crate::dispatch;
 use crate::models::{
-    epic_substatus, format_age, CiStatus, Epic, ReviewDecision, ReviewPr, Staleness, SubStatus,
-    Task, TaskId, TaskStatus, TaskUsage,
+    epic_substatus, format_age, CiStatus, Epic, EpicSubstatus, ReviewDecision, ReviewPr, Staleness,
+    SubStatus, Task, TaskId, TaskStatus, TaskUsage,
 };
 
 // ── Tokyo Night palette ─────────────────────────────────────────────
@@ -724,6 +724,16 @@ fn render_columns(frame: &mut Frame, app: &mut App, area: Rect, now: DateTime<Ut
     }
 }
 
+fn epic_substatus_color(substatus: &EpicSubstatus) -> Color {
+    match substatus {
+        EpicSubstatus::Blocked(_) => Color::Yellow,
+        EpicSubstatus::InReview => CYAN,
+        EpicSubstatus::WrappingUp => GREEN,
+        EpicSubstatus::Active | EpicSubstatus::Unplanned | EpicSubstatus::Planned => MUTED,
+        EpicSubstatus::Done => MUTED,
+    }
+}
+
 fn render_epic_item(
     epic: &Epic,
     is_cursor: bool,
@@ -802,7 +812,10 @@ fn render_epic_item(
                 ));
             }
         }
-        spans.push(Span::styled(substatus.label(), Style::default().fg(MUTED)));
+        spans.push(Span::styled(
+            substatus.label(),
+            Style::default().fg(epic_substatus_color(&substatus)),
+        ));
         Line::from(spans)
     } else {
         Line::from(vec![

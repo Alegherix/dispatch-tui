@@ -1631,7 +1631,7 @@ fn recalculate_epic_status_advances_to_running() {
 }
 
 #[test]
-fn recalculate_epic_status_does_not_move_backward() {
+fn recalculate_epic_status_moves_backward_from_review_to_running() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo").unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
@@ -1646,7 +1646,53 @@ fn recalculate_epic_status_does_not_move_backward() {
 
     db.recalculate_epic_status(epic.id).unwrap();
     let epic = db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Review);
+    assert_eq!(epic.status, TaskStatus::Running);
+}
+
+#[test]
+fn recalculate_epic_status_moves_backward_from_review_to_backlog() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
+        .unwrap();
+
+    let task = db
+        .create_task_returning("T1", "", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
+
+    db.recalculate_epic_status(epic.id).unwrap();
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Backlog);
+}
+
+#[test]
+fn recalculate_epic_status_moves_backward_when_review_subtask_completes() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+
+    let t1 = db
+        .create_task_returning("T1", "", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
+    db.patch_task(t1.id, &TaskPatch::new().status(TaskStatus::Running))
+        .unwrap();
+
+    let t2 = db
+        .create_task_returning("T2", "", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
+    db.patch_task(t2.id, &TaskPatch::new().status(TaskStatus::Done))
+        .unwrap();
+
+    // Manually set epic to Review (simulating a subtask that was in review and then moved to done)
+    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
+        .unwrap();
+
+    db.recalculate_epic_status(epic.id).unwrap();
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    // Should drop back to Running since no subtask is in review but one is running
+    assert_eq!(epic.status, TaskStatus::Running);
 }
 
 #[test]

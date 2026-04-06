@@ -1028,7 +1028,7 @@ rule DeleteEpic {
 
 @invariant EpicStatusRecalculation
     -- Epic status is persisted and recalculated via recalculate_epic_status.
-    -- It only advances forward (never moves to a lower-priority status).
+    -- It moves both forward and backward to always reflect subtask reality.
     -- Derivation logic (checked in priority order):
     --   no active subtasks            => backlog
     --   all active subtasks done      => done
@@ -1036,9 +1036,7 @@ rule DeleteEpic {
     --   any active subtask running    => running
     --   otherwise                     => backlog
     -- The derived status is compared to the current epic.status; it is
-    -- only applied if the derived status is further forward (higher
-    -- column_index) than the current status. This prevents backward
-    -- movement when subtasks are archived or moved back.
+    -- applied whenever the derived status differs from the current status.
     --
     -- Epic substatus (display label for epic cards):
     --   backlog + no plan             => unplanned

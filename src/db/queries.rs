@@ -395,8 +395,7 @@ impl TaskStore for Database {
             TaskStatus::Backlog
         };
 
-        // Only advance forward, never backward
-        if derived.column_index() > epic.status.column_index() {
+        if derived != epic.status {
             self.patch_epic(epic_id, &EpicPatch::new().status(derived))?;
         }
         Ok(())

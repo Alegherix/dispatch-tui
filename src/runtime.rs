@@ -33,7 +33,16 @@ use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::tui::{
     self, App, Command, Message, RepoFilterMode, ReviewAgentRequest, ReviewBoardMode,
 };
+use crate::service::FieldUpdate;
 use crate::{db, dispatch, mcp, models, tmux};
+
+/// Convert `Option<String>` to `FieldUpdate`: `Some(v)` → `Set(v)`, `None` → `Clear`.
+fn option_to_field_update(opt: Option<String>) -> FieldUpdate {
+    match opt {
+        Some(v) => FieldUpdate::Set(v),
+        None => FieldUpdate::Clear,
+    }
+}
 
 /// Set up tmux for the TUI: rename the current window and bind Prefix+g to jump back.
 fn setup_tmux_for_tui(runner: &dyn ProcessRunner) {
@@ -108,10 +117,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         .get_setting_string("repo_filter_mode")
         .unwrap_or(None)
     {
-        let mode = match mode_str.as_str() {
-            "exclude" => RepoFilterMode::Exclude,
-            _ => RepoFilterMode::Include,
-        };
+        let mode = mode_str.parse().unwrap_or_default();
         app.set_repo_filter_mode(mode);
     }
 
@@ -122,10 +128,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
                 .into_iter()
                 .map(|(name, paths, mode_str)| {
                     let set: HashSet<String> = paths.into_iter().collect();
-                    let mode = match mode_str.as_str() {
-                        "exclude" => RepoFilterMode::Exclude,
-                        _ => RepoFilterMode::Include,
-                    };
+                    let mode = mode_str.parse().unwrap_or_default();
                     (name, set, mode)
                 })
                 .collect();
@@ -424,12 +427,12 @@ impl TuiRuntime {
             description: None,
             repo_path: None,
             sort_order: task.sort_order,
-            pr_url: Some(task.pr_url.clone().unwrap_or_default()),
+            pr_url: Some(option_to_field_update(task.pr_url.clone())),
             tag: None,
             sub_status: Some(task.sub_status),
             epic_id: None,
-            worktree: Some(task.worktree.clone().unwrap_or_default()),
-            tmux_window: Some(task.tmux_window.clone().unwrap_or_default()),
+            worktree: Some(option_to_field_update(task.worktree.clone())),
+            tmux_window: Some(option_to_field_update(task.tmux_window.clone())),
         }) {
             app.update(Message::Error(Self::db_error("persisting task", e)));
         }
@@ -772,11 +775,7 @@ impl TuiRuntime {
                 .map(|(name, paths, mode_str)| {
                     let repos: std::collections::HashSet<String> =
                         paths.into_iter().filter(|p| known.contains(p)).collect();
-                    let mode = if mode_str == "exclude" {
-                        crate::tui::RepoFilterMode::Exclude
-                    } else {
-                        crate::tui::RepoFilterMode::Include
-                    };
+                    let mode = mode_str.parse().unwrap_or_default();
                     (name, repos, mode)
                 })
                 .collect();
@@ -992,8 +991,8 @@ impl TuiRuntime {
                 tag: None,
                 sub_status: None,
                 epic_id: None,
-                worktree: Some(String::new()),
-                tmux_window: Some(String::new()),
+                worktree: Some(FieldUpdate::Clear),
+                tmux_window: Some(FieldUpdate::Clear),
             }) {
                 let _ = self
                     .msg_tx
@@ -1045,8 +1044,8 @@ impl TuiRuntime {
                 tag: None,
                 sub_status: None,
                 epic_id: None,
-                worktree: Some(String::new()),
-                tmux_window: Some(String::new()),
+                worktree: Some(FieldUpdate::Clear),
+                tmux_window: Some(FieldUpdate::Clear),
             }) {
                 let _ = self
                     .msg_tx
@@ -1795,11 +1794,7 @@ async fn execute_commands(
                 repo_paths,
                 mode,
             } => {
-                let mode_str = match mode {
-                    RepoFilterMode::Include => "include",
-                    RepoFilterMode::Exclude => "exclude",
-                };
-                rt.exec_persist_filter_preset(app, &name, &repo_paths, mode_str);
+                rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str());
             }
             Command::DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name),
             Command::DeleteRepoPath(path) => rt.exec_delete_repo_path(app, &path),

@@ -256,7 +256,13 @@ pub(super) fn handle_update_task(
         description: parsed.description,
         repo_path: parsed.repo_path,
         sort_order: parsed.sort_order,
-        pr_url: parsed.pr_url,
+        pr_url: parsed.pr_url.map(|s| {
+            if s.is_empty() {
+                crate::service::FieldUpdate::Clear
+            } else {
+                crate::service::FieldUpdate::Set(s)
+            }
+        }),
         tag: parsed.tag,
         sub_status: parsed.sub_status,
         epic_id: parsed.epic_id,

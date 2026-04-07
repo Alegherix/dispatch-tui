@@ -30,6 +30,18 @@ impl std::fmt::Display for ServiceError {
 impl std::error::Error for ServiceError {}
 
 // ---------------------------------------------------------------------------
+// FieldUpdate — explicit set-or-clear for nullable string fields
+// ---------------------------------------------------------------------------
+
+/// Replaces the `Option<String>` + empty-string sentinel pattern.
+/// `Set(value)` sets the field, `Clear` sets it to NULL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldUpdate {
+    Set(String),
+    Clear,
+}
+
+// ---------------------------------------------------------------------------
 // UpdateTaskParams — transport-agnostic input for update_task
 // ---------------------------------------------------------------------------
 
@@ -41,14 +53,12 @@ pub struct UpdateTaskParams {
     pub description: Option<String>,
     pub repo_path: Option<String>,
     pub sort_order: Option<i64>,
-    pub pr_url: Option<String>,
+    pub pr_url: Option<FieldUpdate>,
     pub tag: Option<TaskTag>,
     pub sub_status: Option<SubStatus>,
     pub epic_id: Option<i64>,
-    /// Set worktree path. Empty string clears the field.
-    pub worktree: Option<String>,
-    /// Set tmux window name. Empty string clears the field.
-    pub tmux_window: Option<String>,
+    pub worktree: Option<FieldUpdate>,
+    pub tmux_window: Option<FieldUpdate>,
 }
 
 impl UpdateTaskParams {
@@ -183,29 +193,25 @@ impl TaskService {
         if let Some(so) = params.sort_order {
             patch = patch.sort_order(Some(so));
         }
-        if let Some(ref url) = params.pr_url {
-            if url.is_empty() {
-                patch = patch.pr_url(None);
-            } else {
-                patch = patch.pr_url(Some(url.as_str()));
+        if let Some(ref update) = params.pr_url {
+            match update {
+                FieldUpdate::Set(url) => patch = patch.pr_url(Some(url.as_str())),
+                FieldUpdate::Clear => patch = patch.pr_url(None),
             }
         }
         if let Some(tag) = params.tag {
             patch = patch.tag(Some(tag));
         }
-        // worktree: empty string = clear (set to None), non-empty = set
-        if let Some(ref wt) = params.worktree {
-            if wt.is_empty() {
-                patch = patch.worktree(None);
-            } else {
-                patch = patch.worktree(Some(wt.as_str()));
+        if let Some(ref update) = params.worktree {
+            match update {
+                FieldUpdate::Set(wt) => patch = patch.worktree(Some(wt.as_str())),
+                FieldUpdate::Clear => patch = patch.worktree(None),
             }
         }
-        if let Some(ref tw) = params.tmux_window {
-            if tw.is_empty() {
-                patch = patch.tmux_window(None);
-            } else {
-                patch = patch.tmux_window(Some(tw.as_str()));
+        if let Some(ref update) = params.tmux_window {
+            match update {
+                FieldUpdate::Set(tw) => patch = patch.tmux_window(Some(tw.as_str())),
+                FieldUpdate::Clear => patch = patch.tmux_window(None),
             }
         }
 
@@ -1512,8 +1518,8 @@ mod tests {
             tag: None,
             sub_status: None,
             epic_id: None,
-            worktree: Some("/repo/.worktrees/feat".into()),
-            tmux_window: Some("task-1".into()),
+            worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
+            tmux_window: Some(FieldUpdate::Set("task-1".into())),
         })
         .unwrap();
 
@@ -1552,12 +1558,12 @@ mod tests {
             tag: None,
             sub_status: None,
             epic_id: None,
-            worktree: Some("/repo/.worktrees/feat".into()),
-            tmux_window: Some("task-1".into()),
+            worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
+            tmux_window: Some(FieldUpdate::Set("task-1".into())),
         })
         .unwrap();
 
-        // Clear worktree via ClearWorktree sentinel
+        // Clear worktree via FieldUpdate::Clear
         svc.update_task(UpdateTaskParams {
             task_id: id.0,
             status: Some(TaskStatus::Done),
@@ -1570,8 +1576,8 @@ mod tests {
             tag: None,
             sub_status: None,
             epic_id: None,
-            worktree: Some(String::new()), // empty string = clear
-            tmux_window: Some(String::new()),
+            worktree: Some(FieldUpdate::Clear),
+            tmux_window: Some(FieldUpdate::Clear),
         })
         .unwrap();
 
@@ -1648,5 +1654,167 @@ mod tests {
         let svc = epic_svc(&db);
         let err = svc.delete_epic(999).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
+    }
+
+    // --- FieldUpdate ---
+
+    #[test]
+    fn field_update_set_has_value() {
+        let fu: FieldUpdate = FieldUpdate::Set("hello".to_string());
+        assert!(matches!(fu, FieldUpdate::Set(ref s) if s == "hello"));
+    }
+
+    #[test]
+    fn field_update_clear_is_clear() {
+        let fu: FieldUpdate = FieldUpdate::Clear;
+        assert!(matches!(fu, FieldUpdate::Clear));
+    }
+
+    #[test]
+    fn update_task_worktree_set_persists() {
+        let db = test_db();
+        let svc = task_svc(&db);
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "t".into(),
+                description: "d".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: Some(TaskStatus::Running),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: Some(FieldUpdate::Set("/wt".to_string())),
+            tmux_window: Some(FieldUpdate::Set("win".to_string())),
+        })
+        .unwrap();
+        let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+        assert_eq!(task.worktree.as_deref(), Some("/wt"));
+        assert_eq!(task.tmux_window.as_deref(), Some("win"));
+    }
+
+    #[test]
+    fn update_task_worktree_clear_sets_null() {
+        let db = test_db();
+        let svc = task_svc(&db);
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "t".into(),
+                description: "d".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+        // First set a value
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: Some(TaskStatus::Running),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: Some(FieldUpdate::Set("/wt".to_string())),
+            tmux_window: Some(FieldUpdate::Set("win".to_string())),
+        })
+        .unwrap();
+        // Then clear it
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: None,
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: Some(FieldUpdate::Clear),
+            tmux_window: Some(FieldUpdate::Clear),
+        })
+        .unwrap();
+        let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+        assert_eq!(task.worktree, None);
+        assert_eq!(task.tmux_window, None);
+    }
+
+    #[test]
+    fn update_task_pr_url_set_and_clear() {
+        let db = test_db();
+        let svc = task_svc(&db);
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "t".into(),
+                description: "d".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+        // Set PR URL
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: None,
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: Some(FieldUpdate::Set("https://github.com/org/repo/pull/1".to_string())),
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: None,
+            tmux_window: None,
+        })
+        .unwrap();
+        let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+        assert_eq!(
+            task.pr_url.as_deref(),
+            Some("https://github.com/org/repo/pull/1")
+        );
+        // Clear PR URL
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: None,
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: Some(FieldUpdate::Clear),
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: None,
+            tmux_window: None,
+        })
+        .unwrap();
+        let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
+        assert_eq!(task.pr_url, None);
     }
 }

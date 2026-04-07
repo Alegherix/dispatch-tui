@@ -1159,6 +1159,37 @@ pub struct SecurityAlert {
 }
 
 // ---------------------------------------------------------------------------
+// PrRef — newtype for (repo, PR number) tuples
+// ---------------------------------------------------------------------------
+
+/// A reference to a pull request or security alert, identified by repo and number.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PrRef {
+    repo: String,
+    number: i64,
+}
+
+impl PrRef {
+    pub fn new(repo: String, number: i64) -> Self {
+        Self { repo, number }
+    }
+
+    pub fn repo(&self) -> &str {
+        &self.repo
+    }
+
+    pub fn number(&self) -> i64 {
+        self.number
+    }
+}
+
+impl std::fmt::Display for PrRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}#{}", self.repo, self.number)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // pr_number_from_url
 // ---------------------------------------------------------------------------
 
@@ -2278,5 +2309,38 @@ mod security_tests {
         assert_eq!(ReviewAgentStatus::Reviewing.to_string(), "reviewing");
         assert_eq!(ReviewAgentStatus::FindingsReady.to_string(), "ready");
         assert_eq!(ReviewAgentStatus::Idle.to_string(), "idle");
+    }
+
+    // --- PrRef ---
+
+    #[test]
+    fn pr_ref_new_and_accessors() {
+        let pr = PrRef::new("org/repo".to_string(), 42);
+        assert_eq!(pr.repo(), "org/repo");
+        assert_eq!(pr.number(), 42);
+    }
+
+    #[test]
+    fn pr_ref_equality() {
+        let a = PrRef::new("org/repo".to_string(), 1);
+        let b = PrRef::new("org/repo".to_string(), 1);
+        let c = PrRef::new("org/other".to_string(), 1);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn pr_ref_hash_works_in_hashmap() {
+        use std::collections::HashMap;
+        let mut map = HashMap::new();
+        let pr = PrRef::new("org/repo".to_string(), 42);
+        map.insert(pr.clone(), "value");
+        assert_eq!(map.get(&PrRef::new("org/repo".to_string(), 42)), Some(&"value"));
+    }
+
+    #[test]
+    fn pr_ref_display() {
+        let pr = PrRef::new("org/repo".to_string(), 42);
+        assert_eq!(pr.to_string(), "org/repo#42");
     }
 }

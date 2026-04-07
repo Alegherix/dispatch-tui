@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, AlertSeverity, Epic, EpicId, EpicSubstatus, ReviewDecision, SecurityAlert,
+    AlertKind, AlertSeverity, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision, SecurityAlert,
     SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
 };
 
@@ -118,6 +118,26 @@ pub enum RepoFilterMode {
     #[default]
     Include,
     Exclude,
+}
+
+impl RepoFilterMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RepoFilterMode::Include => "include",
+            RepoFilterMode::Exclude => "exclude",
+        }
+    }
+}
+
+impl std::str::FromStr for RepoFilterMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "include" => Ok(RepoFilterMode::Include),
+            "exclude" => Ok(RepoFilterMode::Exclude),
+            _ => Err(format!("unknown filter mode: {s}")),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -872,7 +892,7 @@ pub struct ReviewBoardState {
     pub bot: PrListState,
     pub detail_visible: bool,
     pub dispatch_pr_filter: bool,
-    pub review_flash: HashMap<(String, i64), Instant>,
+    pub review_flash: HashMap<PrRef, Instant>,
 }
 
 /// Compute a sorted, deduplicated list of repo names from a slice of review PRs.
@@ -1064,7 +1084,7 @@ pub struct SecurityBoardState {
     pub repo_filter: HashSet<String>,
     pub repo_filter_mode: RepoFilterMode,
     pub kind_filter: Option<AlertKind>,
-    pub review_flash: HashMap<(String, i64), Instant>,
+    pub review_flash: HashMap<PrRef, Instant>,
 }
 
 impl SecurityBoardState {
@@ -1432,5 +1452,34 @@ mod tests {
         let mut state = PrListState::default();
         state.last_fetch = Some(Instant::now());
         assert!(!state.needs_fetch(Duration::from_secs(60)));
+    }
+
+    // -- RepoFilterMode --
+
+    #[test]
+    fn repo_filter_mode_as_str() {
+        assert_eq!(RepoFilterMode::Include.as_str(), "include");
+        assert_eq!(RepoFilterMode::Exclude.as_str(), "exclude");
+    }
+
+    #[test]
+    fn repo_filter_mode_from_str_roundtrip() {
+        for mode in [RepoFilterMode::Include, RepoFilterMode::Exclude] {
+            let s = mode.as_str();
+            let parsed: RepoFilterMode = s.parse().unwrap();
+            assert_eq!(parsed, mode);
+        }
+    }
+
+    #[test]
+    fn repo_filter_mode_from_str_invalid() {
+        assert!("bogus".parse::<RepoFilterMode>().is_err());
+        assert!("".parse::<RepoFilterMode>().is_err());
+        assert!("Include".parse::<RepoFilterMode>().is_err());
+    }
+
+    #[test]
+    fn repo_filter_mode_default_is_include() {
+        assert_eq!(RepoFilterMode::default(), RepoFilterMode::Include);
     }
 }

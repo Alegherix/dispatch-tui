@@ -3753,10 +3753,7 @@ impl App {
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
         let value = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
-        let mode_value = match self.filter.mode {
-            RepoFilterMode::Include => "include",
-            RepoFilterMode::Exclude => "exclude",
-        };
+        let mode_value = self.filter.mode.as_str();
         vec![
             Command::PersistStringSetting {
                 key: "repo_filter".to_string(),
@@ -4080,8 +4077,10 @@ impl App {
             let now = std::time::Instant::now();
             self.review
                 .review_flash
-                .insert((repo.clone(), number), now);
-            self.security.review_flash.insert((repo, number), now);
+                .insert(crate::models::PrRef::new(repo.clone(), number), now);
+            self.security
+                .review_flash
+                .insert(crate::models::PrRef::new(repo, number), now);
         }
         vec![]
     }

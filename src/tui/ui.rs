@@ -1838,10 +1838,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(Clear, popup_area);
 
-    let mode_label = match app.repo_filter_mode() {
-        RepoFilterMode::Include => "include",
-        RepoFilterMode::Exclude => "exclude",
-    };
+    let mode_label = app.repo_filter_mode().as_str();
     let block = Block::default()
         .title(format!(" Repo Filter ({mode_label}) "))
         .borders(Borders::ALL)
@@ -2029,10 +2026,7 @@ fn render_review_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(Clear, popup_area);
 
-    let review_mode_label = match app.review_repo_filter_mode() {
-        RepoFilterMode::Include => "include",
-        RepoFilterMode::Exclude => "exclude",
-    };
+    let review_mode_label = app.review_repo_filter_mode().as_str();
     let block = Block::default()
         .title(format!(" Review Repo Filter ({review_mode_label}) "))
         .borders(Borders::ALL)
@@ -3448,10 +3442,7 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
     let mut lines: Vec<Line> = Vec::new();
 
     let mode_str = match app.view_mode() {
-        ViewMode::SecurityBoard { .. } => match &app.security.repo_filter_mode {
-            RepoFilterMode::Include => "include",
-            RepoFilterMode::Exclude => "exclude",
-        },
+        ViewMode::SecurityBoard { .. } => app.security.repo_filter_mode.as_str(),
         _ => "include",
     };
     lines.push(Line::from(Span::styled(

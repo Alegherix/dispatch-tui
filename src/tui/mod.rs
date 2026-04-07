@@ -2056,8 +2056,24 @@ impl App {
 
     fn handle_batch_archive_epics(&mut self, ids: Vec<EpicId>) -> Vec<Command> {
         let mut cmds = Vec::new();
+        let mut skipped = 0usize;
         for id in ids {
+            let not_done = self
+                .subtask_statuses(id)
+                .iter()
+                .filter(|s| **s != TaskStatus::Done)
+                .count();
+            if not_done > 0 {
+                skipped += 1;
+                continue;
+            }
             cmds.extend(self.handle_archive_epic(id));
+        }
+        if skipped > 0 {
+            let noun = if skipped == 1 { "epic" } else { "epics" };
+            self.set_status(format!(
+                "Skipped {skipped} {noun} with non-done subtasks"
+            ));
         }
         self.select.epics.clear();
         self.select.tasks.clear();

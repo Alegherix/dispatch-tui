@@ -8119,6 +8119,25 @@ fn batch_archive_selected_epics() {
 }
 
 #[test]
+fn batch_archive_skips_epics_with_non_done_subtasks() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.epic_id = Some(EpicId(10));
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+
+    let cmds = app.update(Message::BatchArchiveEpics(vec![EpicId(10)]));
+    assert_eq!(
+        app.board.epics.len(),
+        1,
+        "Epic with non-done subtask should not be archived"
+    );
+    assert!(
+        cmds.is_empty(),
+        "Should not emit commands for skipped epic"
+    );
+}
+
+#[test]
 fn x_key_with_epic_selection_shows_count_in_confirm() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10), make_epic(20)];

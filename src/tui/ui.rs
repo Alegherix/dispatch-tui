@@ -2252,7 +2252,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::RepoFilter => {
-            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [q/Enter/Esc] close")
+            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [q/Esc] close")
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }

@@ -2008,6 +2008,20 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(": cancel", note_style),
             ]));
         }
+        InputMode::ConfirmDeleteRepoPath => {
+            let path_label = app
+                .repo_paths()
+                .get(app.input.repo_cursor)
+                .map(|p| p.as_str())
+                .unwrap_or("?");
+            lines.push(Line::from(vec![
+                Span::styled(format!("  Delete {path_label}?  "), Style::default().fg(Color::Yellow)),
+                Span::styled("y", key_style),
+                Span::styled(": yes  ", note_style),
+                Span::styled("n/Esc", key_style),
+                Span::styled(": cancel", note_style),
+            ]));
+        }
         _ => {
             lines.push(Line::from(vec![
                 Span::styled("  [j/k]", key_style),

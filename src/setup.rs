@@ -271,7 +271,7 @@ pub fn remove_permissions(settings_path: &std::path::Path) -> Result<bool> {
             let before = allow.len();
             allow.retain(|v| {
                 v.as_str()
-                    .map_or(true, |s| !s.starts_with("mcp__dispatch__"))
+                    .is_none_or(|s| !s.starts_with("mcp__dispatch__"))
             });
             before != allow.len()
         } else {
@@ -390,6 +390,80 @@ pub fn run_setup(port: u16, yes: bool) -> Result<()> {
         println!("Setup complete.");
     } else {
         println!("Already configured, nothing to do.");
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// run_uninstall — reverse of run_setup
+// ---------------------------------------------------------------------------
+
+pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
+    let claude_dir = claude_dir()?;
+    let mcp_path = claude_dir.join(".mcp.json");
+    let settings_path = claude_dir.join("settings.json");
+    let plugin_path = plugin_dir()?;
+    let db_path = crate::default_db_path();
+
+    // Show what will be removed
+    eprintln!("This will remove:");
+    eprintln!("  Plugin:      {}", plugin_path.display());
+    eprintln!("  MCP config:  mcpServers.dispatch from {}", mcp_path.display());
+    eprintln!("  Permissions: mcp__dispatch__* from {}", settings_path.display());
+    if purge {
+        eprintln!("  Database:    {}", db_path.display());
+    }
+
+    if !yes && !confirm("\nContinue?")? {
+        println!("Aborted.");
+        return Ok(());
+    }
+
+    let mut any_removed = false;
+
+    match remove_plugin(&plugin_path) {
+        Ok(true) => {
+            println!("Removed plugin directory");
+            any_removed = true;
+        }
+        Ok(false) => println!("Plugin directory not found, skipping"),
+        Err(e) => eprintln!("Warning: failed to remove plugin: {e}"),
+    }
+
+    match remove_mcp_config(&mcp_path) {
+        Ok(true) => {
+            println!("Removed dispatch from MCP config");
+            any_removed = true;
+        }
+        Ok(false) => println!("No dispatch entry in MCP config, skipping"),
+        Err(e) => eprintln!("Warning: failed to update MCP config: {e}"),
+    }
+
+    match remove_permissions(&settings_path) {
+        Ok(true) => {
+            println!("Removed dispatch permissions");
+            any_removed = true;
+        }
+        Ok(false) => println!("No dispatch permissions found, skipping"),
+        Err(e) => eprintln!("Warning: failed to update permissions: {e}"),
+    }
+
+    if purge {
+        match remove_database(&db_path) {
+            Ok(true) => {
+                println!("Removed database");
+                any_removed = true;
+            }
+            Ok(false) => println!("Database not found, skipping"),
+            Err(e) => eprintln!("Warning: failed to remove database: {e}"),
+        }
+    }
+
+    if any_removed {
+        println!("Uninstall complete.");
+    } else {
+        println!("Nothing to remove.");
     }
 
     Ok(())

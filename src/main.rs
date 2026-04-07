@@ -91,6 +91,15 @@ enum Commands {
         #[arg(long, short)]
         yes: bool,
     },
+    /// Remove dispatch configuration from Claude Code
+    Uninstall {
+        /// Skip confirmation prompt
+        #[arg(long, short)]
+        yes: bool,
+        /// Also delete the database and log files
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 fn parse_status(s: &str) -> anyhow::Result<models::TaskStatus> {
@@ -245,6 +254,9 @@ async fn main() -> Result<()> {
         }
         Commands::Setup { port, yes } => {
             dispatch_tui::setup::run_setup(port, yes)?;
+        }
+        Commands::Uninstall { yes, purge } => {
+            dispatch_tui::setup::run_uninstall(yes, purge)?;
         }
         Commands::Plan { id, path } => {
             if !path.exists() {

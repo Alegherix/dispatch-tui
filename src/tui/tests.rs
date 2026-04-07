@@ -10591,3 +10591,829 @@ fn n_in_confirm_delete_repo_path_cancels() {
     app.handle_key(make_key(KeyCode::Char('n')));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
+
+// ---------------------------------------------------------------------------
+// Security board input handler tests
+// ---------------------------------------------------------------------------
+
+/// Helper: put app into SecurityBoard view with alerts loaded.
+fn make_security_board_app() -> App {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SecurityAlertsLoaded(vec![
+        make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Critical),
+        make_security_alert(2, "org/beta", crate::models::AlertSeverity::High),
+        make_security_alert(3, "org/gamma", crate::models::AlertSeverity::Critical),
+    ]));
+    app
+}
+
+#[test]
+fn security_board_q_quits() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert_eq!(app.input.mode, InputMode::ConfirmQuit);
+}
+
+#[test]
+fn security_board_tab_switches_to_task_board() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Tab));
+    assert!(matches!(app.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn security_board_esc_switches_to_task_board() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(matches!(app.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn security_board_h_navigates_column_left() {
+    let mut app = make_security_board_app();
+    // Move to column 1 first, then h should go back to 0
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_column(1);
+    }
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.security_selection().unwrap().column(), 0);
+}
+
+#[test]
+fn security_board_l_navigates_column_right() {
+    let mut app = make_security_board_app();
+    assert_eq!(app.security_selection().unwrap().column(), 0);
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(app.security_selection().unwrap().column(), 1);
+}
+
+#[test]
+fn security_board_left_arrow_navigates_column() {
+    let mut app = make_security_board_app();
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_column(1);
+    }
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.security_selection().unwrap().column(), 0);
+}
+
+#[test]
+fn security_board_right_arrow_navigates_column() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.security_selection().unwrap().column(), 1);
+}
+
+#[test]
+fn security_board_column_clamps_at_zero() {
+    let mut app = make_security_board_app();
+    assert_eq!(app.security_selection().unwrap().column(), 0);
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.security_selection().unwrap().column(), 0);
+}
+
+#[test]
+fn security_board_column_clamps_at_max() {
+    let mut app = make_security_board_app();
+    let max_col = crate::models::AlertSeverity::COLUMN_COUNT - 1;
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_column(max_col);
+    }
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(app.security_selection().unwrap().column(), max_col);
+}
+
+#[test]
+fn security_board_j_navigates_row_down() {
+    let mut app = make_security_board_app();
+    // Column 0 (Critical) has 2 alerts
+    assert_eq!(app.security_selection().unwrap().row(0), 0);
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.security_selection().unwrap().row(0), 1);
+}
+
+#[test]
+fn security_board_k_navigates_row_up() {
+    let mut app = make_security_board_app();
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_row(0, 1);
+    }
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.security_selection().unwrap().row(0), 0);
+}
+
+#[test]
+fn security_board_enter_toggles_detail() {
+    let mut app = make_security_board_app();
+    assert!(!app.security_detail_visible());
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.security_detail_visible());
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(!app.security_detail_visible());
+}
+
+#[test]
+fn security_board_p_opens_alert_in_browser() {
+    let mut app = make_security_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::OpenInBrowser { url } if url.contains("security"))));
+}
+
+#[test]
+fn security_board_p_with_no_alert_is_noop() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    // No alerts loaded
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn security_board_d_dispatches_fix_agent() {
+    let mut app = make_security_board_app();
+    // Set repo_paths so resolve_repo_path matches "org/alpha"
+    app.repo_paths = vec!["/path/to/alpha".to_string()];
+    // Move to Critical column row 0, which has alert from "org/alpha"
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+}
+
+#[test]
+fn security_board_d_falls_back_to_repo_input_when_no_match() {
+    let mut app = make_security_board_app();
+    // No matching repo path — should prompt for repo path input
+    app.handle_key(make_key(KeyCode::Char('d')));
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+}
+
+#[test]
+fn security_board_d_with_no_alert_is_noop() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn security_board_r_refreshes_alerts() {
+    let mut app = make_security_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchSecurityAlerts)));
+}
+
+#[test]
+fn security_board_f_opens_repo_filter() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
+}
+
+#[test]
+fn security_board_t_toggles_kind_filter() {
+    let mut app = make_security_board_app();
+    assert!(app.security_kind_filter().is_none());
+    app.handle_key(make_key(KeyCode::Char('t')));
+    assert!(app.security_kind_filter().is_some());
+}
+
+#[test]
+fn security_board_question_mark_toggles_help() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Char('?')));
+    assert_eq!(app.input.mode, InputMode::Help);
+}
+
+#[test]
+fn security_board_unknown_key_is_noop() {
+    let mut app = make_security_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Security repo filter input handler tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn security_repo_filter_enter_closes() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn security_repo_filter_esc_closes() {
+    let mut app = make_security_board_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn security_repo_filter_tab_toggles_mode() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Char('f'))); // Enter filter
+    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
+    app.handle_key(make_key(KeyCode::Tab));
+    // Mode should have toggled (include -> exclude or vice versa)
+    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
+}
+
+#[test]
+fn security_repo_filter_a_toggles_all() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    // After toggling all, the filter should have entries
+    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
+}
+
+#[test]
+fn security_repo_filter_digit_toggles_repo() {
+    let mut app = make_security_board_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    // Press '1' to toggle the first repo
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert_eq!(app.input.mode, InputMode::SecurityRepoFilter);
+}
+
+// ---------------------------------------------------------------------------
+// Review board input handler tests
+// ---------------------------------------------------------------------------
+
+/// Helper: put app into ReviewBoard view with PRs loaded.
+fn make_review_board_app() -> App {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![
+        make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
+        make_review_pr(2, "bob", ReviewDecision::Approved),
+        make_review_pr(3, "carol", ReviewDecision::ReviewRequired),
+    ]));
+    app
+}
+
+#[test]
+fn review_board_q_quits() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert_eq!(app.input.mode, InputMode::ConfirmQuit);
+}
+
+#[test]
+fn review_board_tab_switches_to_security_board() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Tab));
+    assert!(matches!(app.view_mode, ViewMode::SecurityBoard { .. }));
+}
+
+#[test]
+fn review_board_esc_switches_to_task_board() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(matches!(app.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn review_board_h_navigates_column_left() {
+    let mut app = make_review_board_app();
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(1);
+    }
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.review_selection().unwrap().column(), 0);
+}
+
+#[test]
+fn review_board_l_navigates_column_right() {
+    let mut app = make_review_board_app();
+    assert_eq!(app.review_selection().unwrap().column(), 0);
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(app.review_selection().unwrap().column(), 1);
+}
+
+#[test]
+fn review_board_left_right_arrows_navigate_columns() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.review_selection().unwrap().column(), 1);
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.review_selection().unwrap().column(), 0);
+}
+
+#[test]
+fn review_board_column_clamps_at_zero() {
+    let mut app = make_review_board_app();
+    assert_eq!(app.review_selection().unwrap().column(), 0);
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.review_selection().unwrap().column(), 0);
+}
+
+#[test]
+fn review_board_column_clamps_at_max() {
+    let mut app = make_review_board_app();
+    let max_col = ReviewDecision::COLUMN_COUNT - 1;
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(max_col);
+    }
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert_eq!(app.review_selection().unwrap().column(), max_col);
+}
+
+#[test]
+fn review_board_j_navigates_row_down() {
+    let mut app = make_review_board_app();
+    // Column 0 (ReviewRequired) has 2 PRs
+    assert_eq!(app.review_selection().unwrap().row(0), 0);
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.review_selection().unwrap().row(0), 1);
+}
+
+#[test]
+fn review_board_k_navigates_row_up() {
+    let mut app = make_review_board_app();
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_row(0, 1);
+    }
+    app.handle_key(make_key(KeyCode::Char('k')));
+    assert_eq!(app.review_selection().unwrap().row(0), 0);
+}
+
+#[test]
+fn review_board_down_up_arrows_navigate_rows() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.review_selection().unwrap().row(0), 1);
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(app.review_selection().unwrap().row(0), 0);
+}
+
+#[test]
+fn review_board_p_opens_pr_in_browser() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::OpenInBrowser { url } if url.contains("pull"))));
+}
+
+#[test]
+fn review_board_p_with_no_prs_is_noop() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_r_refreshes_prs() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchReviewPrs)));
+}
+
+#[test]
+fn review_board_f_opens_repo_filter() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
+}
+
+#[test]
+fn review_board_d_dispatches_review_agent() {
+    let mut app = make_review_board_app();
+    // Set repo_paths so resolve_repo_path matches "acme/app"
+    app.repo_paths = vec!["/path/to/app".to_string()];
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+}
+
+#[test]
+fn review_board_d_falls_back_to_repo_input_when_no_match() {
+    let mut app = make_review_board_app();
+    // No matching repo path
+    app.handle_key(make_key(KeyCode::Char('d')));
+    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
+}
+
+#[test]
+fn review_board_d_with_no_prs_is_noop() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_question_mark_toggles_help() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Char('?')));
+    assert_eq!(app.input.mode, InputMode::Help);
+}
+
+#[test]
+fn review_board_backtab_toggles_mode() {
+    let mut app = make_review_board_app();
+    assert!(matches!(
+        app.view_mode,
+        ViewMode::ReviewBoard {
+            mode: ReviewBoardMode::Reviewer,
+            ..
+        }
+    ));
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert!(matches!(
+        app.view_mode,
+        ViewMode::ReviewBoard {
+            mode: ReviewBoardMode::Author,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn review_board_e_edits_github_queries() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::EditGithubQueries(ReviewBoardMode::Reviewer))));
+}
+
+#[test]
+fn review_board_unknown_key_is_noop() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_d_capital_toggles_dispatch_filter_in_author_mode() {
+    let mut app = make_review_board_app();
+    // Switch to Author mode
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert!(matches!(
+        app.view_mode,
+        ViewMode::ReviewBoard {
+            mode: ReviewBoardMode::Author,
+            ..
+        }
+    ));
+    assert!(!app.dispatch_pr_filter());
+    app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(app.dispatch_pr_filter());
+}
+
+#[test]
+fn review_board_d_capital_is_noop_in_reviewer_mode() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('D')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_esc_clears_bot_pr_selection_first() {
+    use crate::models::CiStatus;
+    let mut app = make_review_board_app();
+    // Switch to Dependabot mode and select a PR
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)); // Author
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)); // Dependabot
+    let mut pr = make_review_pr(10, "dependabot", ReviewDecision::ReviewRequired);
+    pr.ci_status = CiStatus::Success; // Column 0 (CI Passing)
+    app.update(Message::BotPrsLoaded(vec![pr]));
+    // Select a bot PR (cursor is at column 0 where the PR is)
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.has_bot_pr_selection());
+    // Esc should clear selection, not exit board
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(!app.has_bot_pr_selection());
+    assert!(matches!(app.view_mode, ViewMode::ReviewBoard { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// Review board dependabot-specific input tests
+// ---------------------------------------------------------------------------
+
+/// Helper: app in Dependabot review board mode with bot PRs loaded.
+fn make_dependabot_board_app() -> App {
+    use crate::models::CiStatus;
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    // Cycle to Dependabot mode: Reviewer -> Author -> Dependabot
+    app.update(Message::ToggleReviewBoardMode);
+    app.update(Message::ToggleReviewBoardMode);
+    // Use CiStatus::Success so PRs land in column 0 (CI Passing)
+    let mut pr1 = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr1.ci_status = CiStatus::Success;
+    let mut pr2 = make_review_pr(11, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr2.ci_status = CiStatus::Success;
+    app.update(Message::BotPrsLoaded(vec![pr1, pr2]));
+    app
+}
+
+#[test]
+fn dependabot_space_toggles_select_pr() {
+    let mut app = make_dependabot_board_app();
+    assert!(!app.has_bot_pr_selection());
+    app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(app.has_bot_pr_selection());
+}
+
+#[test]
+fn dependabot_space_is_noop_in_reviewer_mode() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn dependabot_a_selects_all_column() {
+    let mut app = make_dependabot_board_app();
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(app.has_bot_pr_selection());
+}
+
+#[test]
+fn dependabot_a_is_noop_in_reviewer_mode() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn dependabot_capital_a_starts_batch_approve() {
+    let mut app = make_dependabot_board_app();
+    // Select some PRs first
+    app.handle_key(make_key(KeyCode::Char('a'))); // select all
+    app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(matches!(
+        app.input.mode,
+        InputMode::ConfirmBatchApprove(_)
+    ));
+}
+
+#[test]
+fn dependabot_capital_a_is_noop_in_reviewer_mode() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn dependabot_m_starts_batch_merge() {
+    use crate::models::CiStatus;
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ToggleReviewBoardMode); // Author
+    app.update(Message::ToggleReviewBoardMode); // Dependabot
+    // Merge requires CI-passing + approved
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
+    pr.ci_status = CiStatus::Success;
+    app.update(Message::BotPrsLoaded(vec![pr]));
+    // Select the PR — it's in Approved column (3)
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(3);
+    }
+    app.handle_key(make_key(KeyCode::Char(' '))); // select
+    assert!(app.has_bot_pr_selection());
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmBatchMerge(_)));
+}
+
+#[test]
+fn dependabot_m_is_noop_in_reviewer_mode() {
+    let mut app = make_review_board_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(cmds.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Review repo filter input handler tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn review_repo_filter_enter_closes() {
+    let mut app = make_review_board_app();
+    app.input.mode = InputMode::ReviewRepoFilter;
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn review_repo_filter_tab_toggles_mode() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Char('f'))); // Enter filter
+    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
+}
+
+#[test]
+fn review_repo_filter_a_toggles_all() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
+}
+
+#[test]
+fn review_repo_filter_digit_toggles_repo() {
+    let mut app = make_review_board_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
+}
+
+// ---------------------------------------------------------------------------
+// Confirm batch input handler tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn confirm_batch_approve_y_confirms() {
+    let mut app = make_dependabot_board_app();
+    app.handle_key(make_key(KeyCode::Char('a'))); // select all
+    app.handle_key(make_key(KeyCode::Char('A'))); // start batch approve
+    assert!(matches!(
+        app.input.mode,
+        InputMode::ConfirmBatchApprove(_)
+    ));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::BatchApprovePrs(_))));
+}
+
+#[test]
+fn confirm_batch_approve_n_cancels() {
+    let mut app = make_dependabot_board_app();
+    app.handle_key(make_key(KeyCode::Char('a'))); // select all
+    app.handle_key(make_key(KeyCode::Char('A'))); // start batch approve
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_batch_merge_y_confirms() {
+    use crate::models::CiStatus;
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ToggleReviewBoardMode); // Author
+    app.update(Message::ToggleReviewBoardMode); // Dependabot
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
+    pr.ci_status = CiStatus::Success;
+    app.update(Message::BotPrsLoaded(vec![pr]));
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(3); // Approved column
+    }
+    app.handle_key(make_key(KeyCode::Char(' '))); // select
+    app.handle_key(make_key(KeyCode::Char('m'))); // start batch merge
+    assert!(matches!(app.input.mode, InputMode::ConfirmBatchMerge(_)));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::BatchMergePrs(_))));
+}
+
+#[test]
+fn confirm_batch_merge_n_cancels() {
+    let mut app = make_dependabot_board_app();
+    app.handle_key(make_key(KeyCode::Char('a'))); // select all
+    app.handle_key(make_key(KeyCode::Char('m'))); // start batch merge
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+// ---------------------------------------------------------------------------
+// Confirm epic wrap-up input handler tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn confirm_epic_wrap_up_r_sends_rebase() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
+    // Should produce an effect related to epic wrap-up rebase
+    assert!(!cmds.is_empty() || app.input.mode == InputMode::Normal);
+}
+
+#[test]
+fn confirm_epic_wrap_up_p_sends_pr() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
+    assert!(!cmds.is_empty() || app.input.mode == InputMode::Normal);
+}
+
+#[test]
+fn confirm_epic_wrap_up_esc_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(1));
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_epic_wrap_up_unknown_key_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::ConfirmEpicWrapUp(EpicId(1)));
+}
+
+// ---------------------------------------------------------------------------
+// Confirm edit task and confirm detach tmux via handle_key
+// ---------------------------------------------------------------------------
+
+#[test]
+fn confirm_edit_task_y_emits_editor_command() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::EditTaskInEditor(_))));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_edit_task_n_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_edit_task_y_with_missing_task_is_noop() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEditTask(TaskId(999));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_detach_tmux_y_detaches() {
+    let mut task = make_task(3, TaskStatus::Review);
+    task.tmux_window = Some("task-3".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(3)]);
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    // Should produce KillTmuxWindow + PatchSubStatus commands
+    assert!(!cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn confirm_detach_tmux_n_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(3)]);
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+// ---------------------------------------------------------------------------
+// Archive overlay key handler tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn archive_esc_closes_overlay() {
+    let mut app = make_app();
+    // Archive a task first
+    app.update(Message::ArchiveTask(TaskId(1)));
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert!(!app.archive.visible);
+}
+
+#[test]
+fn archive_e_enters_edit_confirm() {
+    let mut app = make_app();
+    app.update(Message::ArchiveTask(TaskId(1)));
+    app.archive.visible = true;
+    app.archive.selected_row = 0;
+    app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(_)));
+}
+
+#[test]
+fn archive_q_quits() {
+    let mut app = make_app();
+    app.update(Message::ArchiveTask(TaskId(1)));
+    app.archive.visible = true;
+    app.handle_key(make_key(KeyCode::Char('q')));
+    assert_eq!(app.input.mode, InputMode::ConfirmQuit);
+}

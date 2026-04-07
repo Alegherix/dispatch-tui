@@ -47,6 +47,9 @@ pub struct App {
     pub(in crate::tui) review: ReviewBoardState,
     pub(in crate::tui) security: SecurityBoardState,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
+    /// Task IDs with an in-flight dispatch (worktree + tmux setup running).
+    /// Prevents duplicate dispatches when the user presses Enter rapidly.
+    pub(in crate::tui) dispatching: HashSet<TaskId>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -81,7 +84,13 @@ impl App {
             review: ReviewBoardState::default(),
             security: SecurityBoardState::default(),
             merge_queue: None,
+            dispatching: HashSet::new(),
         }
+    }
+
+    /// Returns true if the given task has an in-flight dispatch.
+    pub fn is_dispatching(&self, id: TaskId) -> bool {
+        self.dispatching.contains(&id)
     }
 
     /// Get the current selection state (from whichever view mode is active).
@@ -677,6 +686,10 @@ impl App {
             Message::ResumeTask(id) => self.handle_resume_task(id),
             Message::Resumed { id, tmux_window } => self.handle_resumed(id, tmux_window),
             Message::Error(msg) => self.handle_error(msg),
+            Message::DispatchFailed(id) => {
+                self.dispatching.remove(&id);
+                vec![]
+            }
             Message::TaskEdited(edit) => self.handle_task_edited(edit),
             Message::RepoPathsUpdated(paths) => self.handle_repo_paths_updated(paths),
             Message::QuickDispatch { repo_path, epic_id } => {
@@ -1399,28 +1412,37 @@ impl App {
     }
 
     fn handle_dispatch_task(&mut self, id: TaskId) -> Vec<Command> {
-        if let Some(task) = self.find_task(id) {
-            if task.status == TaskStatus::Backlog {
-                return vec![Command::Dispatch { task: task.clone() }];
-            }
+        if self.dispatching.contains(&id) {
+            return vec![];
+        }
+        let task = self.find_task(id).filter(|t| t.status == TaskStatus::Backlog).cloned();
+        if let Some(task) = task {
+            self.dispatching.insert(id);
+            return vec![Command::Dispatch { task }];
         }
         vec![]
     }
 
     fn handle_brainstorm_task(&mut self, id: TaskId) -> Vec<Command> {
-        if let Some(task) = self.find_task(id) {
-            if task.status == TaskStatus::Backlog {
-                return vec![Command::Brainstorm { task: task.clone() }];
-            }
+        if self.dispatching.contains(&id) {
+            return vec![];
+        }
+        let task = self.find_task(id).filter(|t| t.status == TaskStatus::Backlog).cloned();
+        if let Some(task) = task {
+            self.dispatching.insert(id);
+            return vec![Command::Brainstorm { task }];
         }
         vec![]
     }
 
     fn handle_plan_task(&mut self, id: TaskId) -> Vec<Command> {
-        if let Some(task) = self.find_task(id) {
-            if task.status == TaskStatus::Backlog {
-                return vec![Command::Plan { task: task.clone() }];
-            }
+        if self.dispatching.contains(&id) {
+            return vec![];
+        }
+        let task = self.find_task(id).filter(|t| t.status == TaskStatus::Backlog).cloned();
+        if let Some(task) = task {
+            self.dispatching.insert(id);
+            return vec![Command::Plan { task }];
         }
         vec![]
     }
@@ -1432,6 +1454,7 @@ impl App {
         tmux_window: String,
         switch_focus: bool,
     ) -> Vec<Command> {
+        self.dispatching.remove(&id);
         if let Some(task) = self.find_task_mut(id) {
             task.worktree = Some(worktree);
             task.tmux_window = Some(tmux_window.clone());
@@ -1893,6 +1916,7 @@ impl App {
                 cmds.push(c);
             }
             cmds.push(Command::PersistTask(task_clone.clone()));
+            self.dispatching.insert(id);
             cmds.push(Command::Dispatch { task: task_clone });
             cmds
         } else {
@@ -3301,12 +3325,17 @@ impl App {
             let mut backlog_subtasks: Vec<&Task> = self
                 .board.tasks
                 .iter()
-                .filter(|t| t.epic_id == Some(id) && t.status == TaskStatus::Backlog)
+                .filter(|t| {
+                    t.epic_id == Some(id)
+                        && t.status == TaskStatus::Backlog
+                        && !self.dispatching.contains(&t.id)
+                })
                 .collect();
             backlog_subtasks.sort_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0));
 
             match backlog_subtasks.first() {
                 Some(task) => {
+                    self.dispatching.insert(task.id);
                     let cmd = match DispatchMode::for_task(task) {
                         DispatchMode::Dispatch => Command::Dispatch {
                             task: (*task).clone(),

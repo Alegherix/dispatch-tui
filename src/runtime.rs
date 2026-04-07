@@ -491,6 +491,7 @@ impl TuiRuntime {
                     });
                 }
                 Err(e) => {
+                    let _ = tx.send(Message::DispatchFailed(id));
                     let _ = tx.send(Message::Error(format!("{label} failed: {e:#}")));
                 }
             }
@@ -2076,15 +2077,24 @@ mod tests {
                 models::TaskStatus::Backlog,
             )
             .unwrap();
-        rt.exec_dispatch(task);
+        rt.exec_dispatch(task.clone());
 
-        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .unwrap()
             .unwrap();
         assert!(
-            matches!(msg, Message::Error(_)),
-            "Expected Error, got: {msg:?}"
+            matches!(msg1, Message::DispatchFailed(id) if id == task.id),
+            "Expected DispatchFailed, got: {msg1:?}"
+        );
+
+        let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg2, Message::Error(_)),
+            "Expected Error, got: {msg2:?}"
         );
     }
 

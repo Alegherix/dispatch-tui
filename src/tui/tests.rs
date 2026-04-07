@@ -11800,3 +11800,85 @@ fn status_bar_key_color_is_consistent_across_columns() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// In-flight dispatch deduplication
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dispatch_in_flight_blocks_second_dispatch() {
+    let mut app = make_app();
+    // First dispatch succeeds
+    let cmds = app.update(Message::DispatchTask(TaskId(1)));
+    assert!(matches!(cmds[0], Command::Dispatch { .. }));
+    // Second dispatch of same task is blocked
+    let cmds = app.update(Message::DispatchTask(TaskId(1)));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn brainstorm_in_flight_blocks_second_brainstorm() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Feature);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    // First brainstorm succeeds (feature without plan → brainstorm)
+    let cmds = app.update(Message::BrainstormTask(TaskId(1)));
+    assert!(matches!(cmds[0], Command::Brainstorm { .. }));
+    // Second brainstorm of same task is blocked
+    let cmds = app.update(Message::BrainstormTask(TaskId(1)));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn plan_in_flight_blocks_second_plan() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tag = Some(TaskTag::Feature);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    let cmds = app.update(Message::PlanTask(TaskId(1)));
+    assert!(matches!(cmds[0], Command::Plan { .. }));
+    // Second plan of same task is blocked
+    let cmds = app.update(Message::PlanTask(TaskId(1)));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn dispatched_clears_in_flight() {
+    let mut app = make_app();
+    // Dispatch task 1
+    app.update(Message::DispatchTask(TaskId(1)));
+    // Dispatched message clears the in-flight guard
+    app.update(Message::Dispatched {
+        id: TaskId(1),
+        worktree: "/wt".to_string(),
+        tmux_window: "win".to_string(),
+        switch_focus: false,
+    });
+    // Task is now Running, so dispatch is a no-op for a different reason,
+    // but the in-flight set should be clear
+    assert!(!app.is_dispatching(TaskId(1)));
+}
+
+#[test]
+fn dispatch_failed_clears_in_flight() {
+    let mut app = make_app();
+    // Dispatch task 1
+    app.update(Message::DispatchTask(TaskId(1)));
+    assert!(app.is_dispatching(TaskId(1)));
+    // DispatchFailed clears the in-flight guard
+    app.update(Message::DispatchFailed(TaskId(1)));
+    assert!(!app.is_dispatching(TaskId(1)));
+    // Can dispatch again
+    let cmds = app.update(Message::DispatchTask(TaskId(1)));
+    assert!(matches!(cmds[0], Command::Dispatch { .. }));
+}
+
+#[test]
+fn dispatch_different_tasks_both_succeed() {
+    let mut app = make_app();
+    // Dispatch task 1
+    let cmds = app.update(Message::DispatchTask(TaskId(1)));
+    assert!(matches!(cmds[0], Command::Dispatch { .. }));
+    // Dispatch task 2 — different task, should succeed
+    let cmds = app.update(Message::DispatchTask(TaskId(2)));
+    assert!(matches!(cmds[0], Command::Dispatch { .. }));
+}

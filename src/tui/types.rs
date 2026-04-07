@@ -162,6 +162,7 @@ pub enum Message {
         tmux_window: String,
     },
     Error(String),
+    DispatchFailed(TaskId),
     TaskEdited(TaskEdit),
     RepoPathsUpdated(Vec<String>),
     QuickDispatch {

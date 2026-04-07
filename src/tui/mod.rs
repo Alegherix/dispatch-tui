@@ -992,6 +992,8 @@ impl App {
             Message::LoadFilterPreset(name) => self.handle_load_filter_preset(name),
             Message::StartDeletePreset => self.handle_start_delete_preset(),
             Message::DeleteFilterPreset(name) => self.handle_delete_filter_preset(name),
+            Message::StartDeleteRepoPath => self.handle_start_delete_repo_path(),
+            Message::DeleteRepoPath(path) => self.handle_delete_repo_path(path),
             Message::CancelPresetInput => self.handle_cancel_preset_input(),
             Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
         }
@@ -1681,6 +1683,11 @@ impl App {
 
     fn handle_repo_paths_updated(&mut self, paths: Vec<String>) -> Vec<Command> {
         self.repo_paths = paths;
+        if !self.repo_paths.is_empty() {
+            self.input.repo_cursor = self.input.repo_cursor.min(self.repo_paths.len() - 1);
+        } else {
+            self.input.repo_cursor = 0;
+        }
         vec![]
     }
 
@@ -3582,6 +3589,21 @@ impl App {
         self.input.mode = InputMode::RepoFilter;
         self.set_status(format!("Deleted preset \"{name}\""));
         vec![Command::DeleteFilterPreset(name)]
+    }
+
+    fn handle_start_delete_repo_path(&mut self) -> Vec<Command> {
+        if self.repo_paths.is_empty() {
+            return vec![];
+        }
+        self.input.mode = InputMode::ConfirmDeleteRepoPath;
+        vec![]
+    }
+
+    fn handle_delete_repo_path(&mut self, path: String) -> Vec<Command> {
+        self.filter.repos.remove(&path);
+        self.input.mode = InputMode::RepoFilter;
+        self.set_status(format!("Deleted repo path"));
+        vec![Command::DeleteRepoPath(path)]
     }
 
     fn handle_cancel_preset_input(&mut self) -> Vec<Command> {

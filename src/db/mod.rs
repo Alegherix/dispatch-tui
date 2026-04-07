@@ -199,6 +199,7 @@ pub trait TaskStore: Send + Sync {
     fn delete_task(&self, id: TaskId) -> Result<()>;
     fn list_repo_paths(&self) -> Result<Vec<String>>;
     fn save_repo_path(&self, path: &str) -> Result<()>;
+    fn delete_repo_path(&self, path: &str) -> Result<()>;
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
     fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     fn create_task_returning(

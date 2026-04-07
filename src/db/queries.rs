@@ -125,6 +125,44 @@ impl TaskStore for Database {
         Ok(())
     }
 
+    fn delete_repo_path(&self, path: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute("DELETE FROM repo_paths WHERE path = ?1", params![path])
+            .context("Failed to delete repo_path")?;
+        // Clean up filter presets that reference this path
+        let presets: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT name, repo_paths FROM filter_presets")
+                .context("Failed to prepare preset query")?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to list presets for cleanup")?;
+            rows
+        };
+        for (name, repo_paths) in presets {
+            let filtered: Vec<&str> = repo_paths
+                .split('\n')
+                .filter(|p| !p.is_empty() && *p != path)
+                .collect();
+            if filtered.is_empty() {
+                conn.execute(
+                    "DELETE FROM filter_presets WHERE name = ?1",
+                    params![name],
+                )?;
+            } else {
+                let updated = filtered.join("\n");
+                conn.execute(
+                    "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
+                    params![updated, name],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
         let conn = self.conn()?;
         conn.query_row(

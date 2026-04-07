@@ -1819,7 +1819,10 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
 fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let is_filter_mode = matches!(
         app.mode(),
-        InputMode::RepoFilter | InputMode::InputPresetName | InputMode::ConfirmDeletePreset
+        InputMode::RepoFilter
+            | InputMode::InputPresetName
+            | InputMode::ConfirmDeletePreset
+            | InputMode::ConfirmDeleteRepoPath
     );
     if !is_filter_mode {
         return;
@@ -1918,6 +1921,7 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
             note_style,
         )));
     }
+    let broken_style = Style::default().fg(Color::DarkGray);
     for (i, path) in app
         .repo_paths()
         .iter()
@@ -1930,16 +1934,20 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             " "
         };
+        let is_broken = !std::path::Path::new(path).is_dir();
+        let broken_mark = if is_broken { " [!]" } else { "" };
         if i == cursor {
+            let style = if is_broken { broken_style } else { cursor_style };
             lines.push(Line::from(vec![
-                Span::styled("  ►", cursor_style),
-                Span::styled(format!(" [{checked}] {path}"), cursor_style),
+                Span::styled("  ►", style),
+                Span::styled(format!(" [{checked}] {path}{broken_mark}"), style),
             ]));
         } else {
             let num = i + 1;
+            let style = if is_broken { broken_style } else { desc_style };
             lines.push(Line::from(vec![
-                Span::styled(format!("  {num}"), key_style),
-                Span::styled(format!(". [{checked}] {path}"), desc_style),
+                Span::styled(format!("  {num}"), if is_broken { broken_style } else { key_style }),
+                Span::styled(format!(". [{checked}] {path}{broken_mark}"), style),
             ]));
         }
     }
@@ -1986,6 +1994,20 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(": cancel", note_style),
             ]));
         }
+        InputMode::ConfirmDeleteRepoPath => {
+            let path_label = app
+                .repo_paths()
+                .get(app.input.repo_cursor)
+                .map(|p| p.as_str())
+                .unwrap_or("?");
+            lines.push(Line::from(vec![
+                Span::styled(format!("  Delete {path_label}?  "), Style::default().fg(Color::Yellow)),
+                Span::styled("y", key_style),
+                Span::styled(": yes  ", note_style),
+                Span::styled("n/Esc", key_style),
+                Span::styled(": cancel", note_style),
+            ]));
+        }
         _ => {
             lines.push(Line::from(vec![
                 Span::styled("  j/k", key_style),
@@ -2002,7 +2024,9 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(": save preset  ", note_style),
                 Span::styled("x", key_style),
                 Span::styled(": del preset  ", note_style),
-                Span::styled("q/Enter/Esc", key_style),
+                Span::styled("Bksp", key_style),
+                Span::styled(": del repo  ", note_style),
+                Span::styled("q/Esc", key_style),
                 Span::styled(": close", note_style),
             ]));
         }
@@ -2256,6 +2280,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         InputMode::ConfirmDeletePreset => {
             let bar = Paragraph::new("Press A-Z to delete preset, Esc to cancel")
                 .style(Style::default().fg(Color::Cyan));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDeleteRepoPath => {
+            let bar = Paragraph::new("Delete repo path? y to confirm, any key to cancel")
+                .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmEpicWrapUp(_) => {

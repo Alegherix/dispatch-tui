@@ -10486,3 +10486,112 @@ fn selected_security_alert_agrees_with_sorted_order() {
     let a1 = app.selected_security_alert().unwrap();
     assert_eq!(a1.repo, "org/zebra", "row 1 should be the alphabetically second repo");
 }
+
+// ---------------------------------------------------------------------------
+// Delete repo path tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn start_delete_repo_path_enters_confirm_mode() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.update(Message::StartDeleteRepoPath);
+    assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
+}
+
+#[test]
+fn start_delete_repo_path_no_repos_is_noop() {
+    let mut app = make_app();
+    app.repo_paths = vec![];
+    app.input.mode = InputMode::RepoFilter;
+    app.update(Message::StartDeleteRepoPath);
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+#[test]
+fn confirm_delete_repo_path_emits_command() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    app.input.repo_cursor = 1;
+    let cmds = app.update(Message::DeleteRepoPath("/repo-b".to_string()));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DeleteRepoPath(p) if p == "/repo-b")));
+}
+
+#[test]
+fn cancel_delete_repo_path_returns_to_filter() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+#[test]
+fn delete_repo_path_removes_from_active_filter() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.filter.repos.insert("/repo-a".to_string());
+    app.filter.repos.insert("/repo-b".to_string());
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    app.update(Message::DeleteRepoPath("/repo-a".to_string()));
+    assert!(!app.filter.repos.contains("/repo-a"));
+    assert!(app.filter.repos.contains("/repo-b"));
+}
+
+#[test]
+fn delete_repo_path_clamps_cursor() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.repo_cursor = 1;
+    // Simulate the path being removed (RepoPathsUpdated would do this in practice)
+    app.update(Message::RepoPathsUpdated(vec!["/repo-a".to_string()]));
+    assert!(
+        app.input.repo_cursor < app.repo_paths.len(),
+        "cursor should be clamped after repo list shrinks"
+    );
+}
+
+#[test]
+fn backspace_in_repo_filter_starts_delete() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
+}
+
+#[test]
+fn delete_key_in_repo_filter_starts_delete() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.handle_key(make_key(KeyCode::Delete));
+    assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
+}
+
+#[test]
+fn y_in_confirm_delete_repo_path_confirms() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    app.input.repo_cursor = 0;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DeleteRepoPath(p) if p == "/repo-a")));
+}
+
+#[test]
+fn n_in_confirm_delete_repo_path_cancels() {
+    let mut app = make_app();
+    app.repo_paths = vec!["/repo-a".to_string()];
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}

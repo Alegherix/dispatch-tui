@@ -339,6 +339,8 @@ pub enum Message {
     LoadFilterPreset(String),
     StartDeletePreset,
     DeleteFilterPreset(String),
+    StartDeleteRepoPath,
+    DeleteRepoPath(String),
     CancelPresetInput,
     FilterPresetsLoaded(Vec<(String, HashSet<String>, RepoFilterMode)>),
     // Wrap up (replaces finish + PR)
@@ -447,6 +449,7 @@ pub enum Command {
         mode: RepoFilterMode,
     },
     DeleteFilterPreset(String),
+    DeleteRepoPath(String),
     CreatePr {
         id: TaskId,
         repo_path: String,
@@ -526,6 +529,7 @@ pub enum InputMode {
     SecurityRepoFilter,
     InputPresetName,
     ConfirmDeletePreset,
+    ConfirmDeleteRepoPath,
     ConfirmEditTask(TaskId),
     // Dependabot batch operations
     ConfirmBatchApprove(Vec<String>),

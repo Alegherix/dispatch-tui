@@ -44,6 +44,7 @@ impl App {
             InputMode::SecurityRepoFilter => self.handle_key_security_repo_filter(key),
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
+            InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmBatchApprove(_) => self.handle_key_confirm_batch(key, true),
             InputMode::ConfirmBatchMerge(_) => self.handle_key_confirm_batch(key, false),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
@@ -671,6 +672,7 @@ impl App {
                     vec![]
                 }
             }
+            KeyCode::Backspace | KeyCode::Delete => self.update(Message::StartDeleteRepoPath),
             KeyCode::Char('s') => self.update(Message::StartSavePreset),
             KeyCode::Char('x') => self.update(Message::StartDeletePreset),
             KeyCode::Char(c @ 'A'..='Z') => {
@@ -730,6 +732,25 @@ impl App {
             }
             KeyCode::Esc => self.update(Message::CancelPresetInput),
             _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_delete_repo_path(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let idx = self.input.repo_cursor;
+                if idx < self.repo_paths.len() {
+                    let path = self.repo_paths[idx].clone();
+                    self.update(Message::DeleteRepoPath(path))
+                } else {
+                    self.input.mode = InputMode::RepoFilter;
+                    vec![]
+                }
+            }
+            _ => {
+                self.input.mode = InputMode::RepoFilter;
+                vec![]
+            }
         }
     }
 

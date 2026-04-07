@@ -2025,3 +2025,46 @@ fn seed_github_query_defaults_does_not_overwrite_user_edits() {
         .unwrap();
     assert_eq!(review, "my custom query");
 }
+
+#[test]
+fn delete_repo_path_removes_entry() {
+    let db = in_memory_db();
+    db.save_repo_path("/home/user/project").unwrap();
+    db.save_repo_path("/home/user/other").unwrap();
+    assert_eq!(db.list_repo_paths().unwrap().len(), 2);
+    db.delete_repo_path("/home/user/project").unwrap();
+    let paths = db.list_repo_paths().unwrap();
+    assert_eq!(paths.len(), 1);
+    assert_eq!(paths[0], "/home/user/other");
+}
+
+#[test]
+fn delete_repo_path_nonexistent_is_ok() {
+    let db = in_memory_db();
+    db.delete_repo_path("/does/not/exist").unwrap();
+}
+
+#[test]
+fn delete_repo_path_cleans_presets() {
+    let db = in_memory_db();
+    db.save_repo_path("/home/user/a").unwrap();
+    db.save_repo_path("/home/user/b").unwrap();
+    db.save_filter_preset("my_preset", "/home/user/a\n/home/user/b", "include")
+        .unwrap();
+    db.delete_repo_path("/home/user/a").unwrap();
+    let presets = db.list_filter_presets().unwrap();
+    assert_eq!(presets.len(), 1);
+    assert_eq!(presets[0].0, "my_preset");
+    assert_eq!(presets[0].1, "/home/user/b");
+}
+
+#[test]
+fn delete_repo_path_removes_empty_preset() {
+    let db = in_memory_db();
+    db.save_repo_path("/home/user/solo").unwrap();
+    db.save_filter_preset("solo_preset", "/home/user/solo", "include")
+        .unwrap();
+    db.delete_repo_path("/home/user/solo").unwrap();
+    let presets = db.list_filter_presets().unwrap();
+    assert!(presets.is_empty());
+}

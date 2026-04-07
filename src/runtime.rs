@@ -726,6 +726,40 @@ impl TuiRuntime {
         }
     }
 
+    fn exec_delete_repo_path(&self, app: &mut App, path: &str) {
+        if let Err(e) = self.database.delete_repo_path(path) {
+            app.update(Message::Error(Self::db_error("deleting repo path", e)));
+            return;
+        }
+        let paths = self.database.list_repo_paths().unwrap_or_else(|e| {
+            tracing::warn!("failed to list repo paths: {e}");
+            vec![]
+        });
+        app.update(Message::RepoPathsUpdated(paths));
+        // Refresh presets since delete_repo_path cleans them
+        if let Ok(raw) = self.database.list_filter_presets() {
+            let known: std::collections::HashSet<String> =
+                app.repo_paths().iter().cloned().collect();
+            let presets = raw
+                .into_iter()
+                .map(|(name, paths_str, mode_str)| {
+                    let repos: std::collections::HashSet<String> = paths_str
+                        .split('\n')
+                        .filter(|p| !p.is_empty() && known.contains(*p))
+                        .map(String::from)
+                        .collect();
+                    let mode = if mode_str == "exclude" {
+                        crate::tui::RepoFilterMode::Exclude
+                    } else {
+                        crate::tui::RepoFilterMode::Include
+                    };
+                    (name, repos, mode)
+                })
+                .collect();
+            app.update(Message::FilterPresetsLoaded(presets));
+        }
+    }
+
     fn exec_insert_epic(
         &self,
         app: &mut App,
@@ -1579,6 +1613,7 @@ async fn execute_commands(
                 rt.exec_persist_filter_preset(app, &name, &repo_paths, mode_str)
             }
             Command::DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name),
+            Command::DeleteRepoPath(path) => rt.exec_delete_repo_path(app, &path),
             Command::PatchSubStatus { id, sub_status } => {
                 rt.exec_patch_sub_status(app, id, sub_status)
             }

@@ -163,16 +163,19 @@ async fn main() -> Result<()> {
                 .map(parse_status)
                 .transpose()?;
             let svc = service::TaskService::new(std::sync::Arc::new(db));
-            let updated =
-                svc.cli_update_task(task_id, new_status, only_if_status, resolved_sub_status)?;
-            if updated {
-                println!("Task {} updated to {}", id, status);
-            } else {
-                println!(
+            match svc.cli_update_task(task_id, new_status, only_if_status, resolved_sub_status) {
+                Ok(true) => println!("Task {} updated to {}", id, status),
+                Ok(false) => println!(
                     "Task {} not updated (status is not {})",
                     id,
                     only_if.as_deref().unwrap_or("?")
-                );
+                ),
+                Err(e) if e.to_string().contains("not found") => {
+                    // Task doesn't exist — treat as no-op (e.g. hook firing for a
+                    // worktree whose task was removed from the database).
+                    eprintln!("Task {} not found, skipping", id);
+                }
+                Err(e) => return Err(e.into()),
             }
         }
         Commands::List { status } => {

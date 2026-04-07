@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use rusqlite;
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::io::Write;
@@ -212,6 +213,16 @@ fn confirm(prompt: &str) -> Result<bool> {
     Ok(trimmed.is_empty() || trimmed == "y" || trimmed == "yes")
 }
 
+/// Like [`confirm`] but defaults to **No** — the user must explicitly type "y".
+fn confirm_dangerous(prompt: &str) -> Result<bool> {
+    eprint!("{prompt} [y/N] ");
+    std::io::stderr().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim().to_lowercase();
+    Ok(trimmed == "y" || trimmed == "yes")
+}
+
 fn plugin_needs_update() -> Result<bool> {
     plugin_needs_update_in(&plugin_dir()?)
 }
@@ -295,6 +306,15 @@ pub fn remove_plugin(plugin_path: &std::path::Path) -> Result<bool> {
     fs::remove_dir_all(plugin_path)
         .with_context(|| format!("Failed to remove {}", plugin_path.display()))?;
     Ok(true)
+}
+
+fn count_tasks(db_path: &std::path::Path) -> Result<i64> {
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
+    Ok(count)
 }
 
 pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
@@ -450,13 +470,25 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
     }
 
     if purge {
-        match remove_database(&db_path) {
-            Ok(true) => {
-                println!("Removed database");
-                any_removed = true;
+        if db_path.exists() {
+            let task_count = count_tasks(&db_path).unwrap_or(0);
+            eprintln!(
+                "\n  Database contains {task_count} task(s). This cannot be undone."
+            );
+            if confirm_dangerous("Delete database?")? {
+                match remove_database(&db_path) {
+                    Ok(true) => {
+                        println!("Removed database");
+                        any_removed = true;
+                    }
+                    Ok(false) => println!("Database not found, skipping"),
+                    Err(e) => eprintln!("Warning: failed to remove database: {e}"),
+                }
+            } else {
+                println!("Kept database.");
             }
-            Ok(false) => println!("Database not found, skipping"),
-            Err(e) => eprintln!("Warning: failed to remove database: {e}"),
+        } else {
+            println!("Database not found, skipping");
         }
     }
 

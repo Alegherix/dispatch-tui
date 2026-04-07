@@ -236,6 +236,10 @@ rule CreateTask {
         created_at: now,
         updated_at: now
     )
+
+    @guidance
+        -- When invoked from the epic view, epic is set to the
+        -- current epic, auto-linking the new task as a subtask.
 }
 
 rule CreateQuickTask {
@@ -380,6 +384,8 @@ rule MoveTaskBackward {
         -- tracking state (tmux output, staleness timer, crash detection,
         -- notification flags) for the task.
         -- sub_status is always reset to the default for the new status.
+        -- The worktree is preserved so the task can be resumed later
+        -- via ResumeTask.
         -- Supports batch operation on multi-selected tasks.
 }
 
@@ -1051,6 +1057,7 @@ rule UpdateTaskViaMcp {
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
               or sort_order != null or epic_id != null
+              or pr_url != null or tag != null
 
     -- Cannot set status to done or archived via MCP
     requires: status != done
@@ -1494,8 +1501,8 @@ rule DeleteEpic {
     -- Epic substatus (display label for epic cards):
     --   backlog + no plan             => unplanned
     --   backlog + has plan            => planned
-    --   running + any subtask blocked => "N blocked" (N = count of subtasks
-    --     with sub_status in {needs_input, stale, crashed, conflict})
+    --   running + any subtask blocked => "N blocked" (N = count of running
+    --     subtasks with sub_status in {needs_input, stale, crashed, conflict})
     --   running + no blocked          => active
     --   review + active merge         => wrapping up
     --   review + no active merge      => in review

@@ -2068,3 +2068,489 @@ fn delete_repo_path_removes_empty_preset() {
     let presets = db.list_filter_presets().unwrap();
     assert!(presets.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Migration-specific tests — verify data preservation through table rebuilds
+// ---------------------------------------------------------------------------
+
+#[test]
+fn migration_v4_preserves_epic_data_after_table_rebuild() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=3;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan        TEXT,
+             epic_id     INTEGER REFERENCES epics(id),
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             plan        TEXT NOT NULL DEFAULT '',
+             repo_path   TEXT NOT NULL,
+             done        INTEGER NOT NULL DEFAULT 0,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO epics (title, description, plan, repo_path, done)
+             VALUES ('Active Epic', 'Active desc', 'Original plan', '/repo/a', 0);
+         INSERT INTO epics (title, description, plan, repo_path, done)
+             VALUES ('Done Epic', 'Done desc', 'Done plan', '/repo/b', 1);
+         INSERT INTO tasks (title, description, repo_path, epic_id)
+             VALUES ('Task 1', 'Task desc', '/repo/a', 1);",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    // Epic core data preserved through v4 table rebuild
+    let (title, desc, repo): (String, String, String) = conn
+        .query_row(
+            "SELECT title, description, repo_path FROM epics WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(title, "Active Epic");
+    assert_eq!(desc, "Active desc");
+    assert_eq!(repo, "/repo/a");
+
+    // v4 dropped plan; v8 re-added it (NULL); v25 renamed to plan_path
+    let plan_path: Option<String> = conn
+        .query_row("SELECT plan_path FROM epics WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(
+        plan_path.is_none(),
+        "plan should be NULL after v4 dropped and v8 re-added it"
+    );
+
+    // Task-epic FK preserved through rebuild
+    let epic_id: Option<i64> = conn
+        .query_row("SELECT epic_id FROM tasks WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(epic_id, Some(1));
+}
+
+#[test]
+fn migration_v15_converts_needs_input_to_sub_status() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=14;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan        TEXT,
+             epic_id     INTEGER,
+             needs_input INTEGER NOT NULL DEFAULT 0,
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             done        INTEGER NOT NULL DEFAULT 0,
+             plan        TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL
+         );
+         INSERT INTO tasks (title, description, repo_path, status, needs_input)
+             VALUES ('Needs Input', 'desc', '/r', 'running', 1);
+         INSERT INTO tasks (title, description, repo_path, status, needs_input)
+             VALUES ('Running Active', 'desc', '/r', 'running', 0);
+         INSERT INTO tasks (title, description, repo_path, status, needs_input)
+             VALUES ('In Review', 'desc', '/r', 'review', 0);
+         INSERT INTO tasks (title, description, repo_path, status, needs_input)
+             VALUES ('In Backlog', 'desc', '/r', 'backlog', 0);",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT title, sub_status FROM tasks ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+
+    assert_eq!(rows[0], ("Needs Input".into(), "needs_input".into()));
+    assert_eq!(rows[1], ("Running Active".into(), "active".into()));
+    assert_eq!(rows[2], ("In Review".into(), "awaiting_review".into()));
+    assert_eq!(rows[3], ("In Backlog".into(), "none".into()));
+
+    // needs_input column should be removed by v15 table rebuild
+    assert!(
+        conn.prepare("SELECT needs_input FROM tasks").is_err(),
+        "needs_input column should be removed after migration"
+    );
+}
+
+#[test]
+fn migration_v16_cleans_invalid_status_pairs() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=15;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan        TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             done        INTEGER NOT NULL DEFAULT 0,
+             plan        TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL
+         );
+         -- Invalid: (review, needs_input) → should become (review, awaiting_review)
+         INSERT INTO tasks (title, description, repo_path, status, sub_status)
+             VALUES ('Review NI', 'desc', '/r', 'review', 'needs_input');
+         -- Invalid: (running, none) → should become (running, active)
+         INSERT INTO tasks (title, description, repo_path, status, sub_status)
+             VALUES ('Running None', 'desc', '/r', 'running', 'none');
+         -- Invalid: (backlog, active) → should become (backlog, none)
+         INSERT INTO tasks (title, description, repo_path, status, sub_status)
+             VALUES ('Backlog Active', 'desc', '/r', 'backlog', 'active');
+         -- Valid: (running, active) → unchanged
+         INSERT INTO tasks (title, description, repo_path, status, sub_status)
+             VALUES ('Running OK', 'desc', '/r', 'running', 'active');",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    let rows: Vec<(String, String, String)> = conn
+        .prepare("SELECT title, status, sub_status FROM tasks ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+
+    assert_eq!(
+        rows[0],
+        (
+            "Review NI".into(),
+            "review".into(),
+            "awaiting_review".into()
+        )
+    );
+    assert_eq!(
+        rows[1],
+        ("Running None".into(), "running".into(), "active".into())
+    );
+    assert_eq!(
+        rows[2],
+        ("Backlog Active".into(), "backlog".into(), "none".into())
+    );
+    assert_eq!(
+        rows[3],
+        ("Running OK".into(), "running".into(), "active".into())
+    );
+
+    // CHECK constraint should reject invalid pairs after migration
+    let result = conn.execute(
+        "INSERT INTO tasks (title, description, repo_path, status, sub_status)
+         VALUES ('x', 'x', '/x', 'backlog', 'active')",
+        [],
+    );
+    assert!(
+        result.is_err(),
+        "CHECK constraint should reject (backlog, active)"
+    );
+}
+
+#[test]
+fn migration_v18_expands_tilde_paths() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=17;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan        TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (status = 'backlog'  AND sub_status = 'none') OR
+                 (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed','conflict')) OR
+                 (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved')) OR
+                 (status = 'done'     AND sub_status = 'none') OR
+                 (status = 'archived' AND sub_status = 'none')
+             )
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             done        INTEGER NOT NULL DEFAULT 0,
+             plan        TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE settings (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL
+         );
+         INSERT INTO tasks (title, description, repo_path)
+             VALUES ('Tilde', 'desc', '~/project/a');
+         INSERT INTO tasks (title, description, repo_path)
+             VALUES ('Absolute', 'desc', '/absolute/path');
+         INSERT INTO epics (title, description, repo_path)
+             VALUES ('Epic', 'desc', '~/project/b');
+         INSERT INTO repo_paths (path) VALUES ('~/project/c');
+         INSERT INTO settings (key, value) VALUES ('repo_filter', '~/project/d');
+         INSERT INTO filter_presets (name, repo_paths)
+             VALUES ('preset', '~/project/e');",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    let home = std::env::var("HOME").expect("HOME must be set for this test");
+
+    let task_path: String = conn
+        .query_row("SELECT repo_path FROM tasks WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(task_path, format!("{home}/project/a"));
+
+    // Absolute paths unchanged
+    let abs_path: String = conn
+        .query_row("SELECT repo_path FROM tasks WHERE id = 2", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(abs_path, "/absolute/path");
+
+    let epic_path: String = conn
+        .query_row("SELECT repo_path FROM epics WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(epic_path, format!("{home}/project/b"));
+
+    let rp: String = conn
+        .query_row("SELECT path FROM repo_paths", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rp, format!("{home}/project/c"));
+
+    let setting: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'repo_filter'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(setting, format!("{home}/project/d"));
+
+    let preset: String = conn
+        .query_row(
+            "SELECT repo_paths FROM filter_presets WHERE name = 'preset'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(preset, format!("{home}/project/e"));
+}
+
+#[test]
+fn migration_v20_converts_done_boolean_to_status_enum() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=19;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan        TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (status = 'backlog'  AND sub_status = 'none') OR
+                 (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed','conflict')) OR
+                 (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved')) OR
+                 (status = 'done'     AND sub_status = 'none') OR
+                 (status = 'archived' AND sub_status = 'none')
+             )
+         );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             done        INTEGER NOT NULL DEFAULT 0,
+             plan        TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         CREATE TABLE filter_presets (
+             name       TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL
+         );
+         -- Epic 1: done=1 → status 'done'
+         INSERT INTO epics (title, description, repo_path, done)
+             VALUES ('Done Epic', 'desc', '/r', 1);
+         -- Epic 2: done=0, no subtasks → status 'backlog'
+         INSERT INTO epics (title, description, repo_path, done)
+             VALUES ('Empty Epic', 'desc', '/r', 0);
+         -- Epic 3: done=0, all subtasks done → status 'done'
+         INSERT INTO epics (title, description, repo_path, done)
+             VALUES ('All Done', 'desc', '/r', 0);
+         INSERT INTO tasks (title, description, repo_path, status, sub_status, epic_id)
+             VALUES ('T1', 'd', '/r', 'done', 'none', 3);
+         INSERT INTO tasks (title, description, repo_path, status, sub_status, epic_id)
+             VALUES ('T2', 'd', '/r', 'done', 'none', 3);
+         -- Epic 4: done=0, has running subtask → status 'running'
+         INSERT INTO epics (title, description, repo_path, done)
+             VALUES ('Running Epic', 'desc', '/r', 0);
+         INSERT INTO tasks (title, description, repo_path, status, sub_status, epic_id)
+             VALUES ('T3', 'd', '/r', 'running', 'active', 4);
+         INSERT INTO tasks (title, description, repo_path, status, sub_status, epic_id)
+             VALUES ('T4', 'd', '/r', 'done', 'none', 4);
+         -- Epic 5: done=0, review+done subtasks → status 'review'
+         INSERT INTO epics (title, description, repo_path, done)
+             VALUES ('Review Epic', 'desc', '/r', 0);
+         INSERT INTO tasks (title, description, repo_path, status, sub_status, epic_id)
+             VALUES ('T5', 'd', '/r', 'review', 'awaiting_review', 5);
+         INSERT INTO tasks (title, description, repo_path, status, sub_status, epic_id)
+             VALUES ('T6', 'd', '/r', 'done', 'none', 5);",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    let statuses: Vec<(String, String)> = conn
+        .prepare("SELECT title, status FROM epics ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+
+    assert_eq!(statuses[0], ("Done Epic".into(), "done".into()));
+    assert_eq!(statuses[1], ("Empty Epic".into(), "backlog".into()));
+    assert_eq!(statuses[2], ("All Done".into(), "done".into()));
+    assert_eq!(statuses[3], ("Running Epic".into(), "running".into()));
+    assert_eq!(statuses[4], ("Review Epic".into(), "review".into()));
+
+    // done column should be removed (replaced by status enum)
+    assert!(
+        conn.prepare("SELECT done FROM epics").is_err(),
+        "done column should be removed after migration"
+    );
+}

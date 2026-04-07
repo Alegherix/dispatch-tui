@@ -1025,6 +1025,9 @@ impl App {
                 self.set_status(format!("Fix agent failed: {error}"));
                 vec![]
             }
+            Message::ReviewStatusUpdated { .. } => vec![], // TODO: step 8
+            Message::DetachReviewAgent { .. } => vec![],   // TODO: step 8
+            Message::DetachFixAgent { .. } => vec![],      // TODO: step 8
             // Filter presets
             Message::StartSavePreset => self.handle_start_save_preset(),
             Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),

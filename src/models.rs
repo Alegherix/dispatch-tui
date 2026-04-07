@@ -662,6 +662,46 @@ pub struct Reviewer {
 }
 
 // ---------------------------------------------------------------------------
+// ReviewAgentStatus — lifecycle state of a dispatched review/fix agent
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewAgentStatus {
+    Reviewing,
+    FindingsReady,
+    Idle,
+}
+
+impl ReviewAgentStatus {
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            Self::Reviewing => "reviewing",
+            Self::FindingsReady => "findings_ready",
+            Self::Idle => "idle",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "reviewing" => Some(Self::Reviewing),
+            "findings_ready" => Some(Self::FindingsReady),
+            "idle" => Some(Self::Idle),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ReviewAgentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Reviewing => write!(f, "reviewing"),
+            Self::FindingsReady => write!(f, "ready"),
+            Self::Idle => write!(f, "idle"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ReviewPr — a PR the user is expected to review
 // ---------------------------------------------------------------------------
 
@@ -685,6 +725,7 @@ pub struct ReviewPr {
     pub reviewers: Vec<Reviewer>,
     pub tmux_window: Option<String>,
     pub worktree: Option<String>,
+    pub agent_status: Option<ReviewAgentStatus>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,6 +1151,7 @@ pub struct SecurityAlert {
     pub description: String,
     pub tmux_window: Option<String>,
     pub worktree: Option<String>,
+    pub agent_status: Option<ReviewAgentStatus>,
 }
 
 // ---------------------------------------------------------------------------
@@ -2205,5 +2247,32 @@ mod security_tests {
         assert_eq!(AlertSeverity::High.as_str(), "High");
         assert_eq!(AlertSeverity::Medium.as_str(), "Medium");
         assert_eq!(AlertSeverity::Low.as_str(), "Low");
+    }
+
+    #[test]
+    fn review_agent_status_db_roundtrip() {
+        for status in [
+            ReviewAgentStatus::Reviewing,
+            ReviewAgentStatus::FindingsReady,
+            ReviewAgentStatus::Idle,
+        ] {
+            let s = status.as_db_str();
+            let parsed = ReviewAgentStatus::from_db_str(s)
+                .unwrap_or_else(|| panic!("roundtrip failed for: {s}"));
+            assert_eq!(parsed, status);
+        }
+    }
+
+    #[test]
+    fn review_agent_status_from_db_str_invalid() {
+        assert_eq!(ReviewAgentStatus::from_db_str("bogus"), None);
+        assert_eq!(ReviewAgentStatus::from_db_str(""), None);
+    }
+
+    #[test]
+    fn review_agent_status_display() {
+        assert_eq!(ReviewAgentStatus::Reviewing.to_string(), "reviewing");
+        assert_eq!(ReviewAgentStatus::FindingsReady.to_string(), "ready");
+        assert_eq!(ReviewAgentStatus::Idle.to_string(), "idle");
     }
 }

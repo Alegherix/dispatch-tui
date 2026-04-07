@@ -201,7 +201,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26, "fresh DB should be at schema version 26");
+    assert_eq!(version, 27, "fresh DB should be at schema version 27");
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
 }
 
 #[test]
@@ -353,7 +353,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
 }
 
 #[test]
@@ -464,7 +464,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
 }
 
 #[test]
@@ -1190,6 +1190,7 @@ fn save_and_load_review_prs() {
         reviewers: vec![],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     let pr2 = ReviewPr {
         number: 99,
@@ -1210,6 +1211,7 @@ fn save_and_load_review_prs() {
         reviewers: vec![],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
 
     db.save_review_prs(&[pr1, pr2]).unwrap();
@@ -1261,6 +1263,7 @@ fn save_review_prs_replaces_all() {
         }],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_review_prs(&[pr1]).unwrap();
     assert_eq!(db.load_review_prs().unwrap().len(), 1);
@@ -1297,6 +1300,7 @@ fn save_review_prs_replaces_all() {
         }],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_review_prs(&[pr2]).unwrap();
 
@@ -1342,6 +1346,7 @@ fn save_review_prs_preserves_agent_fields() {
         reviewers: vec![],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_review_prs(&[pr]).unwrap();
 
@@ -1376,6 +1381,7 @@ fn save_review_prs_preserves_agent_fields() {
         reviewers: vec![],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_review_prs(&[refreshed_pr]).unwrap();
 
@@ -1417,6 +1423,7 @@ fn save_review_prs_removes_stale_prs() {
         reviewers: vec![],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
 
     // Save two PRs
@@ -1532,7 +1539,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1633,7 +1640,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26, "fresh DB should be at schema version 26");
+    assert_eq!(version, 27, "fresh DB should be at schema version 27");
 }
 
 #[test]
@@ -1759,7 +1766,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -2074,6 +2081,7 @@ fn security_alerts_round_trip() {
             description: "Prototype pollution".to_string(),
             tmux_window: None,
             worktree: None,
+            agent_status: None,
         },
         SecurityAlert {
             number: 2,
@@ -2091,6 +2099,7 @@ fn security_alerts_round_trip() {
             description: "Potential SQL injection".to_string(),
             tmux_window: None,
             worktree: None,
+            agent_status: None,
         },
     ];
 
@@ -2136,6 +2145,7 @@ fn security_alerts_save_replaces_previous() {
         description: "".to_string(),
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     }];
     db.save_security_alerts(&alerts1).unwrap();
     assert_eq!(db.load_security_alerts().unwrap().len(), 1);
@@ -2156,6 +2166,7 @@ fn security_alerts_save_replaces_previous() {
         description: "".to_string(),
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     }];
     db.save_security_alerts(&alerts2).unwrap();
     let loaded = db.load_security_alerts().unwrap();
@@ -2186,6 +2197,7 @@ fn save_security_alerts_preserves_agent_fields() {
         description: "Prototype pollution".to_string(),
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_security_alerts(&[alert]).unwrap();
 
@@ -2217,6 +2229,7 @@ fn save_security_alerts_preserves_agent_fields() {
         description: "Prototype pollution".to_string(),
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_security_alerts(&[refreshed]).unwrap();
 
@@ -2827,6 +2840,7 @@ fn set_pr_agent_updates_fields() {
         reviewers: vec![],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_review_prs(&[pr]).unwrap();
 
@@ -2835,6 +2849,7 @@ fn set_pr_agent_updates_fields() {
     let loaded = db.load_review_prs().unwrap();
     assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:review-42"));
     assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
+    assert_eq!(loaded[0].agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
 }
 
 #[test]
@@ -2860,6 +2875,7 @@ fn set_alert_agent_updates_fields() {
         description: String::new(),
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     };
     db.save_security_alerts(&[alert]).unwrap();
 
@@ -2868,4 +2884,154 @@ fn set_alert_agent_updates_fields() {
     let loaded = db.load_security_alerts().unwrap();
     assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:fix-1"));
     assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
+    assert_eq!(loaded[0].agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+}
+
+#[test]
+fn update_agent_status_finds_review_pr() {
+    use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    let pr = ReviewPr {
+        number: 42,
+        title: "Test".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 0,
+        deletions: 0,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_review_prs(&[pr]).unwrap();
+    db.set_pr_agent("review_prs", "acme/app", 42, "dispatch:review-42", "/tmp/wt").unwrap();
+
+    let table = db.update_agent_status("acme/app", 42, Some("findings_ready")).unwrap();
+    assert_eq!(table, "review_prs");
+
+    let loaded = db.load_review_prs().unwrap();
+    assert_eq!(loaded[0].agent_status, Some(ReviewAgentStatus::FindingsReady));
+}
+
+#[test]
+fn update_agent_status_finds_bot_pr() {
+    use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    let pr = ReviewPr {
+        number: 10,
+        title: "Bump dep".to_string(),
+        author: "dependabot".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/10".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 1,
+        deletions: 1,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_bot_prs(&[pr]).unwrap();
+    db.set_pr_agent("bot_prs", "acme/app", 10, "dispatch:review-10", "/tmp/wt").unwrap();
+
+    let table = db.update_agent_status("acme/app", 10, Some("idle")).unwrap();
+    assert_eq!(table, "bot_prs");
+
+    let loaded = db.load_bot_prs().unwrap();
+    assert_eq!(loaded[0].agent_status, Some(ReviewAgentStatus::Idle));
+}
+
+#[test]
+fn update_agent_status_finds_security_alert() {
+    use crate::models::{AlertKind, AlertSeverity, ReviewAgentStatus, SecurityAlert};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    let alert = SecurityAlert {
+        number: 1,
+        repo: "acme/app".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE".to_string(),
+        package: None,
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: "https://example.com".to_string(),
+        created_at: Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_security_alerts(&[alert]).unwrap();
+    db.set_alert_agent("acme/app", 1, AlertKind::Dependabot, "dispatch:fix-1", "/tmp/wt").unwrap();
+
+    let table = db.update_agent_status("acme/app", 1, Some("findings_ready")).unwrap();
+    assert_eq!(table, "security_alerts");
+
+    let loaded = db.load_security_alerts().unwrap();
+    assert_eq!(loaded[0].agent_status, Some(ReviewAgentStatus::FindingsReady));
+}
+
+#[test]
+fn update_agent_status_errors_when_no_match() {
+    let db = Database::open_in_memory().unwrap();
+    let result = db.update_agent_status("acme/unknown", 999, Some("idle"));
+    assert!(result.is_err());
+}
+
+#[test]
+fn update_agent_status_skips_pr_without_tmux() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    let pr = ReviewPr {
+        number: 42,
+        title: "Test".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 0,
+        deletions: 0,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_review_prs(&[pr]).unwrap();
+
+    // PR has no tmux_window, so update should fail
+    let result = db.update_agent_status("acme/app", 42, Some("findings_ready"));
+    assert!(result.is_err());
 }

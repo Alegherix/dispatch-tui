@@ -6224,6 +6224,7 @@ fn make_review_pr_for_repo(
         reviewers: vec![],
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     }
 }
 
@@ -6248,6 +6249,7 @@ fn make_security_alert(
         description: String::new(),
         tmux_window: None,
         worktree: None,
+        agent_status: None,
     }
 }
 

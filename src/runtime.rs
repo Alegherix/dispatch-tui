@@ -1702,6 +1702,8 @@ async fn execute_commands(
             Command::EditGithubQueries(mode) => {
                 rt.exec_edit_github_queries(app, mode, terminal, key_rx)?
             }
+            Command::UpdateAgentStatus { .. } => {} // TODO: step 9
+            Command::ReReview { .. } => {}          // TODO: step 9
         }
     }
 
@@ -2588,6 +2590,7 @@ mod tests {
             reviewers: vec![],
             tmux_window: None,
             worktree: None,
+            agent_status: None,
         };
         rt.database.save_review_prs(&[pr]).unwrap();
 

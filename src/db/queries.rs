@@ -3,8 +3,8 @@ use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
-    CiStatus, Epic, EpicId, ReviewDecision, ReviewPr, Reviewer, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag, TaskUsage, UsageReport,
+    CiStatus, Epic, EpicId, ReviewAgentStatus, ReviewDecision, ReviewPr, Reviewer, SubStatus,
+    Task, TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
 
 use super::{Database, EpicPatch, TaskPatch, TaskStore};
@@ -659,7 +659,7 @@ impl TaskStore for Database {
         );
         let conn = self.conn()?;
         conn.execute(
-            &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2 WHERE repo = ?3 AND number = ?4"),
+            &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4"),
             params![tmux_window, worktree, repo, number],
         )?;
         Ok(())
@@ -668,10 +668,31 @@ impl TaskStore for Database {
     fn set_alert_agent(&self, repo: &str, number: i64, kind: crate::models::AlertKind, tmux_window: &str, worktree: &str) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(
-            "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2 WHERE repo = ?3 AND number = ?4 AND kind = ?5",
+            "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4 AND kind = ?5",
             params![tmux_window, worktree, repo, number, kind.as_db_str()],
         )?;
         Ok(())
+    }
+
+    fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String> {
+        let conn = self.conn()?;
+        for table in &["review_prs", "bot_prs"] {
+            let affected = conn.execute(
+                &format!("UPDATE {table} SET agent_status = ?1 WHERE repo = ?2 AND number = ?3 AND tmux_window IS NOT NULL"),
+                params![status, repo, number],
+            )?;
+            if affected > 0 {
+                return Ok(table.to_string());
+            }
+        }
+        let affected = conn.execute(
+            "UPDATE security_alerts SET agent_status = ?1 WHERE repo = ?2 AND number = ?3 AND tmux_window IS NOT NULL",
+            params![status, repo, number],
+        )?;
+        if affected > 0 {
+            return Ok("security_alerts".to_string());
+        }
+        anyhow::bail!("No active agent found for {repo}#{number}");
     }
 }
 
@@ -771,7 +792,7 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
         "SELECT repo, number, title, author, url, is_draft,
                 created_at, updated_at, additions, deletions,
                 review_decision, labels, body, head_ref, ci_status, reviewers,
-                tmux_window, worktree
+                tmux_window, worktree, agent_status
          FROM {table}"
     ))?;
     let rows = stmt.query_map([], |row| {
@@ -793,6 +814,7 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
         let reviewers_json: String = row.get(15)?;
         let tmux_window: Option<String> = row.get(16)?;
         let worktree: Option<String> = row.get(17)?;
+        let agent_status_str: Option<String> = row.get(18)?;
         Ok((
             repo,
             number,
@@ -812,6 +834,7 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             reviewers_json,
             tmux_window,
             worktree,
+            agent_status_str,
         ))
     })?;
 
@@ -836,6 +859,7 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             reviewers_json,
             tmux_window,
             worktree,
+            agent_status_str,
         ) = row?;
 
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
@@ -877,6 +901,7 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             reviewers,
             tmux_window,
             worktree,
+            agent_status: agent_status_str.as_deref().and_then(ReviewAgentStatus::from_db_str),
         });
     }
     Ok(prs)
@@ -961,7 +986,7 @@ fn load_security_alerts_impl(
     let mut stmt = conn.prepare(
         "SELECT repo, number, kind, severity, title, package,
                 vulnerable_range, fixed_version, cvss_score, url,
-                created_at, state, description, tmux_window, worktree
+                created_at, state, description, tmux_window, worktree, agent_status
          FROM security_alerts",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -981,6 +1006,7 @@ fn load_security_alerts_impl(
             row.get::<_, String>(12)?,
             row.get::<_, Option<String>>(13)?,
             row.get::<_, Option<String>>(14)?,
+            row.get::<_, Option<String>>(15)?,
         ))
     })?;
 
@@ -1002,6 +1028,7 @@ fn load_security_alerts_impl(
             description,
             tmux_window,
             worktree,
+            agent_status_str,
         ) = row?;
 
         let kind = AlertKind::from_db_str(&kind_str).unwrap_or(AlertKind::Dependabot);
@@ -1026,6 +1053,7 @@ fn load_security_alerts_impl(
             description,
             tmux_window,
             worktree,
+            agent_status: agent_status_str.as_deref().and_then(ReviewAgentStatus::from_db_str),
         });
     }
     Ok(alerts)

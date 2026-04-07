@@ -30,6 +30,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (24, migrate_v24_create_security_alerts_table),
     (25, migrate_v25_rename_plan_to_plan_path),
     (26, migrate_v26_add_agent_columns),
+    (27, migrate_v27_add_agent_status),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -505,6 +506,17 @@ fn migrate_v26_add_agent_columns(conn: &Connection) -> Result<()> {
             "ALTER TABLE {table} ADD COLUMN worktree TEXT"
         )) {
             tracing::debug!("ALTER {table} ADD worktree (may already exist): {e}");
+        }
+    }
+    Ok(())
+}
+
+fn migrate_v27_add_agent_status(conn: &Connection) -> Result<()> {
+    for table in &["review_prs", "bot_prs", "security_alerts"] {
+        if let Err(e) = conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN agent_status TEXT"
+        )) {
+            tracing::debug!("ALTER {table} ADD agent_status (may already exist): {e}");
         }
     }
     Ok(())

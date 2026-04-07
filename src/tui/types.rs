@@ -337,6 +337,20 @@ pub enum Message {
     FixAgentFailed {
         error: String,
     },
+    ReviewStatusUpdated {
+        repo: String,
+        number: i64,
+        status: crate::models::ReviewAgentStatus,
+    },
+    DetachReviewAgent {
+        repo: String,
+        number: i64,
+    },
+    DetachFixAgent {
+        repo: String,
+        number: i64,
+        kind: crate::models::AlertKind,
+    },
     // Filter presets
     StartSavePreset,
     SaveFilterPreset(String),
@@ -512,6 +526,16 @@ pub enum Command {
         fixed_version: Option<String>,
     },
     EditGithubQueries(ReviewBoardMode),
+    UpdateAgentStatus {
+        repo: String,
+        number: i64,
+        status: Option<crate::models::ReviewAgentStatus>,
+    },
+    ReReview {
+        repo: String,
+        number: i64,
+        tmux_window: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -755,6 +779,7 @@ pub struct ReviewBoardState {
     pub last_bot_prs_fetch: Option<Instant>,
     pub bot_prs_repo_filter: HashSet<String>,
     pub bot_prs_repo_filter_mode: RepoFilterMode,
+    pub review_flash: HashMap<(String, i64), Instant>,
 }
 
 impl ReviewBoardState {
@@ -772,6 +797,9 @@ impl ReviewBoardState {
                 }
                 if new_pr.worktree.is_none() {
                     new_pr.worktree = old_pr.worktree.clone();
+                }
+                if new_pr.agent_status.is_none() {
+                    new_pr.agent_status = old_pr.agent_status;
                 }
             }
         }
@@ -793,6 +821,9 @@ impl ReviewBoardState {
                 }
                 if new_pr.worktree.is_none() {
                     new_pr.worktree = old_pr.worktree.clone();
+                }
+                if new_pr.agent_status.is_none() {
+                    new_pr.agent_status = old_pr.agent_status;
                 }
             }
         }
@@ -864,6 +895,9 @@ impl ReviewBoardState {
                 }
                 if new_pr.worktree.is_none() {
                     new_pr.worktree = old_pr.worktree.clone();
+                }
+                if new_pr.agent_status.is_none() {
+                    new_pr.agent_status = old_pr.agent_status;
                 }
             }
         }
@@ -1086,6 +1120,7 @@ pub struct SecurityBoardState {
     pub repo_filter: HashSet<String>,
     pub repo_filter_mode: RepoFilterMode,
     pub kind_filter: Option<AlertKind>,
+    pub review_flash: HashMap<(String, i64), Instant>,
 }
 
 impl SecurityBoardState {
@@ -1101,6 +1136,9 @@ impl SecurityBoardState {
                 }
                 if new_alert.worktree.is_none() {
                     new_alert.worktree = old_alert.worktree.clone();
+                }
+                if new_alert.agent_status.is_none() {
+                    new_alert.agent_status = old_alert.agent_status;
                 }
             }
         }

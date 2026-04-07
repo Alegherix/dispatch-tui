@@ -263,6 +263,7 @@ pub trait TaskStore: Send + Sync {
     // Agent tracking on PRs/alerts
     fn set_pr_agent(&self, table: &str, repo: &str, number: i64, tmux_window: &str, worktree: &str) -> Result<()>;
     fn set_alert_agent(&self, repo: &str, number: i64, kind: crate::models::AlertKind, tmux_window: &str, worktree: &str) -> Result<()>;
+    fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String>;
 }
 
 // ---------------------------------------------------------------------------

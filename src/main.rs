@@ -87,6 +87,9 @@ enum Commands {
         /// MCP server port
         #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
+        /// Skip confirmation prompts
+        #[arg(long, short)]
+        yes: bool,
     },
 }
 
@@ -251,8 +254,8 @@ async fn main() -> Result<()> {
             }
             println!("Created task #{}: \"{}\" [backlog]", id, title);
         }
-        Commands::Setup { port } => {
-            dispatch_tui::setup::run_setup(port)?;
+        Commands::Setup { port, yes } => {
+            dispatch_tui::setup::run_setup(port, yes)?;
         }
         Commands::Plan { id, path } => {
             if !path.exists() {

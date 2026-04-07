@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -199,10 +200,38 @@ fn write_json_file(path: &std::path::Path, value: &Value) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Interactive confirmation
+// ---------------------------------------------------------------------------
+
+fn confirm(prompt: &str) -> Result<bool> {
+    eprint!("{prompt} [Y/n] ");
+    std::io::stderr().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim().to_lowercase();
+    Ok(trimmed.is_empty() || trimmed == "y" || trimmed == "yes")
+}
+
+fn plugin_needs_update() -> Result<bool> {
+    plugin_needs_update_in(&plugin_dir()?)
+}
+
+fn plugin_needs_update_in(dir: &std::path::Path) -> Result<bool> {
+    for (rel_path, content, _) in plugin_files() {
+        let path = dir.join(rel_path);
+        match fs::read_to_string(&path) {
+            Ok(existing) if existing == content => continue,
+            _ => return Ok(true),
+        }
+    }
+    Ok(false)
+}
+
+// ---------------------------------------------------------------------------
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
 
-pub fn run_setup(port: u16) -> Result<()> {
+pub fn run_setup(port: u16, yes: bool) -> Result<()> {
     let claude_dir = claude_dir()?;
     fs::create_dir_all(&claude_dir)
         .with_context(|| format!("Failed to create {}", claude_dir.display()))?;
@@ -214,9 +243,13 @@ pub fn run_setup(port: u16) -> Result<()> {
     let existing_mcp = read_json_file(&mcp_path)?;
     let mcp_result = merge_mcp_config(existing_mcp, port);
     if mcp_result.changed {
-        write_json_file(&mcp_path, &mcp_result.value)?;
-        println!("MCP config: added dispatch to ~/.claude/.mcp.json (port {port})");
-        any_changes = true;
+        if yes || confirm(&format!("Add dispatch MCP server (localhost:{port}) to ~/.claude/.mcp.json?"))? {
+            write_json_file(&mcp_path, &mcp_result.value)?;
+            println!("MCP config: added dispatch to ~/.claude/.mcp.json (port {port})");
+            any_changes = true;
+        } else {
+            println!("MCP config: skipped");
+        }
     } else {
         println!("MCP config: dispatch already configured in ~/.claude/.mcp.json");
     }
@@ -226,12 +259,16 @@ pub fn run_setup(port: u16) -> Result<()> {
     let existing_settings = read_json_file(&settings_path)?;
     let perms_result = merge_permissions(existing_settings);
     if perms_result.added_count > 0 {
-        write_json_file(&settings_path, &perms_result.value)?;
-        println!(
-            "Permissions: added {} MCP tool permission(s) to ~/.claude/settings.json",
-            perms_result.added_count
-        );
-        any_changes = true;
+        if yes || confirm(&format!("Add {} dispatch tool permission(s) to ~/.claude/settings.json?", perms_result.added_count))? {
+            write_json_file(&settings_path, &perms_result.value)?;
+            println!(
+                "Permissions: added {} MCP tool permission(s) to ~/.claude/settings.json",
+                perms_result.added_count
+            );
+            any_changes = true;
+        } else {
+            println!("Permissions: skipped");
+        }
     } else {
         println!(
             "Permissions: all MCP tool permissions already present in ~/.claude/settings.json"
@@ -239,12 +276,17 @@ pub fn run_setup(port: u16) -> Result<()> {
     }
 
     // 3. Plugin (hooks, skills, commands)
-    if install_plugin()? {
-        println!("Plugin: installed dispatch plugin to ~/.claude/plugins/local/dispatch/");
-        println!("  → Skills: /wrap-up, /decompose-review");
-        println!("  → Commands: /queue-plan");
-        println!("  → Hooks: task-status, task-usage");
-        any_changes = true;
+    if plugin_needs_update()? {
+        if yes || confirm("Install dispatch plugin (skills, hooks, commands) to ~/.claude/plugins/local/dispatch/?")? {
+            install_plugin()?;
+            println!("Plugin: installed dispatch plugin to ~/.claude/plugins/local/dispatch/");
+            println!("  → Skills: /wrap-up, /decompose-review");
+            println!("  → Commands: /queue-plan");
+            println!("  → Hooks: task-status, task-usage");
+            any_changes = true;
+        } else {
+            println!("Plugin: skipped");
+        }
     } else {
         println!("Plugin: dispatch plugin already up to date");
     }
@@ -548,5 +590,38 @@ mod tests {
         write_json_file(&path, &value).unwrap();
         let read_back = read_json_file(&path).unwrap().unwrap();
         assert_eq!(read_back, value);
+    }
+
+    // -- plugin_needs_update --
+
+    #[test]
+    fn plugin_needs_update_true_when_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(plugin_needs_update_in(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn plugin_needs_update_false_when_all_match() {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel_path, content, _) in plugin_files() {
+            let path = dir.path().join(rel_path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, content).unwrap();
+        }
+        assert!(!plugin_needs_update_in(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn plugin_needs_update_true_when_one_file_differs() {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel_path, content, _) in plugin_files() {
+            let path = dir.path().join(rel_path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, content).unwrap();
+        }
+        // Corrupt one file
+        let first = plugin_files()[0].0;
+        fs::write(dir.path().join(first), "corrupted").unwrap();
+        assert!(plugin_needs_update_in(dir.path()).unwrap());
     }
 }

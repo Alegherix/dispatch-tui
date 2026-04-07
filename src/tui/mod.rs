@@ -2042,6 +2042,10 @@ impl App {
         } else {
             value
         };
+        if let Err(msg) = crate::dispatch::validate_repo_path(&repo_path) {
+            self.set_status(msg);
+            return vec![];
+        }
         self.finish_task_creation(repo_path)
     }
 
@@ -2839,6 +2843,10 @@ impl App {
         } else {
             value
         };
+        if let Err(msg) = crate::dispatch::validate_repo_path(&repo_path) {
+            self.set_status(msg);
+            return vec![];
+        }
         self.input.mode = InputMode::Normal;
         let pending = self.input.pending_dispatch.take();
         match pending {
@@ -3386,7 +3394,10 @@ impl App {
         } else {
             value
         };
-
+        if let Err(msg) = crate::dispatch::validate_repo_path(&repo_path) {
+            self.set_status(msg);
+            return vec![];
+        }
         self.finish_epic_creation(repo_path)
     }
 

@@ -349,7 +349,7 @@ fn move_backward_from_running_without_dispatch_fields() {
 #[test]
 fn repo_path_empty_uses_saved_path() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.repo_paths = vec!["/saved/repo".to_string()];
+    app.repo_paths = vec!["/tmp".to_string()];
 
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
@@ -362,7 +362,7 @@ fn repo_path_empty_uses_saved_path() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(
-        |c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/saved/repo")
+        |c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")
     ));
 }
 
@@ -389,9 +389,40 @@ fn repo_path_empty_no_saved_stays_in_mode() {
 }
 
 #[test]
+fn repo_path_nonexistent_shows_error() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: "D".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.update(Message::SubmitRepoPath("/nonexistent/path".to_string()));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.is_some());
+    let msg = app.status_message.as_ref().unwrap().as_str();
+    assert!(msg.contains("does not exist"), "got: {msg}");
+}
+
+#[test]
+fn dispatch_repo_path_nonexistent_shows_error() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
+    app.review.set_prs(vec![pr]);
+    app.update(Message::SwitchToReviewBoard);
+    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+
+    let cmds = app.update(Message::SubmitDispatchRepoPath("origin".to_string()));
+    assert!(cmds.is_empty());
+    assert!(app.status_message.is_some());
+    let msg = app.status_message.as_ref().unwrap().as_str();
+    assert!(msg.contains("does not exist"), "got: {msg}");
+}
+
+#[test]
 fn repo_path_nonempty_used_as_is() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.repo_paths = vec!["/saved/repo".to_string()];
+    app.repo_paths = vec!["/tmp".to_string()];
 
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
@@ -399,12 +430,12 @@ fn repo_path_nonempty_used_as_is() {
         description: "desc".to_string(),
         ..Default::default()
     });
-    app.input.buffer = "/custom/path".to_string();
+    app.input.buffer = "/tmp".to_string();
 
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(
-        |c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/custom/path")
+        |c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")
     ));
     assert_eq!(app.tasks.len(), 0); // task not added until TaskCreated
 }
@@ -1910,9 +1941,9 @@ fn submit_repo_path_creates_task() {
         tag: Some(TaskTag::Bug),
         ..Default::default()
     });
-    let cmds = app.update(Message::SubmitRepoPath("/my/repo".to_string()));
+    let cmds = app.update(Message::SubmitRepoPath("/tmp".to_string()));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/my/repo" && draft.tag == Some(TaskTag::Bug))));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp" && draft.tag == Some(TaskTag::Bug))));
 }
 
 #[test]
@@ -3775,18 +3806,18 @@ fn epic_repo_path_enter_with_text_completes() {
         description: "D".to_string(),
         ..Default::default()
     });
-    app.input.buffer = "/my/repo".to_string();
+    app.input.buffer = "/tmp".to_string();
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/my/repo")));
+        .any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/tmp")));
 }
 
 #[test]
 fn epic_repo_path_enter_empty_uses_saved_path() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.repo_paths = vec!["/saved".to_string()];
+    app.repo_paths = vec!["/tmp".to_string()];
     app.input.mode = InputMode::InputEpicRepoPath;
     app.input.epic_draft = Some(EpicDraft {
         title: "E".to_string(),
@@ -3798,7 +3829,7 @@ fn epic_repo_path_enter_empty_uses_saved_path() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/saved")));
+        .any(|c| matches!(c, Command::InsertEpic(ref d) if d.repo_path == "/tmp")));
 }
 
 #[test]
@@ -8333,15 +8364,13 @@ fn submit_dispatch_repo_path_dispatches_review_agent() {
     assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
 
     // Submit a repo path
-    let cmds = app.update(Message::SubmitDispatchRepoPath(
-        "/home/user/Code/repo".to_string(),
-    ));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/home/user/Code/repo")
-    ));
+    let cmds = app.update(Message::SubmitDispatchRepoPath("/tmp".to_string()));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/home/user/Code/repo")));
+        .any(|c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/tmp")));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/tmp")));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -8410,15 +8439,13 @@ fn submit_dispatch_repo_path_dispatches_fix_agent() {
     assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
 
     // Submit a repo path
-    let cmds = app.update(Message::SubmitDispatchRepoPath(
-        "/home/user/Code/my-repo".to_string(),
-    ));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::DispatchFixAgent { repo, .. } if repo == "/home/user/Code/my-repo")
-    ));
+    let cmds = app.update(Message::SubmitDispatchRepoPath("/tmp".to_string()));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/home/user/Code/my-repo")));
+        .any(|c| matches!(c, Command::DispatchFixAgent { repo, .. } if repo == "/tmp")));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/tmp")));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -8451,7 +8478,7 @@ fn dispatch_repo_path_cursor_navigation() {
 #[test]
 fn dispatch_repo_path_enter_selects_cursor_item() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.repo_paths = vec!["/first".into(), "/second".into()];
+    app.repo_paths = vec!["/tmp".into(), "/var".into()];
     let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
     app.review.set_prs(vec![pr]);
     app.update(Message::SwitchToReviewBoard);
@@ -8466,9 +8493,9 @@ fn dispatch_repo_path_enter_selects_cursor_item() {
 
     // Press Enter to select
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Enter));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/second")
-    ));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchReviewAgent(req) if req.repo == "/var")));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 

@@ -288,6 +288,15 @@ pub fn remove_permissions(settings_path: &std::path::Path) -> Result<bool> {
     Ok(removed_any)
 }
 
+pub fn remove_plugin(plugin_path: &std::path::Path) -> Result<bool> {
+    if !plugin_path.exists() {
+        return Ok(false);
+    }
+    fs::remove_dir_all(plugin_path)
+        .with_context(|| format!("Failed to remove {}", plugin_path.display()))?;
+    Ok(true)
+}
+
 // ---------------------------------------------------------------------------
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
@@ -765,6 +774,29 @@ mod tests {
         write_json_file(&path, &existing).unwrap();
 
         let removed = remove_permissions(&path).unwrap();
+        assert!(!removed);
+    }
+
+    // -- Plugin removal --
+
+    #[test]
+    fn remove_plugin_deletes_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin = dir.path().join("dispatch");
+        fs::create_dir_all(plugin.join("hooks/scripts")).unwrap();
+        fs::write(plugin.join("hooks/hooks.json"), "{}").unwrap();
+
+        let removed = remove_plugin(&plugin).unwrap();
+        assert!(removed);
+        assert!(!plugin.exists());
+    }
+
+    #[test]
+    fn remove_plugin_noop_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin = dir.path().join("dispatch");
+
+        let removed = remove_plugin(&plugin).unwrap();
         assert!(!removed);
     }
 

@@ -857,12 +857,18 @@ fn save_security_alerts_impl(
     alerts: &[crate::models::SecurityAlert],
 ) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM security_alerts", [])?;
+
     {
         let mut stmt = tx.prepare(
             "INSERT INTO security_alerts (repo, number, kind, severity, title, package,
              vulnerable_range, fixed_version, cvss_score, url, created_at, state, description)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(repo, number, kind) DO UPDATE SET
+             severity = excluded.severity, title = excluded.title,
+             package = excluded.package, vulnerable_range = excluded.vulnerable_range,
+             fixed_version = excluded.fixed_version, cvss_score = excluded.cvss_score,
+             url = excluded.url, created_at = excluded.created_at,
+             state = excluded.state, description = excluded.description",
         )?;
         for a in alerts {
             stmt.execute(params![
@@ -882,6 +888,31 @@ fn save_security_alerts_impl(
             ])?;
         }
     }
+
+    // Delete stale rows
+    if alerts.is_empty() {
+        tx.execute("DELETE FROM security_alerts", [])?;
+    } else {
+        let keys: Vec<String> = alerts
+            .iter()
+            .map(|a| {
+                format!(
+                    "('{}', {}, '{}')",
+                    a.repo.replace('\'', "''"),
+                    a.number,
+                    a.kind.as_db_str()
+                )
+            })
+            .collect();
+        tx.execute(
+            &format!(
+                "DELETE FROM security_alerts WHERE (repo, number, kind) NOT IN ({})",
+                keys.join(", ")
+            ),
+            [],
+        )?;
+    }
+
     tx.commit()?;
     Ok(())
 }
@@ -894,7 +925,7 @@ fn load_security_alerts_impl(
     let mut stmt = conn.prepare(
         "SELECT repo, number, kind, severity, title, package,
                 vulnerable_range, fixed_version, cvss_score, url,
-                created_at, state, description
+                created_at, state, description, tmux_window, worktree
          FROM security_alerts",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -912,6 +943,8 @@ fn load_security_alerts_impl(
             row.get::<_, String>(10)?,
             row.get::<_, String>(11)?,
             row.get::<_, String>(12)?,
+            row.get::<_, Option<String>>(13)?,
+            row.get::<_, Option<String>>(14)?,
         ))
     })?;
 
@@ -931,6 +964,8 @@ fn load_security_alerts_impl(
             created_at_str,
             state,
             description,
+            tmux_window,
+            worktree,
         ) = row?;
 
         let kind = AlertKind::from_db_str(&kind_str).unwrap_or(AlertKind::Dependabot);
@@ -953,8 +988,8 @@ fn load_security_alerts_impl(
             created_at,
             state,
             description,
-            tmux_window: None,
-            worktree: None,
+            tmux_window,
+            worktree,
         });
     }
     Ok(alerts)

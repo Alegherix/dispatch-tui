@@ -2164,6 +2164,71 @@ fn security_alerts_save_replaces_previous() {
 }
 
 #[test]
+fn save_security_alerts_preserves_agent_fields() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+
+    let alert = SecurityAlert {
+        number: 1,
+        repo: "acme/app".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-1234".to_string(),
+        package: Some("lodash".to_string()),
+        vulnerable_range: None,
+        fixed_version: Some("4.17.21".to_string()),
+        cvss_score: Some(7.5),
+        url: "https://github.com/acme/app/security/dependabot/1".to_string(),
+        created_at: Utc::now(),
+        state: "open".to_string(),
+        description: "Prototype pollution".to_string(),
+        tmux_window: None,
+        worktree: None,
+    };
+    db.save_security_alerts(&[alert]).unwrap();
+
+    // Simulate agent dispatch
+    {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE security_alerts SET tmux_window = 'dispatch:fix-1', worktree = '/tmp/wt'
+             WHERE repo = 'acme/app' AND number = 1 AND kind = 'dependabot'",
+            [],
+        )
+        .unwrap();
+    }
+
+    // Refresh with updated alert data
+    let refreshed = SecurityAlert {
+        number: 1,
+        repo: "acme/app".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-1234 (updated)".to_string(),
+        package: Some("lodash".to_string()),
+        vulnerable_range: None,
+        fixed_version: Some("4.17.22".to_string()),
+        cvss_score: Some(7.5),
+        url: "https://github.com/acme/app/security/dependabot/1".to_string(),
+        created_at: Utc::now(),
+        state: "open".to_string(),
+        description: "Prototype pollution".to_string(),
+        tmux_window: None,
+        worktree: None,
+    };
+    db.save_security_alerts(&[refreshed]).unwrap();
+
+    let loaded = db.load_security_alerts().unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].title, "CVE-2024-1234 (updated)");
+    assert_eq!(loaded[0].fixed_version.as_deref(), Some("4.17.22"));
+    assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:fix-1"));
+    assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
+}
+
+#[test]
 fn seed_github_query_defaults_sets_all_three() {
     let db = in_memory_db();
     db.seed_github_query_defaults().unwrap();

@@ -8518,15 +8518,16 @@ fn submit_dispatch_repo_path_dispatches_review_agent() {
 #[test]
 fn fix_agent_dispatch_enters_repo_input_when_path_unknown() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
-    let cmds = app.update(Message::DispatchFixAgent {
-        repo: "org/my-repo".to_string(),
+    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/my-repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::Dependabot,
         title: "CVE-2025-1234".to_string(),
         description: "desc".to_string(),
         package: Some("serde".to_string()),
         fixed_version: Some("1.0.1".to_string()),
-    });
+    }));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
     assert!(app.input.pending_dispatch.is_some());
@@ -8536,17 +8537,18 @@ fn fix_agent_dispatch_enters_repo_input_when_path_unknown() {
 fn fix_agent_dispatch_resolves_known_path() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.repo_paths = vec!["/home/user/Code/my-repo".to_string()];
-    let cmds = app.update(Message::DispatchFixAgent {
-        repo: "org/my-repo".to_string(),
+    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/my-repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::Dependabot,
         title: "CVE-2025-1234".to_string(),
         description: "desc".to_string(),
         package: Some("serde".to_string()),
         fixed_version: Some("1.0.1".to_string()),
-    });
+    }));
     assert!(cmds.iter().any(
-        |c| matches!(c, Command::DispatchFixAgent { repo, .. } if repo == "/home/user/Code/my-repo")
+        |c| matches!(c, Command::DispatchFixAgent(req) if req.repo == "/home/user/Code/my-repo")
     ));
 }
 
@@ -8568,22 +8570,23 @@ fn cancel_dispatch_repo_path_clears_pending() {
 fn submit_dispatch_repo_path_dispatches_fix_agent() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     // Enter InputDispatchRepoPath via fix agent with unknown repo
-    app.update(Message::DispatchFixAgent {
-        repo: "org/my-repo".to_string(),
+    app.update(Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/my-repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::Dependabot,
         title: "CVE-2025-1234".to_string(),
         description: "desc".to_string(),
         package: Some("serde".to_string()),
         fixed_version: Some("1.0.1".to_string()),
-    });
+    }));
     assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
 
     // Submit a repo path
     let cmds = app.update(Message::SubmitDispatchRepoPath("/tmp".to_string()));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent { repo, .. } if repo == "/tmp")));
+        .any(|c| matches!(c, Command::DispatchFixAgent(req) if req.repo == "/tmp")));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/tmp")));
@@ -11009,7 +11012,7 @@ fn security_board_d_dispatches_fix_agent() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
 }
 
 #[test]
@@ -12207,20 +12210,21 @@ fn review_agent_different_prs_both_dispatch() {
 fn fix_agent_dispatch_in_flight_blocks_second_dispatch() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/path/to/repo".to_string()];
-    let msg = Message::DispatchFixAgent {
-        repo: "org/repo".to_string(),
+    let msg = Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::Dependabot,
         title: "Alert 1".to_string(),
         description: String::new(),
         package: None,
         fixed_version: None,
-    };
+    });
     // First dispatch succeeds
     let cmds = app.update(msg.clone());
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
     // Second dispatch of same alert is blocked
     let cmds = app.update(msg);
     assert!(cmds.is_empty());
@@ -12230,15 +12234,16 @@ fn fix_agent_dispatch_in_flight_blocks_second_dispatch() {
 fn fix_agent_dispatched_clears_in_flight() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/path/to/repo".to_string()];
-    app.update(Message::DispatchFixAgent {
-        repo: "org/repo".to_string(),
+    app.update(Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::Dependabot,
         title: "Alert 1".to_string(),
         description: String::new(),
         package: None,
         fixed_version: None,
-    });
+    }));
     assert!(app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
     // Success clears the guard
     app.update(Message::FixAgentDispatched {
@@ -12255,15 +12260,16 @@ fn fix_agent_dispatched_clears_in_flight() {
 fn fix_agent_failed_clears_in_flight() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/path/to/repo".to_string()];
-    app.update(Message::DispatchFixAgent {
-        repo: "org/repo".to_string(),
+    app.update(Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::Dependabot,
         title: "Alert 1".to_string(),
         description: String::new(),
         package: None,
         fixed_version: None,
-    });
+    }));
     assert!(app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
     // Failure clears the guard
     app.update(Message::FixAgentFailed {
@@ -12280,31 +12286,33 @@ fn fix_agent_different_alerts_both_dispatch() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/path/to/repo".to_string()];
     // Dependabot alert
-    let cmds = app.update(Message::DispatchFixAgent {
-        repo: "org/repo".to_string(),
+    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::Dependabot,
         title: "Alert 1".to_string(),
         description: String::new(),
         package: None,
         fixed_version: None,
-    });
+    }));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
     // CodeScanning alert on same repo+number — different kind, should succeed
-    let cmds = app.update(Message::DispatchFixAgent {
-        repo: "org/repo".to_string(),
+    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
+        repo: String::new(),
+        github_repo: "org/repo".to_string(),
         number: 1,
         kind: crate::models::AlertKind::CodeScanning,
         title: "Alert 1".to_string(),
         description: String::new(),
         package: None,
         fixed_version: None,
-    });
+    }));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
 }
 
 // ---------------------------------------------------------------------------

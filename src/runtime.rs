@@ -1461,37 +1461,18 @@ impl TuiRuntime {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn exec_dispatch_fix_agent(
-        &self,
-        repo: String,
-        github_repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        title: String,
-        description: String,
-        package: Option<String>,
-        fixed_version: Option<String>,
-    ) {
+    fn exec_dispatch_fix_agent(&self, req: tui::FixAgentRequest) {
         // repo is already resolved to a local path by the TUI
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
-        let github_repo_clone = github_repo.clone();
         tokio::task::spawn_blocking(move || {
-            match dispatch::dispatch_fix_agent(
-                &repo,
-                &github_repo,
-                number,
-                kind,
-                &title,
-                &description,
-                package.as_deref(),
-                fixed_version.as_deref(),
-                &*runner,
-            ) {
+            let github_repo = req.github_repo.clone();
+            let number = req.number;
+            let kind = req.kind;
+            match dispatch::dispatch_fix_agent(req, &*runner) {
                 Ok(result) => {
                     let _ = tx.send(Message::FixAgentDispatched {
-                        github_repo: github_repo_clone,
+                        github_repo,
                         number,
                         kind,
                         tmux_window: result.tmux_window,
@@ -1515,16 +1496,7 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
         tokio::task::spawn_blocking(move || {
-            match crate::dispatch::dispatch_review_agent(
-                &req.repo,
-                &req.github_repo,
-                req.number,
-                &req.title,
-                &req.body,
-                &req.head_ref,
-                req.is_dependabot,
-                &*runner,
-            ) {
+            match crate::dispatch::dispatch_review_agent(&req, &*runner) {
                 Ok(result) => {
                     let _ = tx.send(Message::ReviewAgentDispatched {
                         github_repo: req.github_repo,
@@ -1754,26 +1726,8 @@ async fn execute_commands(
             Command::DispatchReviewAgent(req) => rt.exec_dispatch_review_agent(req),
             Command::FetchSecurityAlerts => rt.exec_fetch_security_alerts(),
             Command::PersistSecurityAlerts(alerts) => rt.exec_persist_security_alerts(app, alerts),
-            Command::DispatchFixAgent {
-                repo,
-                github_repo,
-                number,
-                kind,
-                title,
-                description,
-                package,
-                fixed_version,
-            } => {
-                rt.exec_dispatch_fix_agent(
-                    repo,
-                    github_repo,
-                    number,
-                    kind,
-                    title,
-                    description,
-                    package,
-                    fixed_version,
-                );
+            Command::DispatchFixAgent(req) => {
+                rt.exec_dispatch_fix_agent(req);
             }
             Command::EditGithubQueries(mode) => {
                 let extra = rt.exec_edit_github_queries(app, mode, terminal, key_rx)?;
@@ -3802,16 +3756,16 @@ mod tests {
         ]));
         let rt = make_runtime(db, tx, mock);
 
-        rt.exec_dispatch_fix_agent(
-            repo.to_string(),
-            "acme/app".into(),
-            1,
-            models::AlertKind::Dependabot,
-            "CVE-2024-1234".into(),
-            "Fix this vuln".into(),
-            Some("lodash".into()),
-            Some("4.17.21".into()),
-        );
+        rt.exec_dispatch_fix_agent(tui::FixAgentRequest {
+            repo: repo.to_string(),
+            github_repo: "acme/app".into(),
+            number: 1,
+            kind: models::AlertKind::Dependabot,
+            title: "CVE-2024-1234".into(),
+            description: "Fix this vuln".into(),
+            package: Some("lodash".into()),
+            fixed_version: Some("4.17.21".into()),
+        });
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
@@ -3832,16 +3786,16 @@ mod tests {
         )]));
         let rt = make_runtime(db, tx, mock);
 
-        rt.exec_dispatch_fix_agent(
-            "/nonexistent".into(),
-            "acme/app".into(),
-            1,
-            models::AlertKind::Dependabot,
-            "CVE".into(),
-            "desc".into(),
-            None,
-            None,
-        );
+        rt.exec_dispatch_fix_agent(tui::FixAgentRequest {
+            repo: "/nonexistent".into(),
+            github_repo: "acme/app".into(),
+            number: 1,
+            kind: models::AlertKind::Dependabot,
+            title: "CVE".into(),
+            description: "desc".into(),
+            package: None,
+            fixed_version: None,
+        });
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await

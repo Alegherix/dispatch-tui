@@ -83,28 +83,36 @@ pub struct ReviewAgentRequest {
 }
 
 // ---------------------------------------------------------------------------
+// FixAgentRequest
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct FixAgentRequest {
+    pub repo: String,
+    pub github_repo: String,
+    pub number: i64,
+    pub kind: AlertKind,
+    pub title: String,
+    pub description: String,
+    pub package: Option<String>,
+    pub fixed_version: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // PendingDispatch — held while user selects a repo path for dispatch
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub enum PendingDispatch {
     Review(ReviewAgentRequest),
-    Fix {
-        repo: String,
-        number: i64,
-        kind: AlertKind,
-        title: String,
-        description: String,
-        package: Option<String>,
-        fixed_version: Option<String>,
-    },
+    Fix(FixAgentRequest),
 }
 
 impl PendingDispatch {
     pub fn github_repo(&self) -> &str {
         match self {
             PendingDispatch::Review(req) => &req.github_repo,
-            PendingDispatch::Fix { repo, .. } => repo,
+            PendingDispatch::Fix(req) => &req.github_repo,
         }
     }
 }
@@ -343,15 +351,7 @@ pub enum Message {
     ToggleSecurityRepoFilter(String),
     ToggleAllSecurityRepoFilter,
     ToggleSecurityRepoFilterMode,
-    DispatchFixAgent {
-        repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        title: String,
-        description: String,
-        package: Option<String>,
-        fixed_version: Option<String>,
-    },
+    DispatchFixAgent(FixAgentRequest),
     FixAgentDispatched {
         github_repo: String,
         number: i64,
@@ -551,16 +551,7 @@ pub enum Command {
     DispatchReviewAgent(ReviewAgentRequest),
     FetchSecurityAlerts,
     PersistSecurityAlerts(Vec<SecurityAlert>),
-    DispatchFixAgent {
-        repo: String,
-        github_repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        title: String,
-        description: String,
-        package: Option<String>,
-        fixed_version: Option<String>,
-    },
+    DispatchFixAgent(FixAgentRequest),
     EditGithubQueries(ReviewBoardMode),
     UpdateAgentStatus {
         repo: String,

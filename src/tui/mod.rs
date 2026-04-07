@@ -1104,23 +1104,7 @@ impl App {
             }
             Message::ToggleAllSecurityRepoFilter => self.handle_toggle_all_security_repo_filter(),
             Message::ToggleSecurityRepoFilterMode => self.handle_toggle_security_repo_filter_mode(),
-            Message::DispatchFixAgent {
-                repo,
-                number,
-                kind,
-                title,
-                description,
-                package,
-                fixed_version,
-            } => self.handle_dispatch_fix_agent(
-                repo,
-                number,
-                kind,
-                title,
-                description,
-                package,
-                fixed_version,
-            ),
+            Message::DispatchFixAgent(req) => self.handle_dispatch_fix_agent(req),
             Message::FixAgentDispatched {
                 github_repo,
                 number,
@@ -3116,30 +3100,14 @@ impl App {
                 self.set_status(format!("Dispatching review agent for #{}...", req.number));
                 vec![Command::DispatchReviewAgent(req), save]
             }
-            Some(PendingDispatch::Fix {
-                repo: github_repo,
-                number,
-                kind,
-                title,
-                description,
-                package,
-                fixed_version,
-            }) => {
+            Some(PendingDispatch::Fix(mut req)) => {
                 self.set_status(format!(
                     "Dispatching fix agent for {}#{}...",
-                    github_repo, number
+                    req.github_repo, req.number
                 ));
+                req.repo = repo_path.clone();
                 vec![
-                    Command::DispatchFixAgent {
-                        repo: repo_path.clone(),
-                        github_repo,
-                        number,
-                        kind,
-                        title,
-                        description,
-                        package,
-                        fixed_version,
-                    },
+                    Command::DispatchFixAgent(req),
                     Command::SaveRepoPath(repo_path),
                 ]
             }
@@ -4107,46 +4075,26 @@ impl App {
         vec![]
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn handle_dispatch_fix_agent(
-        &mut self,
-        repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        title: String,
-        description: String,
-        package: Option<String>,
-        fixed_version: Option<String>,
-    ) -> Vec<Command> {
-        let fix_key = (repo.clone(), number, kind);
+    fn handle_dispatch_fix_agent(&mut self, mut req: FixAgentRequest) -> Vec<Command> {
+        let fix_key = (req.github_repo.clone(), req.number, req.kind);
         if self.dispatching_fix.contains(&fix_key) {
             return vec![];
         }
         let known = self.known_repo_paths();
-        if let Some(path) = dispatch::resolve_repo_path(&repo, &known) {
+        if let Some(path) = dispatch::resolve_repo_path(&req.github_repo, &known) {
             self.dispatching_fix.insert(fix_key);
-            self.set_status(format!("Dispatching fix agent for {}#{}...", repo, number));
-            vec![Command::DispatchFixAgent {
-                github_repo: repo,
-                repo: path,
-                number,
-                kind,
-                title,
-                description,
-                package,
-                fixed_version,
-            }]
+            self.set_status(format!(
+                "Dispatching fix agent for {}#{}...",
+                req.github_repo, req.number
+            ));
+            req.repo = path;
+            vec![Command::DispatchFixAgent(req)]
         } else {
-            self.set_status(format!("No local repo found for {} — select a path", repo));
-            self.input.pending_dispatch = Some(PendingDispatch::Fix {
-                repo,
-                number,
-                kind,
-                title,
-                description,
-                package,
-                fixed_version,
-            });
+            self.set_status(format!(
+                "No local repo found for {} — select a path",
+                req.github_repo
+            ));
+            self.input.pending_dispatch = Some(PendingDispatch::Fix(req));
             self.input.mode = InputMode::InputDispatchRepoPath;
             self.input.buffer.clear();
             self.input.repo_cursor = 0;

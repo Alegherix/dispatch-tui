@@ -1,8 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{
-    App, ColumnItem, Command, InputMode, Message, MoveDirection, ReviewAgentRequest,
-    ReviewBoardMode, ViewMode,
+    App, ColumnItem, Command, FixAgentRequest, InputMode, Message, MoveDirection,
+    ReviewAgentRequest, ReviewBoardMode, ViewMode,
 };
 use crate::models::{
     AlertSeverity, DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
@@ -835,15 +835,16 @@ impl App {
 
             KeyCode::Char('d') => {
                 if let Some(alert) = self.selected_security_alert() {
-                    self.update(Message::DispatchFixAgent {
-                        repo: alert.repo.clone(),
+                    self.update(Message::DispatchFixAgent(FixAgentRequest {
+                        repo: String::new(),
+                        github_repo: alert.repo.clone(),
                         number: alert.number,
                         kind: alert.kind,
                         title: alert.title.clone(),
                         description: alert.description.clone(),
                         package: alert.package.clone(),
                         fixed_version: alert.fixed_version.clone(),
-                    })
+                    }))
                 } else {
                     vec![]
                 }

@@ -11167,6 +11167,30 @@ fn review_board_e_edits_github_queries() {
 }
 
 #[test]
+fn refresh_review_prs_returns_fetch_command() {
+    let mut app = make_review_board_app();
+    let cmds = app.update(Message::RefreshReviewPrs);
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchReviewPrs)));
+}
+
+#[test]
+fn refresh_review_prs_in_author_mode_returns_fetch_my_prs() {
+    let mut app = make_review_board_app();
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    let cmds = app.update(Message::RefreshReviewPrs);
+    assert!(cmds.iter().any(|c| matches!(c, Command::FetchMyPrs)));
+}
+
+#[test]
+fn refresh_bot_prs_returns_fetch_bot_prs() {
+    let mut app = make_review_board_app();
+    let cmds = app.update(Message::RefreshBotPrs);
+    assert!(cmds.iter().any(|c| matches!(c, Command::FetchBotPrs)));
+}
+
+#[test]
 fn review_board_unknown_key_is_noop() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('z')));

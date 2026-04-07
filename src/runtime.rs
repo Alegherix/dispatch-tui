@@ -851,7 +851,7 @@ impl TuiRuntime {
         mode: ReviewBoardMode,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
-    ) -> Result<()> {
+    ) -> Result<Vec<Command>> {
         let key = match mode {
             ReviewBoardMode::Reviewer => "github_queries_review",
             ReviewBoardMode::Author => "github_queries_my_prs",
@@ -876,7 +876,7 @@ impl TuiRuntime {
         let content = format!("{header}{current}\n");
 
         let Some(edited) = self.run_editor(terminal, key_rx, "github-queries-", &content)? else {
-            return Ok(());
+            return Ok(vec![]);
         };
 
         // Strip comments and blank lines
@@ -889,7 +889,7 @@ impl TuiRuntime {
 
         if let Err(e) = self.database.set_setting_string(key, &queries) {
             app.update(Message::Error(Self::db_error("saving github queries", e)));
-            return Ok(());
+            return Ok(vec![]);
         }
 
         // Trigger a refresh for the affected category
@@ -898,8 +898,7 @@ impl TuiRuntime {
             ReviewBoardMode::Author => Message::RefreshReviewPrs,
             ReviewBoardMode::Dependabot => Message::RefreshBotPrs,
         };
-        app.update(refresh_msg);
-        Ok(())
+        Ok(app.update(refresh_msg))
     }
 
     fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
@@ -1802,7 +1801,8 @@ async fn execute_commands(
                 );
             }
             Command::EditGithubQueries(mode) => {
-                rt.exec_edit_github_queries(app, mode, terminal, key_rx)?
+                let extra = rt.exec_edit_github_queries(app, mode, terminal, key_rx)?;
+                queue.extend(extra);
             }
             Command::UpdateAgentStatus {
                 repo,

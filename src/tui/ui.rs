@@ -2900,13 +2900,11 @@ fn build_review_pr_item(
     ]);
 
     // Line 2: repo · author · age · +/-lines
-    let meta_parts = [
-        repo_short.to_string(),
-        format!("@{}", pr.author),
-        age,
-        format!("+{}/-{}", pr.additions, pr.deletions),
-    ];
-    let meta = format!("  {} ", meta_parts.join(" \u{b7} "));
+    let staleness = Staleness::from_age(pr.created_at, now);
+    let age_color = staleness_color(staleness);
+
+    let before_age = format!("  {} \u{b7} @{} \u{b7} ", repo_short, pr.author);
+    let after_age = format!(" \u{b7} +{}/-{} ", pr.additions, pr.deletions);
 
     let meta_style = if is_cursor {
         Style::default().fg(Color::Gray)
@@ -2914,7 +2912,11 @@ fn build_review_pr_item(
         Style::default().fg(Color::DarkGray)
     };
 
-    let line2 = Line::from(Span::styled(meta, meta_style));
+    let line2 = Line::from(vec![
+        Span::styled(before_age, meta_style),
+        Span::styled(age, Style::default().fg(age_color)),
+        Span::styled(after_age, meta_style),
+    ]);
 
     let bg = if is_cursor {
         review_cursor_bg_color(decision_for_color)
@@ -3163,13 +3165,16 @@ fn build_security_alert_item(
     ]);
 
     // Line 2: repo · kind indicator + package + CVSS + age
+    let staleness = Staleness::from_age(alert.created_at, now);
+    let age_color = staleness_color(staleness);
+
     let kind_indicator = alert.kind.indicator();
     let pkg = alert.package.as_deref().unwrap_or("-");
     let cvss_str = alert
         .cvss_score
         .map(|s| format!("CVSS:{s:.1}"))
         .unwrap_or_default();
-    let meta = format!("  {repo_short} \u{b7} [{kind_indicator}] {pkg} {cvss_str} {age}");
+    let before_age = format!("  {repo_short} \u{b7} [{kind_indicator}] {pkg} {cvss_str} ");
 
     let meta_style = if is_cursor {
         Style::default().fg(Color::Gray)
@@ -3177,7 +3182,10 @@ fn build_security_alert_item(
         Style::default().fg(Color::DarkGray)
     };
 
-    let line2 = Line::from(Span::styled(meta, meta_style));
+    let line2 = Line::from(vec![
+        Span::styled(before_age, meta_style),
+        Span::styled(age, Style::default().fg(age_color)),
+    ]);
 
     let bg = if is_cursor {
         security_cursor_bg_color(severity)

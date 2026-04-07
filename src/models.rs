@@ -902,9 +902,9 @@ pub enum Staleness {
 }
 
 impl Staleness {
-    /// Determine staleness tier from the age of `updated_at` relative to `now`.
-    pub fn from_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Self {
-        let age = now.signed_duration_since(updated_at);
+    /// Determine staleness tier from the age of `timestamp` relative to `now`.
+    pub fn from_age(timestamp: DateTime<Utc>, now: DateTime<Utc>) -> Self {
+        let age = now.signed_duration_since(timestamp);
         let hours = age.num_hours().max(0);
         if hours < FRESH_THRESHOLD_HOURS {
             Staleness::Fresh

@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 
 // ---------------------------------------------------------------------------
 // Path utilities
@@ -23,8 +24,10 @@ pub fn expand_tilde(path: &str) -> String {
 // TaskStatus
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
+    #[serde(alias = "ready")]
     Backlog,
     Running,
     Review,
@@ -125,7 +128,8 @@ impl std::str::FromStr for TaskStatus {
 // SubStatus
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SubStatus {
     None,
     Active,
@@ -750,7 +754,8 @@ impl DispatchMode {
 // TaskTag
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TaskTag {
     Bug,
     Feature,

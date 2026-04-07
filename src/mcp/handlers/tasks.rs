@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::dispatch;
 use crate::mcp::McpState;
-use crate::models::{DispatchMode, EpicId, Task, TaskStatus};
+use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskStatus, TaskTag};
 use crate::service::{
     ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams,
 };
@@ -25,7 +25,7 @@ pub(super) struct UpdateTaskArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
     #[serde(default)]
-    pub(super) status: Option<String>,
+    pub(super) status: Option<TaskStatus>,
     #[serde(default)]
     pub(super) plan_path: Option<String>,
     #[serde(default)]
@@ -39,9 +39,9 @@ pub(super) struct UpdateTaskArgs {
     #[serde(default)]
     pub(super) pr_url: Option<String>,
     #[serde(default)]
-    pub(super) tag: Option<String>,
+    pub(super) tag: Option<TaskTag>,
     #[serde(default)]
-    pub(super) sub_status: Option<String>,
+    pub(super) sub_status: Option<SubStatus>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
 }
@@ -93,14 +93,30 @@ pub(super) struct CreateTaskWithEpicArgs {
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
-    pub(super) tag: Option<String>,
+    pub(super) tag: Option<TaskTag>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum WrapUpAction {
+    Rebase,
+    Pr,
+}
+
+impl WrapUpAction {
+    fn as_str(&self) -> &'static str {
+        match self {
+            WrapUpAction::Rebase => "rebase",
+            WrapUpAction::Pr => "pr",
+        }
+    }
 }
 
 #[derive(Deserialize)]
 pub(super) struct WrapUpArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
-    pub(super) action: String, // "rebase" | "pr"
+    pub(super) action: WrapUpAction,
 }
 
 #[derive(Deserialize)]
@@ -233,15 +249,15 @@ pub(super) fn handle_update_task(
 
     let params = UpdateTaskParams {
         task_id: parsed.task_id,
-        status: parsed.status.clone(),
+        status: parsed.status.map(|s| s.as_str().to_string()),
         plan_path: parsed.plan_path,
         title: parsed.title,
         description: parsed.description,
         repo_path: parsed.repo_path,
         sort_order: parsed.sort_order,
         pr_url: parsed.pr_url,
-        tag: parsed.tag,
-        sub_status: parsed.sub_status,
+        tag: parsed.tag.map(|t| t.as_str().to_string()),
+        sub_status: parsed.sub_status.map(|s| s.as_str().to_string()),
         epic_id: parsed.epic_id,
     };
     let field_names = params.updated_field_names();
@@ -278,7 +294,7 @@ pub(super) fn handle_create_task(
         plan_path: parsed.plan_path,
         epic_id: parsed.epic_id,
         sort_order: parsed.sort_order,
-        tag: parsed.tag,
+        tag: parsed.tag.map(|t| t.as_str().to_string()),
     }) {
         Ok(task_id) => {
             state.notify();
@@ -417,10 +433,10 @@ pub(super) async fn handle_wrap_up(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    tracing::info!(task_id = parsed.task_id, action = %parsed.action, "MCP wrap_up");
+    tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
     let svc = TaskService::new(state.db.clone());
-    let task = match svc.validate_wrap_up(parsed.task_id, &parsed.action) {
+    let task = match svc.validate_wrap_up(parsed.task_id, parsed.action.as_str()) {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
@@ -447,8 +463,8 @@ pub(super) async fn handle_wrap_up(
     let notify_tx = state.notify_tx.clone();
     let task_id = task.id;
 
-    match parsed.action.as_str() {
-        "rebase" => {
+    match parsed.action {
+        WrapUpAction::Rebase => {
             let db = state.db.clone();
             let rebase_runner = runner.clone();
             let rebase_result = match tokio::task::spawn_blocking(move || {
@@ -495,7 +511,7 @@ pub(super) async fn handle_wrap_up(
                 }
             }
         }
-        "pr" => {
+        WrapUpAction::Pr => {
             let db = state.db.clone();
             let pr_runner = runner.clone();
             let title = task.title.clone();
@@ -554,7 +570,6 @@ pub(super) async fn handle_wrap_up(
                 }
             }
         }
-        _ => unreachable!(),
     }
 }
 

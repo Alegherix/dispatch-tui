@@ -140,7 +140,7 @@ async fn update_task_invalid_status() {
         })),
     )
     .await;
-    assert_error(&resp, "Unknown status");
+    assert_error(&resp, "unknown variant `bogus`");
 }
 
 #[tokio::test]
@@ -1979,7 +1979,7 @@ async fn wrap_up_invalid_action() {
         })),
     )
     .await;
-    assert_error(&resp, "Unknown action");
+    assert_error(&resp, "unknown variant `teleport`");
 }
 
 #[tokio::test]
@@ -2134,7 +2134,7 @@ async fn update_task_rejects_bogus_sub_status() {
         })),
     )
     .await;
-    assert_error(&resp, "Invalid sub_status");
+    assert_error(&resp, "unknown variant `bogus`");
 }
 
 #[tokio::test]
@@ -2828,7 +2828,7 @@ async fn update_task_invalid_tag() {
         })),
     )
     .await;
-    assert_error(&resp, "Invalid tag");
+    assert_error(&resp, "unknown variant `invalid_tag`");
 }
 
 #[tokio::test]
@@ -2920,7 +2920,7 @@ async fn create_task_invalid_tag() {
         })),
     )
     .await;
-    assert_error(&resp, "Invalid tag");
+    assert_error(&resp, "unknown variant `bogus`");
 }
 
 #[tokio::test]

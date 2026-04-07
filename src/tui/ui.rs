@@ -248,8 +248,6 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
                 active_style.fg(PURPLE),
             ));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
-            spans.push(Span::styled(" Tasks ", inactive_style));
-            spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             spans.push(Span::styled(review_tab_label(app, " "), inactive_style));
             spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
             spans.push(Span::styled(security_tab_label(app, " "), inactive_style));

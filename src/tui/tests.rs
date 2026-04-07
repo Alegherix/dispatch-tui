@@ -10033,6 +10033,24 @@ fn render_tab_bar_epic_mode_shows_epic_title() {
 }
 
 #[test]
+fn render_tab_bar_epic_mode_replaces_tasks_tab() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(10);
+    epic.title = "Platform Work".to_string();
+    app.board.epics = vec![epic];
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        !buffer_contains(&buf, "Tasks"),
+        "epic tab should replace the Tasks tab, not appear alongside it"
+    );
+}
+
+#[test]
 fn render_tab_bar_board_mode_shows_tasks_label() {
     let mut app = make_app();
     let buf = render_to_buffer(&mut app, 100, 30);

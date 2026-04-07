@@ -35,6 +35,7 @@ external entity TmuxWindow {
 
 enum TaskTag { bug | feature | chore | epic }
 
+-- Legacy alias: "ready" maps to backlog
 enum TaskStatus { backlog | running | review | done | archived }
 
 -- SubStatus refines the parent status into a more precise state.
@@ -452,7 +453,8 @@ rule MergePr {
 rule PollPrStatus {
     when: Tick
 
-    for task in Tasks where status = review and pr_url != null:
+    for task in Tasks where status = review and pr_url != null
+                           and sub_status != conflict:
 
         ensures: PrMerged(task: task)
         ensures:
@@ -504,6 +506,9 @@ rule WrapUpRebase {
 
     let branch = task.worktree.branch
 
+    ensures:
+        if task.sub_status = conflict:
+            task.sub_status = SubStatus.default_for(task.status)
     ensures: BranchRebased(branch: branch, onto: config.default_branch)
     ensures: task.tmux_window = null
     ensures: task.status = done
@@ -511,6 +516,9 @@ rule WrapUpRebase {
     ensures: task.updated_at = now
 
     @guidance
+        -- Optimistically clears conflict sub_status before attempting the
+        -- rebase, so the task is no longer visually flagged while the
+        -- rebase runs in the background.
         -- Runs `git fetch origin && git rebase origin/<default_branch>`
         -- in the task's worktree directory, then fast-forwards the
         -- default branch to the rebased branch. Uses the same
@@ -681,6 +689,27 @@ rule DetectCrashedAgent {
         -- the window name remains available for the ConfirmRetry prompt.
         -- When activity resumes (TmuxOutput or RetryResume), sub_status
         -- is reset to active.
+        -- For non-running tasks (e.g. review tasks), window closure
+        -- silently clears task.tmux_window = null without changing
+        -- sub_status or sending notifications. This is the normal exit
+        -- path for review agents and detached sessions.
+}
+
+rule RecoverFromStale {
+    -- When tmux output arrives for a running task with stale or crashed
+    -- sub_status, the agent is alive again. Reset sub_status to active.
+    when: TmuxOutput(task)
+
+    requires: task.status = running
+    requires: task.sub_status in {stale, crashed}
+
+    ensures: task.sub_status = active
+
+    @guidance
+        -- Evaluated when new tmux output is detected and the output
+        -- content has changed since the last capture. This is the
+        -- counterpart to DetectStaleAgent and DetectCrashedAgent:
+        -- activity evidence reverses the health degradation.
 }
 
 -- == Notifications ==
@@ -746,9 +775,17 @@ rule RetryResume {
     requires: task.status = running
     requires: task.worktree != null
 
+    ensures:
+        if task.tmux_window != null:
+            OldTmuxWindow.killed(window: task.tmux_window)
     ensures: task.sub_status = active
     ensures: task.tmux_window = TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: resume)
+
+    @guidance
+        -- If the task already has a tmux window (e.g. a crashed or stale
+        -- session), the existing window is killed before creating a fresh
+        -- one. This tears down the old process cleanly.
 }
 
 rule RetryFresh {
@@ -1032,12 +1069,17 @@ rule DispatchEpicPlanning {
         -- because the planning task has no plan — the agent's job is
         -- to create one. The dispatch provisions a worktree and tmux
         -- window and transitions the task to Running.
+        -- When an epic has no plan but already has active subtasks,
+        -- neither this rule nor DispatchEpicSubtask applies. The TUI
+        -- handles this gracefully by showing "Epic has subtasks but
+        -- no plan" without taking any action.
 }
 
 rule DispatchEpicSubtask {
     when: DispatchEpic(epic)
 
     requires: epic.status = backlog
+    requires: epic.has_plan
 
     -- Dispatches the next backlog subtask of this epic, ordered by
     -- sort_order ascending (nulls last, tie-broken by id ascending).

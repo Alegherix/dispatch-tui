@@ -6,72 +6,43 @@ A terminal kanban board for managing development tasks and dispatching Claude Co
 
 | Dependency | Required | Install |
 |---|---|---|
-| `tmux` | Yes | `sudo apt install tmux` / `brew install tmux` |
+| Rust toolchain | Yes | [rustup.rs](https://rustup.rs) |
+| `tmux` | Yes | `apt install tmux` / `brew install tmux` |
 | `git` | Yes | Already installed on most systems |
 | `claude` | Yes | [Claude Code CLI](https://claude.ai/code) |
 | `gh` | Optional | [GitHub CLI](https://cli.github.com) — needed for the Review Board |
 
-## Installation
+## Getting Started
 
-### One-line install (Linux x86_64 / macOS Apple Silicon)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Ragazoor/dispatch-tui/main/install.sh | bash
-```
-
-Or clone and run locally:
+**1. Clone and install:**
 
 ```bash
 git clone https://github.com/Ragazoor/dispatch-tui
-cd dispatch
-bash install.sh
+cd dispatch-tui
+cargo install --path .
 ```
 
-The script downloads the latest release binary to `~/.local/bin/dispatch` and runs `dispatch setup`, which:
-- Registers the dispatch MCP server with Claude Code
-- Installs the dispatch plugin (hooks, skills, commands)
-- Adds MCP tool permissions
-
-If `~/.local/bin` is not in your PATH, add it to your shell profile:
+**2. Configure Claude Code:**
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-Verify the install:
-
-```bash
-dispatch --version
-```
-
-### Install from crates.io
-
-```bash
-cargo install dispatch-agent
 dispatch setup
 ```
 
-### Build from source
+This registers the dispatch MCP server, installs the dispatch plugin (hooks, skills, commands), and adds MCP tool permissions.
 
-```bash
-cargo build --release
-cp target/release/dispatch ~/.local/bin/
-dispatch setup
-```
-
-## Getting Started
-
-**1. Open a tmux session** (Dispatch must run inside tmux):
+**3. Open a tmux session** (dispatch must run inside tmux):
 
 ```bash
 tmux new-session -s dev
 ```
 
-**2. Start the TUI:**
+**4. Start the TUI:**
 
 ```bash
 dispatch tui
 ```
+
+## Usage
 
 ### Create a task (`n`)
 

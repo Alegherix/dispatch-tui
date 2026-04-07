@@ -471,7 +471,9 @@ pub enum Command {
         window: String,
     },
     EditTaskInEditor(Task),
-    OpenDescriptionEditor { is_epic: bool },
+    OpenDescriptionEditor {
+        is_epic: bool,
+    },
     SaveRepoPath(String),
     RefreshFromDb,
     QuickDispatch {
@@ -1235,11 +1237,7 @@ pub struct SubtaskStats {
 
 impl SubtaskStats {
     /// Compute stats for a single epic from its non-archived subtasks.
-    pub fn for_epic(
-        epic: &Epic,
-        all_tasks: &[Task],
-        active_merge_epic: Option<EpicId>,
-    ) -> Self {
+    pub fn for_epic(epic: &Epic, all_tasks: &[Task], active_merge_epic: Option<EpicId>) -> Self {
         let subtasks: Vec<&Task> = all_tasks
             .iter()
             .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)

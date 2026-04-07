@@ -8,7 +8,7 @@ use crate::dispatch;
 use crate::mcp::McpState;
 use crate::models::{DispatchMode, EpicId, SubStatus, Task, TaskStatus, TaskTag};
 use crate::service::{
-    ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams,
+    ClaimTaskParams, CreateTaskParams, ListTasksFilter, ServiceError, TaskService, UpdateTaskParams,
 };
 
 use super::types::{
@@ -238,6 +238,16 @@ pub(super) fn handle_update_task(
     };
     tracing::info!(task_id = parsed.task_id, status = ?parsed.status, "MCP update_task");
 
+    // MCP-specific restriction: agents cannot set status to done or archived
+    if matches!(parsed.status, Some(TaskStatus::Done | TaskStatus::Archived)) {
+        return service_err_to_response(
+            id,
+            ServiceError::Validation(
+                "Cannot set status to done or archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
+            ),
+        );
+    }
+
     let params = UpdateTaskParams {
         task_id: parsed.task_id,
         status: parsed.status,
@@ -250,6 +260,8 @@ pub(super) fn handle_update_task(
         tag: parsed.tag,
         sub_status: parsed.sub_status,
         epic_id: parsed.epic_id,
+        worktree: None,
+        tmux_window: None,
     };
     let field_names = params.updated_field_names();
 
@@ -605,9 +617,7 @@ pub(super) async fn handle_dispatch_next(
             DispatchMode::Brainstorm => {
                 dispatch::brainstorm_agent(&next_task, &*runner, epic_ctx.as_ref())
             }
-            DispatchMode::Plan => {
-                dispatch::plan_agent(&next_task, &*runner, epic_ctx.as_ref())
-            }
+            DispatchMode::Plan => dispatch::plan_agent(&next_task, &*runner, epic_ctx.as_ref()),
         };
 
         match result {

@@ -1597,7 +1597,10 @@ async fn update_epic_plan() {
     );
 
     let updated = state.db.get_epic(epic.id).unwrap().unwrap();
-    assert_eq!(updated.plan_path.as_deref(), Some("docs/plans/epic-plan.md"));
+    assert_eq!(
+        updated.plan_path.as_deref(),
+        Some("docs/plans/epic-plan.md")
+    );
 }
 
 // =======================================================================
@@ -3445,7 +3448,10 @@ async fn list_tasks_excludes_archived_by_default() {
 #[tokio::test]
 async fn list_epics_excludes_archived() {
     let state = test_state();
-    state.db.create_epic("Active Epic", "desc", "/repo").unwrap();
+    state
+        .db
+        .create_epic("Active Epic", "desc", "/repo")
+        .unwrap();
     let archived_epic = state
         .db
         .create_epic("Archived Epic", "desc", "/repo")
@@ -3526,12 +3532,12 @@ async fn dispatch_next_picks_first_backlog_subtask() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),  // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),      // tmux new-window
-        MockProcessRunner::ok(),      // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(),      // tmux set-hook
-        MockProcessRunner::ok(),      // tmux send-keys -l (literal text)
-        MockProcessRunner::ok(),      // tmux send-keys Enter
+        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok(),     // tmux new-window
+        MockProcessRunner::ok(),     // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),     // tmux set-hook
+        MockProcessRunner::ok(),     // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(),     // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3541,7 +3547,13 @@ async fn dispatch_next_picks_first_backlog_subtask() {
 
     let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
     let task1_id = db
-        .create_task("Task 1", "first", &repo_path, Some("docs/plan.md"), TaskStatus::Backlog)
+        .create_task(
+            "Task 1",
+            "first",
+            &repo_path,
+            Some("docs/plan.md"),
+            TaskStatus::Backlog,
+        )
         .unwrap();
     let task2_id = db
         .create_task("Task 2", "second", &repo_path, None, TaskStatus::Backlog)
@@ -3595,12 +3607,12 @@ async fn dispatch_next_respects_sort_order() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),  // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),      // tmux new-window
-        MockProcessRunner::ok(),      // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(),      // tmux set-hook
-        MockProcessRunner::ok(),      // tmux send-keys -l (literal text)
-        MockProcessRunner::ok(),      // tmux send-keys Enter
+        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok(),     // tmux new-window
+        MockProcessRunner::ok(),     // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),     // tmux set-hook
+        MockProcessRunner::ok(),     // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(),     // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3612,17 +3624,31 @@ async fn dispatch_next_respects_sort_order() {
 
     // task1 has higher ID but lower sort_order — should be picked second
     let task1_id = db
-        .create_task("Task A", "first by id", &repo_path, Some("docs/plan.md"), TaskStatus::Backlog)
+        .create_task(
+            "Task A",
+            "first by id",
+            &repo_path,
+            Some("docs/plan.md"),
+            TaskStatus::Backlog,
+        )
         .unwrap();
     let task2_id = db
-        .create_task("Task B", "second by id", &repo_path, Some("docs/plan.md"), TaskStatus::Backlog)
+        .create_task(
+            "Task B",
+            "second by id",
+            &repo_path,
+            Some("docs/plan.md"),
+            TaskStatus::Backlog,
+        )
         .unwrap();
     db.set_task_epic_id(task1_id, Some(epic.id)).unwrap();
     db.set_task_epic_id(task2_id, Some(epic.id)).unwrap();
 
     // Give task2 a lower sort_order so it should be picked first
-    db.patch_task(task2_id, &db::TaskPatch::new().sort_order(Some(1))).unwrap();
-    db.patch_task(task1_id, &db::TaskPatch::new().sort_order(Some(2))).unwrap();
+    db.patch_task(task2_id, &db::TaskPatch::new().sort_order(Some(1)))
+        .unwrap();
+    db.patch_task(task1_id, &db::TaskPatch::new().sort_order(Some(2)))
+        .unwrap();
 
     // Pre-create worktree dir for task2 (the one that should be dispatched)
     std::fs::create_dir_all(
@@ -3657,12 +3683,12 @@ async fn dispatch_next_respects_tag_routing() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),  // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),      // tmux new-window
-        MockProcessRunner::ok(),      // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(),      // tmux set-hook
-        MockProcessRunner::ok(),      // tmux send-keys -l (literal text)
-        MockProcessRunner::ok(),      // tmux send-keys Enter
+        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
+        MockProcessRunner::ok(),     // tmux new-window
+        MockProcessRunner::ok(),     // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),     // tmux set-hook
+        MockProcessRunner::ok(),     // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(),     // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3674,7 +3700,13 @@ async fn dispatch_next_respects_tag_routing() {
 
     // Create a feature-tagged task with no plan — should use Plan mode
     let task_id = db
-        .create_task("Feature Task", "a feature", &repo_path, None, TaskStatus::Backlog)
+        .create_task(
+            "Feature Task",
+            "a feature",
+            &repo_path,
+            None,
+            TaskStatus::Backlog,
+        )
         .unwrap();
     db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
     db.patch_task(
@@ -3748,7 +3780,13 @@ async fn update_review_status_updates_pr() {
     state.db.save_review_prs(&[pr]).unwrap();
     state
         .db
-        .set_pr_agent("review_prs", "acme/app", 42, "dispatch:review-42", "/tmp/wt")
+        .set_pr_agent(
+            "review_prs",
+            "acme/app",
+            42,
+            "dispatch:review-42",
+            "/tmp/wt",
+        )
         .unwrap();
 
     let resp = call(

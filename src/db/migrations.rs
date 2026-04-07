@@ -499,14 +499,13 @@ fn migrate_v25_rename_plan_to_plan_path(conn: &Connection) -> Result<()> {
 
 fn migrate_v26_add_agent_columns(conn: &Connection) -> Result<()> {
     for table in &["review_prs", "my_prs", "bot_prs", "security_alerts"] {
-        if let Err(e) = conn.execute_batch(&format!(
-            "ALTER TABLE {table} ADD COLUMN tmux_window TEXT"
-        )) {
+        if let Err(e) =
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN tmux_window TEXT"))
+        {
             tracing::debug!("ALTER {table} ADD tmux_window (may already exist): {e}");
         }
-        if let Err(e) = conn.execute_batch(&format!(
-            "ALTER TABLE {table} ADD COLUMN worktree TEXT"
-        )) {
+        if let Err(e) = conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN worktree TEXT"))
+        {
             tracing::debug!("ALTER {table} ADD worktree (may already exist): {e}");
         }
     }
@@ -515,9 +514,9 @@ fn migrate_v26_add_agent_columns(conn: &Connection) -> Result<()> {
 
 fn migrate_v27_add_agent_status(conn: &Connection) -> Result<()> {
     for table in &["review_prs", "bot_prs", "security_alerts"] {
-        if let Err(e) = conn.execute_batch(&format!(
-            "ALTER TABLE {table} ADD COLUMN agent_status TEXT"
-        )) {
+        if let Err(e) =
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN agent_status TEXT"))
+        {
             tracing::debug!("ALTER {table} ADD agent_status (may already exist): {e}");
         }
     }
@@ -548,9 +547,7 @@ fn migrate_v24_create_security_alerts_table(conn: &Connection) -> Result<()> {
 
 fn migrate_v28_add_my_prs_agent_status(conn: &Connection) -> Result<()> {
     // v27 missed my_prs when adding agent_status. Fix the gap.
-    if let Err(e) =
-        conn.execute_batch("ALTER TABLE my_prs ADD COLUMN agent_status TEXT")
-    {
+    if let Err(e) = conn.execute_batch("ALTER TABLE my_prs ADD COLUMN agent_status TEXT") {
         tracing::debug!("ALTER my_prs ADD agent_status (may already exist): {e}");
     }
     Ok(())

@@ -355,9 +355,7 @@ fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, Strin
             let cvss_score = node
                 .pointer("/securityAdvisory/cvss/score")
                 .and_then(|v| v.as_f64());
-            let url = format!(
-                "https://github.com/{repo}/security/dependabot/{number}"
-            );
+            let url = format!("https://github.com/{repo}/security/dependabot/{number}");
             let created_at = node["createdAt"]
                 .as_str()
                 .and_then(|s| s.parse::<DateTime<Utc>>().ok())
@@ -434,8 +432,8 @@ pub fn fetch_security_alerts(runner: &dyn ProcessRunner) -> Result<Vec<SecurityA
         let json = String::from_utf8_lossy(&output.stdout);
         all_alerts.extend(parse_graphql_security_alerts(&json)?);
 
-        let root: serde_json::Value = serde_json::from_str(&json)
-            .map_err(|e| format!("Failed to parse JSON: {e}"))?;
+        let root: serde_json::Value =
+            serde_json::from_str(&json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
         let page_info = root.pointer("/data/viewer/repositories/pageInfo");
         let has_next = page_info
             .and_then(|p| p["hasNextPage"].as_bool())

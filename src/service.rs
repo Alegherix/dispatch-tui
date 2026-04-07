@@ -45,6 +45,10 @@ pub struct UpdateTaskParams {
     pub tag: Option<TaskTag>,
     pub sub_status: Option<SubStatus>,
     pub epic_id: Option<i64>,
+    /// Set worktree path. Empty string clears the field.
+    pub worktree: Option<String>,
+    /// Set tmux window name. Empty string clears the field.
+    pub tmux_window: Option<String>,
 }
 
 impl UpdateTaskParams {
@@ -59,6 +63,8 @@ impl UpdateTaskParams {
             || self.tag.is_some()
             || self.sub_status.is_some()
             || self.epic_id.is_some()
+            || self.worktree.is_some()
+            || self.tmux_window.is_some()
     }
 
     pub fn updated_field_names(&self) -> Vec<String> {
@@ -92,6 +98,12 @@ impl UpdateTaskParams {
         }
         if self.epic_id.is_some() {
             names.push("epic_id".to_string());
+        }
+        if self.worktree.is_some() {
+            names.push("worktree".to_string());
+        }
+        if self.tmux_window.is_some() {
+            names.push("tmux_window".to_string());
         }
         names
     }
@@ -146,13 +158,7 @@ impl TaskService {
     pub fn update_task(&self, params: UpdateTaskParams) -> Result<TaskId, ServiceError> {
         if !params.has_any_field() {
             return Err(ServiceError::Validation(
-                "At least one of status, plan, title, description, repo_path, sort_order, pr_url, tag, sub_status, epic_id must be provided".into(),
-            ));
-        }
-
-        if matches!(params.status, Some(TaskStatus::Done | TaskStatus::Archived)) {
-            return Err(ServiceError::Validation(
-                "Cannot set status to done or archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
+                "At least one field must be provided".into(),
             ));
         }
 
@@ -178,10 +184,29 @@ impl TaskService {
             patch = patch.sort_order(Some(so));
         }
         if let Some(ref url) = params.pr_url {
-            patch = patch.pr_url(Some(url.as_str()));
+            if url.is_empty() {
+                patch = patch.pr_url(None);
+            } else {
+                patch = patch.pr_url(Some(url.as_str()));
+            }
         }
         if let Some(tag) = params.tag {
             patch = patch.tag(Some(tag));
+        }
+        // worktree: empty string = clear (set to None), non-empty = set
+        if let Some(ref wt) = params.worktree {
+            if wt.is_empty() {
+                patch = patch.worktree(None);
+            } else {
+                patch = patch.worktree(Some(wt.as_str()));
+            }
+        }
+        if let Some(ref tw) = params.tmux_window {
+            if tw.is_empty() {
+                patch = patch.tmux_window(None);
+            } else {
+                patch = patch.tmux_window(Some(tw.as_str()));
+            }
         }
 
         if let Some(ss) = params.sub_status {
@@ -316,6 +341,58 @@ impl TaskService {
         }
 
         Ok(task_id)
+    }
+
+    /// Create a task and return the full Task object (used by TUI).
+    pub fn create_task_returning(&self, params: CreateTaskParams) -> Result<Task, ServiceError> {
+        let repo_path = crate::models::expand_tilde(&params.repo_path);
+
+        let plan = params.plan_path.as_deref().map(|p| {
+            std::fs::canonicalize(p)
+                .map(|abs| abs.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| p.to_string())
+        });
+
+        let mut task = self
+            .db
+            .create_task_returning(
+                &params.title,
+                &params.description,
+                &repo_path,
+                plan.as_deref(),
+                TaskStatus::Backlog,
+            )
+            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+
+        if let Some(eid) = params.epic_id {
+            self.db
+                .set_task_epic_id(task.id, Some(EpicId(eid)))
+                .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
+            task.epic_id = Some(EpicId(eid));
+        }
+        if let Some(so) = params.sort_order {
+            let _ = self
+                .db
+                .patch_task(task.id, &TaskPatch::new().sort_order(Some(so)));
+            task.sort_order = Some(so);
+        }
+        if let Some(tag) = params.tag {
+            let _ = self
+                .db
+                .patch_task(task.id, &TaskPatch::new().tag(Some(tag)));
+            task.tag = Some(tag);
+        }
+
+        Ok(task)
+    }
+
+    pub fn delete_task(&self, task_id: i64) -> Result<(), ServiceError> {
+        // Verify task exists
+        self.get_task(task_id)?;
+
+        self.db
+            .delete_task(TaskId(task_id))
+            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 
     pub fn get_task(&self, task_id: i64) -> Result<Task, ServiceError> {
@@ -474,9 +551,7 @@ impl TaskService {
                     epic_id
                 )))
             }
-            Err(e) => {
-                return Err(ServiceError::Internal(format!("database error: {e}")))
-            }
+            Err(e) => return Err(ServiceError::Internal(format!("database error: {e}"))),
         }
 
         let tasks = self
@@ -625,13 +700,7 @@ impl EpicService {
     pub fn update_epic(&self, params: UpdateEpicParams) -> Result<EpicId, ServiceError> {
         if !params.has_any_field() {
             return Err(ServiceError::Validation(
-                "At least one of title, description, status, plan, sort_order, repo_path must be provided".into(),
-            ));
-        }
-
-        if matches!(params.status, Some(TaskStatus::Archived)) {
-            return Err(ServiceError::Validation(
-                "Cannot set epic status to archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
+                "At least one field must be provided".into(),
             ));
         }
 
@@ -662,6 +731,15 @@ impl EpicService {
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         Ok(epic_id)
+    }
+
+    pub fn delete_epic(&self, epic_id: i64) -> Result<(), ServiceError> {
+        // Verify epic exists
+        self.get_epic(epic_id)?;
+
+        self.db
+            .delete_epic(EpicId(epic_id))
+            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 }
 
@@ -761,6 +839,8 @@ mod tests {
             tag: None,
             sub_status: None,
             epic_id: None,
+            worktree: None,
+            tmux_window: None,
         })
         .unwrap();
 
@@ -768,40 +848,8 @@ mod tests {
         assert_eq!(task.status, TaskStatus::Running);
     }
 
-    #[test]
-    fn update_task_rejects_done_status() {
-        let db = test_db();
-        let svc = task_svc(&db);
-
-        let id = svc
-            .create_task(CreateTaskParams {
-                title: "T".into(),
-                description: "".into(),
-                repo_path: "/repo".into(),
-                plan_path: None,
-                epic_id: None,
-                sort_order: None,
-                tag: None,
-            })
-            .unwrap();
-
-        let err = svc
-            .update_task(UpdateTaskParams {
-                task_id: id.0,
-                status: Some(TaskStatus::Done),
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: None,
-            })
-            .unwrap_err();
-        assert!(matches!(err, ServiceError::Validation(_)));
-    }
+    // Note: Done/Archived restriction moved to MCP handler layer.
+    // The service now allows any status transition (TUI needs it).
 
     #[test]
     fn update_task_no_fields_returns_error() {
@@ -833,6 +881,8 @@ mod tests {
                 tag: None,
                 sub_status: None,
                 epic_id: None,
+                worktree: None,
+                tmux_window: None,
             })
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
@@ -869,6 +919,8 @@ mod tests {
                 tag: None,
                 sub_status: Some(SubStatus::Active),
                 epic_id: None,
+                worktree: None,
+                tmux_window: None,
             })
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
@@ -963,6 +1015,8 @@ mod tests {
             tag: None,
             sub_status: None,
             epic_id: None,
+            worktree: None,
+            tmux_window: None,
         })
         .unwrap();
 
@@ -1076,6 +1130,8 @@ mod tests {
                 tag: None,
                 sub_status: None,
                 epic_id: Some(epic.id.0),
+                worktree: None,
+                tmux_window: None,
             })
             .unwrap();
 
@@ -1320,6 +1376,8 @@ mod tests {
                 tag: None,
                 sub_status: None,
                 epic_id: None,
+                worktree: None,
+                tmux_window: None,
             })
             .unwrap();
 
@@ -1332,6 +1390,263 @@ mod tests {
         let db = test_db();
         let svc = task_svc(&db);
         let err = svc.next_backlog_task(999).unwrap_err();
+        assert!(matches!(err, ServiceError::NotFound(_)));
+    }
+
+    // -- create_task_returning ---------------------------------------------------
+
+    #[test]
+    fn create_task_returning_gives_full_task() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let task = svc
+            .create_task_returning(CreateTaskParams {
+                title: "Full task".into(),
+                description: "desc".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: Some(TaskTag::Feature),
+            })
+            .unwrap();
+
+        assert_eq!(task.title, "Full task");
+        assert_eq!(task.description, "desc");
+        assert_eq!(task.tag, Some(TaskTag::Feature));
+        assert_eq!(task.status, TaskStatus::Backlog);
+    }
+
+    #[test]
+    fn create_task_returning_with_epic() {
+        let db = test_db();
+        let tsvc = task_svc(&db);
+        let esvc = epic_svc(&db);
+
+        let epic = esvc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        let task = tsvc
+            .create_task_returning(CreateTaskParams {
+                title: "Sub".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        assert_eq!(task.epic_id, Some(epic.id));
+    }
+
+    // -- delete_task -------------------------------------------------------------
+
+    #[test]
+    fn delete_task_removes_it() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        svc.delete_task(id.0).unwrap();
+
+        let err = svc.get_task(id.0).unwrap_err();
+        assert!(matches!(err, ServiceError::NotFound(_)));
+    }
+
+    #[test]
+    fn delete_task_not_found() {
+        let db = test_db();
+        let svc = task_svc(&db);
+        let err = svc.delete_task(999).unwrap_err();
+        assert!(matches!(err, ServiceError::NotFound(_)));
+    }
+
+    // -- update_task with worktree/tmux_window -----------------------------------
+
+    #[test]
+    fn update_task_sets_worktree_and_tmux_window() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: Some(TaskStatus::Running),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: Some("/repo/.worktrees/feat".into()),
+            tmux_window: Some("task-1".into()),
+        })
+        .unwrap();
+
+        let task = svc.get_task(id.0).unwrap();
+        assert_eq!(task.worktree.as_deref(), Some("/repo/.worktrees/feat"));
+        assert_eq!(task.tmux_window.as_deref(), Some("task-1"));
+    }
+
+    #[test]
+    fn update_task_clears_worktree() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        // Set worktree
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: Some(TaskStatus::Running),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: Some("/repo/.worktrees/feat".into()),
+            tmux_window: Some("task-1".into()),
+        })
+        .unwrap();
+
+        // Clear worktree via ClearWorktree sentinel
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: Some(TaskStatus::Done),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: Some(String::new()), // empty string = clear
+            tmux_window: Some(String::new()),
+        })
+        .unwrap();
+
+        let task = svc.get_task(id.0).unwrap();
+        assert!(task.worktree.is_none());
+        assert!(task.tmux_window.is_none());
+    }
+
+    // -- update_task allows done/archived (MCP restriction moved to handler) -----
+
+    #[test]
+    fn update_task_allows_done_status() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: Some(TaskStatus::Done),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: None,
+            tmux_window: None,
+        })
+        .unwrap();
+
+        let task = svc.get_task(id.0).unwrap();
+        assert_eq!(task.status, TaskStatus::Done);
+    }
+
+    // -- delete_epic -------------------------------------------------------------
+
+    #[test]
+    fn delete_epic_removes_it() {
+        let db = test_db();
+        let svc = epic_svc(&db);
+
+        let epic = svc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        svc.delete_epic(epic.id.0).unwrap();
+
+        let err = svc.get_epic(epic.id.0).unwrap_err();
+        assert!(matches!(err, ServiceError::NotFound(_)));
+    }
+
+    #[test]
+    fn delete_epic_not_found() {
+        let db = test_db();
+        let svc = epic_svc(&db);
+        let err = svc.delete_epic(999).unwrap_err();
         assert!(matches!(err, ServiceError::NotFound(_)));
     }
 }

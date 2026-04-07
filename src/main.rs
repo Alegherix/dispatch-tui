@@ -158,10 +158,7 @@ async fn main() -> Result<()> {
                 None
             };
 
-            let only_if_status = only_if
-                .as_deref()
-                .map(parse_status)
-                .transpose()?;
+            let only_if_status = only_if.as_deref().map(parse_status).transpose()?;
             let svc = service::TaskService::new(std::sync::Arc::new(db));
             match svc.cli_update_task(task_id, new_status, only_if_status, resolved_sub_status) {
                 Ok(true) => println!("Task {} updated to {}", id, status),

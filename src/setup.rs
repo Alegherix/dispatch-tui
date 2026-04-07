@@ -13,8 +13,7 @@ const HOOKS_JSON: &str = include_str!("../plugin/hooks/hooks.json");
 const HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-status-hook");
 const USAGE_HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-usage-hook");
 const WRAP_UP_SKILL: &str = include_str!("../plugin/skills/wrap-up/SKILL.md");
-const DECOMPOSE_REVIEW_SKILL: &str =
-    include_str!("../plugin/skills/decompose-review/SKILL.md");
+const DECOMPOSE_REVIEW_SKILL: &str = include_str!("../plugin/skills/decompose-review/SKILL.md");
 const DECOMPOSE_REVIEW_PLAN_TEMPLATE: &str =
     include_str!("../plugin/skills/decompose-review/references/plan-template.md");
 const QUEUE_PLAN_CMD: &str = include_str!("../plugin/commands/queue-plan.md");
@@ -135,10 +134,7 @@ fn plugin_files() -> Vec<(&'static str, &'static str, bool)> {
 
 fn plugin_dir() -> Result<PathBuf> {
     let claude_dir = claude_dir()?;
-    Ok(claude_dir
-        .join("plugins")
-        .join("local")
-        .join("dispatch"))
+    Ok(claude_dir.join("plugins").join("local").join("dispatch"))
 }
 
 pub fn install_plugin() -> Result<bool> {
@@ -165,8 +161,7 @@ fn write_file_if_changed(path: &std::path::Path, content: &str, executable: bool
             return Ok(false);
         }
     }
-    fs::write(path, content)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    fs::write(path, content).with_context(|| format!("Failed to write {}", path.display()))?;
     if executable {
         fs::set_permissions(path, fs::Permissions::from_mode(0o755))
             .with_context(|| format!("Failed to set permissions on {}", path.display()))?;
@@ -280,10 +275,7 @@ pub fn remove_permissions(settings_path: &std::path::Path) -> Result<bool> {
     let removed_any = if let Some(Value::Object(perms)) = root.get_mut("permissions") {
         if let Some(Value::Array(allow)) = perms.get_mut("allow") {
             let before = allow.len();
-            allow.retain(|v| {
-                v.as_str()
-                    .is_none_or(|s| !s.starts_with("mcp__dispatch__"))
-            });
+            allow.retain(|v| v.as_str().is_none_or(|s| !s.starts_with("mcp__dispatch__")));
             before != allow.len()
         } else {
             false
@@ -309,10 +301,8 @@ pub fn remove_plugin(plugin_path: &std::path::Path) -> Result<bool> {
 }
 
 fn count_tasks(db_path: &std::path::Path) -> Result<i64> {
-    let conn = rusqlite::Connection::open_with_flags(
-        db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )?;
+    let conn =
+        rusqlite::Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
     Ok(count)
 }
@@ -335,8 +325,7 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
     }
 
     if parent.exists() && parent.read_dir()?.next().is_none() {
-        fs::remove_dir(parent)
-            .with_context(|| format!("Failed to remove {}", parent.display()))?;
+        fs::remove_dir(parent).with_context(|| format!("Failed to remove {}", parent.display()))?;
     }
 
     Ok(true)
@@ -358,7 +347,11 @@ pub fn run_setup(port: u16, yes: bool) -> Result<()> {
     let existing_mcp = read_json_file(&mcp_path)?;
     let mcp_result = merge_mcp_config(existing_mcp, port);
     if mcp_result.changed {
-        if yes || confirm(&format!("Add dispatch MCP server (localhost:{port}) to ~/.claude/.mcp.json?"))? {
+        if yes
+            || confirm(&format!(
+                "Add dispatch MCP server (localhost:{port}) to ~/.claude/.mcp.json?"
+            ))?
+        {
             write_json_file(&mcp_path, &mcp_result.value)?;
             println!("MCP config: added dispatch to ~/.claude/.mcp.json (port {port})");
             any_changes = true;
@@ -374,7 +367,12 @@ pub fn run_setup(port: u16, yes: bool) -> Result<()> {
     let existing_settings = read_json_file(&settings_path)?;
     let perms_result = merge_permissions(existing_settings);
     if perms_result.added_count > 0 {
-        if yes || confirm(&format!("Add {} dispatch tool permission(s) to ~/.claude/settings.json?", perms_result.added_count))? {
+        if yes
+            || confirm(&format!(
+                "Add {} dispatch tool permission(s) to ~/.claude/settings.json?",
+                perms_result.added_count
+            ))?
+        {
             write_json_file(&settings_path, &perms_result.value)?;
             println!(
                 "Permissions: added {} MCP tool permission(s) to ~/.claude/settings.json",
@@ -429,8 +427,14 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
     // Show what will be removed
     eprintln!("This will remove:");
     eprintln!("  Plugin:      {}", plugin_path.display());
-    eprintln!("  MCP config:  mcpServers.dispatch from {}", mcp_path.display());
-    eprintln!("  Permissions: mcp__dispatch__* from {}", settings_path.display());
+    eprintln!(
+        "  MCP config:  mcpServers.dispatch from {}",
+        mcp_path.display()
+    );
+    eprintln!(
+        "  Permissions: mcp__dispatch__* from {}",
+        settings_path.display()
+    );
     if purge {
         eprintln!("  Database:    {}", db_path.display());
     }
@@ -472,9 +476,7 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
     if purge {
         if db_path.exists() {
             let task_count = count_tasks(&db_path).unwrap_or(0);
-            eprintln!(
-                "\n  Database contains {task_count} task(s). This cannot be undone."
-            );
+            eprintln!("\n  Database contains {task_count} task(s). This cannot be undone.");
             if confirm_dangerous("Delete database?")? {
                 match remove_database(&db_path) {
                     Ok(true) => {

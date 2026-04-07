@@ -3,8 +3,8 @@ use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
-    CiStatus, Epic, EpicId, ReviewAgentStatus, ReviewDecision, ReviewPr, Reviewer, SubStatus,
-    Task, TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
+    CiStatus, Epic, EpicId, ReviewAgentStatus, ReviewDecision, ReviewPr, Reviewer, SubStatus, Task,
+    TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
 
 use super::{Database, EpicPatch, TaskPatch, TaskStore};
@@ -144,15 +144,9 @@ impl TaskStore for Database {
         };
         for (name, json) in presets {
             let paths: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
-            let filtered: Vec<String> = paths
-                .into_iter()
-                .filter(|p| p != path)
-                .collect();
+            let filtered: Vec<String> = paths.into_iter().filter(|p| p != path).collect();
             if filtered.is_empty() {
-                conn.execute(
-                    "DELETE FROM filter_presets WHERE name = ?1",
-                    params![name],
-                )?;
+                conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
             } else {
                 let updated = serde_json::to_string(&filtered)
                     .context("Failed to serialize filtered repo_paths")?;
@@ -585,8 +579,7 @@ impl TaskStore for Database {
 
     fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()> {
         let conn = self.conn()?;
-        let json =
-            serde_json::to_string(repo_paths).context("Failed to serialize repo_paths")?;
+        let json = serde_json::to_string(repo_paths).context("Failed to serialize repo_paths")?;
         conn.execute(
             "INSERT INTO filter_presets (name, repo_paths, mode) VALUES (?1, ?2, ?3)
              ON CONFLICT(name) DO UPDATE SET repo_paths = ?2, mode = ?3",
@@ -664,7 +657,14 @@ impl TaskStore for Database {
         load_security_alerts_impl(&conn)
     }
 
-    fn set_pr_agent(&self, table: &str, repo: &str, number: i64, tmux_window: &str, worktree: &str) -> Result<()> {
+    fn set_pr_agent(
+        &self,
+        table: &str,
+        repo: &str,
+        number: i64,
+        tmux_window: &str,
+        worktree: &str,
+    ) -> Result<()> {
         anyhow::ensure!(
             matches!(table, "review_prs" | "my_prs" | "bot_prs"),
             "invalid PR table: {table}"
@@ -677,7 +677,14 @@ impl TaskStore for Database {
         Ok(())
     }
 
-    fn set_alert_agent(&self, repo: &str, number: i64, kind: crate::models::AlertKind, tmux_window: &str, worktree: &str) -> Result<()> {
+    fn set_alert_agent(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::AlertKind,
+        tmux_window: &str,
+        worktree: &str,
+    ) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(
             "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4 AND kind = ?5",
@@ -913,7 +920,9 @@ fn load_prs_from_table(conn: &rusqlite::Connection, table: &str) -> Result<Vec<R
             reviewers,
             tmux_window,
             worktree,
-            agent_status: agent_status_str.as_deref().and_then(ReviewAgentStatus::from_db_str),
+            agent_status: agent_status_str
+                .as_deref()
+                .and_then(ReviewAgentStatus::from_db_str),
         });
     }
     Ok(prs)
@@ -1065,7 +1074,9 @@ fn load_security_alerts_impl(
             description,
             tmux_window,
             worktree,
-            agent_status: agent_status_str.as_deref().and_then(ReviewAgentStatus::from_db_str),
+            agent_status: agent_status_str
+                .as_deref()
+                .and_then(ReviewAgentStatus::from_db_str),
         });
     }
     Ok(alerts)

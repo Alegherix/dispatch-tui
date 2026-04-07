@@ -1413,10 +1413,7 @@ fn save_review_prs_preserves_agent_fields() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].title, "Updated title");
     assert_eq!(loaded[0].review_decision, ReviewDecision::Approved);
-    assert_eq!(
-        loaded[0].tmux_window.as_deref(),
-        Some("dispatch:review-42")
-    );
+    assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:review-42"));
     assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
 }
 
@@ -2348,12 +2345,8 @@ fn delete_repo_path_cleans_presets() {
 fn delete_repo_path_removes_empty_preset() {
     let db = in_memory_db();
     db.save_repo_path("/home/user/solo").unwrap();
-    db.save_filter_preset(
-        "solo_preset",
-        &["/home/user/solo".to_string()],
-        "include",
-    )
-    .unwrap();
+    db.save_filter_preset("solo_preset", &["/home/user/solo".to_string()], "include")
+        .unwrap();
     db.delete_repo_path("/home/user/solo").unwrap();
     let presets = db.list_filter_presets().unwrap();
     assert!(presets.is_empty());
@@ -2883,12 +2876,22 @@ fn set_pr_agent_updates_fields() {
     };
     db.save_review_prs(&[pr]).unwrap();
 
-    db.set_pr_agent("review_prs", "acme/app", 42, "dispatch:review-42", "/tmp/wt").unwrap();
+    db.set_pr_agent(
+        "review_prs",
+        "acme/app",
+        42,
+        "dispatch:review-42",
+        "/tmp/wt",
+    )
+    .unwrap();
 
     let loaded = db.load_review_prs().unwrap();
     assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:review-42"));
     assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
-    assert_eq!(loaded[0].agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+    assert_eq!(
+        loaded[0].agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing)
+    );
 }
 
 #[test]
@@ -2918,12 +2921,22 @@ fn set_alert_agent_updates_fields() {
     };
     db.save_security_alerts(&[alert]).unwrap();
 
-    db.set_alert_agent("acme/app", 1, AlertKind::Dependabot, "dispatch:fix-1", "/tmp/wt").unwrap();
+    db.set_alert_agent(
+        "acme/app",
+        1,
+        AlertKind::Dependabot,
+        "dispatch:fix-1",
+        "/tmp/wt",
+    )
+    .unwrap();
 
     let loaded = db.load_security_alerts().unwrap();
     assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:fix-1"));
     assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
-    assert_eq!(loaded[0].agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+    assert_eq!(
+        loaded[0].agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing)
+    );
 }
 
 #[test]
@@ -2954,13 +2967,25 @@ fn update_agent_status_finds_review_pr() {
         agent_status: None,
     };
     db.save_review_prs(&[pr]).unwrap();
-    db.set_pr_agent("review_prs", "acme/app", 42, "dispatch:review-42", "/tmp/wt").unwrap();
+    db.set_pr_agent(
+        "review_prs",
+        "acme/app",
+        42,
+        "dispatch:review-42",
+        "/tmp/wt",
+    )
+    .unwrap();
 
-    let table = db.update_agent_status("acme/app", 42, Some("findings_ready")).unwrap();
+    let table = db
+        .update_agent_status("acme/app", 42, Some("findings_ready"))
+        .unwrap();
     assert_eq!(table, "review_prs");
 
     let loaded = db.load_review_prs().unwrap();
-    assert_eq!(loaded[0].agent_status, Some(ReviewAgentStatus::FindingsReady));
+    assert_eq!(
+        loaded[0].agent_status,
+        Some(ReviewAgentStatus::FindingsReady)
+    );
 }
 
 #[test]
@@ -2991,9 +3016,12 @@ fn update_agent_status_finds_bot_pr() {
         agent_status: None,
     };
     db.save_bot_prs(&[pr]).unwrap();
-    db.set_pr_agent("bot_prs", "acme/app", 10, "dispatch:review-10", "/tmp/wt").unwrap();
+    db.set_pr_agent("bot_prs", "acme/app", 10, "dispatch:review-10", "/tmp/wt")
+        .unwrap();
 
-    let table = db.update_agent_status("acme/app", 10, Some("idle")).unwrap();
+    let table = db
+        .update_agent_status("acme/app", 10, Some("idle"))
+        .unwrap();
     assert_eq!(table, "bot_prs");
 
     let loaded = db.load_bot_prs().unwrap();
@@ -3025,13 +3053,25 @@ fn update_agent_status_finds_security_alert() {
         agent_status: None,
     };
     db.save_security_alerts(&[alert]).unwrap();
-    db.set_alert_agent("acme/app", 1, AlertKind::Dependabot, "dispatch:fix-1", "/tmp/wt").unwrap();
+    db.set_alert_agent(
+        "acme/app",
+        1,
+        AlertKind::Dependabot,
+        "dispatch:fix-1",
+        "/tmp/wt",
+    )
+    .unwrap();
 
-    let table = db.update_agent_status("acme/app", 1, Some("findings_ready")).unwrap();
+    let table = db
+        .update_agent_status("acme/app", 1, Some("findings_ready"))
+        .unwrap();
     assert_eq!(table, "security_alerts");
 
     let loaded = db.load_security_alerts().unwrap();
-    assert_eq!(loaded[0].agent_status, Some(ReviewAgentStatus::FindingsReady));
+    assert_eq!(
+        loaded[0].agent_status,
+        Some(ReviewAgentStatus::FindingsReady)
+    );
 }
 
 #[test]
@@ -3161,7 +3201,10 @@ fn migration_v17_adds_conflict_sub_status() {
         .collect::<rusqlite::Result<_>>()
         .unwrap();
 
-    assert_eq!(rows[0], ("Active".into(), "running".into(), "active".into()));
+    assert_eq!(
+        rows[0],
+        ("Active".into(), "running".into(), "active".into())
+    );
     assert_eq!(rows[1], ("Stale".into(), "running".into(), "stale".into()));
     assert_eq!(
         rows[2],
@@ -3507,7 +3550,11 @@ fn migration_v29_converts_newline_presets_to_json() {
     let multi_paths: Vec<String> = serde_json::from_str(&multi).unwrap();
     assert_eq!(
         multi_paths,
-        vec!["/repo/a".to_string(), "/repo/b".to_string(), "/repo/c".to_string()]
+        vec![
+            "/repo/a".to_string(),
+            "/repo/b".to_string(),
+            "/repo/c".to_string()
+        ]
     );
 
     let single: String = conn

@@ -23,7 +23,7 @@ const TICK_INTERVAL: Duration = Duration::from_secs(2);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::{EpicPatch, TaskStore};
+use crate::db::TaskStore;
 use crate::editor::{
     format_description_for_editor, format_editor_content, format_epic_for_editor,
     parse_description_editor_output, parse_editor_content, parse_epic_editor_output,
@@ -38,11 +38,7 @@ use crate::{db, dispatch, mcp, models, tmux};
 /// Set up tmux for the TUI: rename the current window and bind Prefix+g to jump back.
 fn setup_tmux_for_tui(runner: &dyn ProcessRunner) {
     let _ = tmux::rename_window("", TUI_WINDOW_NAME, runner);
-    let _ = tmux::bind_key(
-        "g",
-        &format!("select-window -t {TUI_WINDOW_NAME}"),
-        runner,
-    );
+    let _ = tmux::bind_key("g", &format!("select-window -t {TUI_WINDOW_NAME}"), runner);
 }
 
 /// Tear down tmux TUI state: unbind the key and restore the original window name.
@@ -98,8 +94,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     if let Some(filter_str) = database.get_setting_string("repo_filter").unwrap_or(None) {
         if !filter_str.is_empty() {
             let known: HashSet<&str> = app.repo_paths().iter().map(|s| s.as_str()).collect();
-            let paths: Vec<String> =
-                serde_json::from_str(&filter_str).unwrap_or_default();
+            let paths: Vec<String> = serde_json::from_str(&filter_str).unwrap_or_default();
             let filter: HashSet<String> = paths
                 .into_iter()
                 .filter(|s| known.contains(s.as_str()))
@@ -218,6 +213,8 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     tracing::info!(port, db = %db_path.display(), "TUI started, MCP server on port {port}");
 
     let runtime = TuiRuntime {
+        task_svc: crate::service::TaskService::new(database.clone()),
+        epic_svc: crate::service::EpicService::new(database.clone()),
         database,
         msg_tx,
         input_paused,
@@ -310,6 +307,8 @@ impl Drop for InputPausedGuard<'_> {
 
 struct TuiRuntime {
     database: Arc<dyn db::TaskStore>,
+    task_svc: crate::service::TaskService,
+    epic_svc: crate::service::EpicService,
     msg_tx: mpsc::UnboundedSender<Message>,
     input_paused: Arc<AtomicBool>,
     runner: Arc<dyn ProcessRunner>,
@@ -346,35 +345,22 @@ impl TuiRuntime {
         tag: Option<models::TaskTag>,
         epic_id: Option<models::EpicId>,
     ) -> Option<models::Task> {
-        let mut task = match self.database.create_task_returning(
-            title,
-            description,
-            repo_path,
-            None,
-            models::TaskStatus::Backlog,
-        ) {
-            Ok(task) => task,
+        use crate::service::CreateTaskParams;
+        match self.task_svc.create_task_returning(CreateTaskParams {
+            title: title.to_string(),
+            description: description.to_string(),
+            repo_path: repo_path.to_string(),
+            plan_path: None,
+            epic_id: epic_id.map(|e| e.0),
+            sort_order: None,
+            tag,
+        }) {
+            Ok(task) => Some(task),
             Err(e) => {
                 app.update(Message::Error(Self::db_error("creating task", e)));
-                return None;
+                None
             }
-        };
-        if let Some(eid) = epic_id {
-            if let Err(e) = self.database.set_task_epic_id(task.id, Some(eid)) {
-                app.update(Message::Error(Self::db_error("linking task to epic", e)));
-                return None;
-            }
-            task.epic_id = Some(eid);
         }
-        if let Some(t) = tag {
-            let patch = db::TaskPatch::new().tag(Some(t));
-            if let Err(e) = self.database.patch_task(task.id, &patch) {
-                app.update(Message::Error(Self::db_error("setting task tag", e)));
-                return None;
-            }
-            task.tag = Some(t);
-        }
-        Some(task)
     }
 
     fn exec_insert_task(
@@ -428,20 +414,23 @@ impl TuiRuntime {
     }
 
     fn exec_persist_task(&self, app: &mut App, task: models::Task) {
-        if let Err(e) = self.database.patch_task(
-            task.id,
-            &db::TaskPatch::new()
-                .status(task.status)
-                .sub_status(task.sub_status)
-                .worktree(task.worktree.as_deref())
-                .tmux_window(task.tmux_window.as_deref())
-                .pr_url(task.pr_url.as_deref())
-                .sort_order(task.sort_order),
-        ) {
+        use crate::service::UpdateTaskParams;
+        if let Err(e) = self.task_svc.update_task(UpdateTaskParams {
+            task_id: task.id.0,
+            status: Some(task.status),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: task.sort_order,
+            pr_url: Some(task.pr_url.clone().unwrap_or_default()),
+            tag: None,
+            sub_status: Some(task.sub_status),
+            epic_id: None,
+            worktree: Some(task.worktree.clone().unwrap_or_default()),
+            tmux_window: Some(task.tmux_window.clone().unwrap_or_default()),
+        }) {
             app.update(Message::Error(Self::db_error("persisting task", e)));
-        }
-        if let Some(epic_id) = task.epic_id {
-            let _ = self.database.recalculate_epic_status(epic_id);
         }
     }
 
@@ -451,16 +440,28 @@ impl TuiRuntime {
         id: models::TaskId,
         sub_status: models::SubStatus,
     ) {
-        if let Err(e) = self
-            .database
-            .patch_task(id, &db::TaskPatch::new().sub_status(sub_status))
-        {
+        use crate::service::UpdateTaskParams;
+        if let Err(e) = self.task_svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: None,
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: Some(sub_status),
+            epic_id: None,
+            worktree: None,
+            tmux_window: None,
+        }) {
             app.update(Message::Error(Self::db_error("patching sub_status", e)));
         }
     }
 
     fn exec_delete_task(&self, app: &mut App, id: TaskId) {
-        if let Err(e) = self.database.delete_task(id) {
+        if let Err(e) = self.task_svc.delete_task(id.0) {
             app.update(Message::Error(Self::db_error("deleting task", e)));
         }
     }
@@ -628,23 +629,22 @@ impl TuiRuntime {
             models::TaskTag::parse(&fields.tag)
         };
 
-        if let Err(e) = self.database.patch_task(
-            task_id,
-            &db::TaskPatch::new()
-                .status(new_status)
-                .title(&title)
-                .description(&description)
-                .repo_path(&repo_path)
-                .plan_path(plan.as_deref())
-                .tag(tag),
-        ) {
+        if let Err(e) = self.task_svc.update_task(crate::service::UpdateTaskParams {
+            task_id: task_id.0,
+            status: Some(new_status),
+            plan_path: plan.clone(),
+            title: Some(title.clone()),
+            description: Some(description.clone()),
+            repo_path: Some(repo_path.clone()),
+            sort_order: None,
+            pr_url: None,
+            tag,
+            sub_status: None,
+            epic_id: None,
+            worktree: None,
+            tmux_window: None,
+        }) {
             app.update(Message::Error(Self::db_error("updating task", e)));
-        }
-        // Recalculate parent epic status if status changed via editor
-        if new_status != task.status {
-            if let Some(epic_id) = task.epic_id {
-                let _ = self.database.recalculate_epic_status(epic_id);
-            }
         }
         app.update(Message::TaskEdited(tui::TaskEdit {
             id: task_id,
@@ -731,7 +731,13 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_persist_filter_preset(&self, app: &mut App, name: &str, repo_paths: &[String], mode: &str) {
+    fn exec_persist_filter_preset(
+        &self,
+        app: &mut App,
+        name: &str,
+        repo_paths: &[String],
+        mode: &str,
+    ) {
         if let Err(e) = self.database.save_filter_preset(name, repo_paths, mode) {
             app.update(Message::Error(Self::db_error("saving filter preset", e)));
         }
@@ -763,10 +769,8 @@ impl TuiRuntime {
             let presets = raw
                 .into_iter()
                 .map(|(name, paths, mode_str)| {
-                    let repos: std::collections::HashSet<String> = paths
-                        .into_iter()
-                        .filter(|p| known.contains(p))
-                        .collect();
+                    let repos: std::collections::HashSet<String> =
+                        paths.into_iter().filter(|p| known.contains(p)).collect();
                     let mode = if mode_str == "exclude" {
                         crate::tui::RepoFilterMode::Exclude
                     } else {
@@ -786,7 +790,12 @@ impl TuiRuntime {
         description: String,
         repo_path: String,
     ) {
-        match self.database.create_epic(&title, &description, &repo_path) {
+        match self.epic_svc.create_epic(crate::service::CreateEpicParams {
+            title,
+            description,
+            repo_path,
+            sort_order: None,
+        }) {
             Ok(epic) => {
                 app.update(Message::EpicCreated(epic));
             }
@@ -828,13 +837,15 @@ impl TuiRuntime {
             fields.repo_path
         };
 
-        if let Err(e) = self.database.patch_epic(
-            epic_id,
-            &EpicPatch::new()
-                .title(&title)
-                .description(&description)
-                .repo_path(&repo_path),
-        ) {
+        if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
+            epic_id: epic_id.0,
+            title: Some(title.clone()),
+            description: Some(description.clone()),
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: Some(repo_path.clone()),
+        }) {
             app.update(Message::Error(Self::db_error("updating epic", e)));
         }
         let mut updated = epic;
@@ -902,7 +913,7 @@ impl TuiRuntime {
     }
 
     fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
-        if let Err(e) = self.database.delete_epic(id) {
+        if let Err(e) = self.epic_svc.delete_epic(id.0) {
             app.update(Message::Error(Self::db_error("deleting epic", e)));
         }
     }
@@ -914,17 +925,20 @@ impl TuiRuntime {
         status: Option<models::TaskStatus>,
         sort_order: Option<i64>,
     ) {
-        let mut patch = EpicPatch::new();
-        if let Some(s) = status {
-            patch = patch.status(s);
+        // Only call service if there's something to update
+        if status.is_none() && sort_order.is_none() {
+            return;
         }
-        if let Some(so) = sort_order {
-            patch = patch.sort_order(Some(so));
-        }
-        if patch.has_changes() {
-            if let Err(e) = self.database.patch_epic(id, &patch) {
-                app.update(Message::Error(Self::db_error("updating epic", e)));
-            }
+        if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
+            epic_id: id.0,
+            title: None,
+            description: None,
+            status,
+            plan_path: None,
+            sort_order,
+            repo_path: None,
+        }) {
+            app.update(Message::Error(Self::db_error("updating epic", e)));
         }
     }
 
@@ -965,10 +979,21 @@ impl TuiRuntime {
         if shared {
             // Other active tasks share this worktree — just detach this task
             tracing::info!(task_id = id.0, "worktree shared, detaching only");
-            if let Err(e) = self
-                .database
-                .patch_task(id, &db::TaskPatch::new().worktree(None).tmux_window(None))
-            {
+            if let Err(e) = self.task_svc.update_task(crate::service::UpdateTaskParams {
+                task_id: id.0,
+                status: None,
+                plan_path: None,
+                title: None,
+                description: None,
+                repo_path: None,
+                sort_order: None,
+                pr_url: None,
+                tag: None,
+                sub_status: None,
+                epic_id: None,
+                worktree: Some(String::new()),
+                tmux_window: Some(String::new()),
+            }) {
                 let _ = self
                     .msg_tx
                     .send(Message::Error(format!("Detach failed: {e:#}")));
@@ -1007,10 +1032,21 @@ impl TuiRuntime {
                 task_id = id.0,
                 "worktree shared, detaching only (no rebase)"
             );
-            if let Err(e) = self
-                .database
-                .patch_task(id, &db::TaskPatch::new().worktree(None).tmux_window(None))
-            {
+            if let Err(e) = self.task_svc.update_task(crate::service::UpdateTaskParams {
+                task_id: id.0,
+                status: None,
+                plan_path: None,
+                title: None,
+                description: None,
+                repo_path: None,
+                sort_order: None,
+                pr_url: None,
+                tag: None,
+                sub_status: None,
+                epic_id: None,
+                worktree: Some(String::new()),
+                tmux_window: Some(String::new()),
+            }) {
                 let _ = self
                     .msg_tx
                     .send(Message::Error(format!("Detach failed: {e:#}")));
@@ -1077,9 +1113,7 @@ impl TuiRuntime {
         let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
             Ok(id) => id,
             Err(_) => {
-                app.update(Message::StatusInfo(
-                    "Split mode requires tmux".to_string(),
-                ));
+                app.update(Message::StatusInfo("Split mode requires tmux".to_string()));
                 return;
             }
         };
@@ -1096,12 +1130,7 @@ impl TuiRuntime {
         }
     }
 
-    fn exec_exit_split_mode(
-        &self,
-        app: &mut App,
-        pane_id: &str,
-        restore_window: Option<&str>,
-    ) {
+    fn exec_exit_split_mode(&self, app: &mut App, pane_id: &str, restore_window: Option<&str>) {
         if let Some(window_name) = restore_window {
             if let Err(e) = tmux::break_pane_to_window(pane_id, window_name, &*self.runner) {
                 app.update(Message::Error(format!("Break pane failed: {e:#}")));
@@ -1171,25 +1200,19 @@ impl TuiRuntime {
             epic.title, epic.description
         );
 
-        // Create the planning subtask in DB as Backlog
-        let task = match self.database.create_task_returning(
-            &title,
-            &description,
-            &epic.repo_path,
-            None,
-            models::TaskStatus::Backlog,
-        ) {
-            Ok(mut task) => {
-                if let Err(e) = self.database.set_task_epic_id(task.id, Some(epic.id)) {
-                    app.update(Message::Error(Self::db_error(
-                        "linking planning task to epic",
-                        e,
-                    )));
-                    return;
-                }
-                task.epic_id = Some(epic.id);
-                task
-            }
+        // Create the planning subtask via service
+        let task = match self
+            .task_svc
+            .create_task_returning(crate::service::CreateTaskParams {
+                title: title.clone(),
+                description: description.clone(),
+                repo_path: epic.repo_path.clone(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: None,
+                tag: None,
+            }) {
+            Ok(task) => task,
             Err(e) => {
                 app.update(Message::Error(Self::db_error("creating planning task", e)));
                 return;
@@ -1304,17 +1327,15 @@ impl TuiRuntime {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
-        tokio::task::spawn_blocking(move || {
-            match dispatch::merge_pr(&pr_url, &*runner) {
-                Ok(()) => {
-                    let _ = tx.send(Message::PrMerged(id));
-                }
-                Err(e) => {
-                    let _ = tx.send(Message::MergePrFailed {
-                        id,
-                        error: e.to_string(),
-                    });
-                }
+        tokio::task::spawn_blocking(move || match dispatch::merge_pr(&pr_url, &*runner) {
+            Ok(()) => {
+                let _ = tx.send(Message::PrMerged(id));
+            }
+            Err(e) => {
+                let _ = tx.send(Message::MergePrFailed {
+                    id,
+                    error: e.to_string(),
+                });
             }
         });
     }
@@ -1471,9 +1492,16 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_persist_security_alerts(&self, app: &mut App, alerts: Vec<crate::models::SecurityAlert>) {
+    fn exec_persist_security_alerts(
+        &self,
+        app: &mut App,
+        alerts: Vec<crate::models::SecurityAlert>,
+    ) {
         if let Err(e) = self.database.save_security_alerts(&alerts) {
-            app.update(Message::Error(Self::db_error("persisting security alerts", e)));
+            app.update(Message::Error(Self::db_error(
+                "persisting security alerts",
+                e,
+            )));
         }
     }
 
@@ -1650,8 +1678,9 @@ async fn execute_commands(
                     rt.database
                         .set_pr_agent(&table, &github_repo, number, &tmux_window, &worktree)
                 {
-                    let extra =
-                        app.update(Message::Error(format!("Failed to persist review agent: {e}")));
+                    let extra = app.update(Message::Error(format!(
+                        "Failed to persist review agent: {e}"
+                    )));
                     queue.extend(extra);
                 }
             }
@@ -1810,11 +1839,10 @@ async fn execute_commands(
                 status,
             } => {
                 let status_str = status.map(|s| s.as_db_str().to_string());
-                if let Err(e) = rt.database.update_agent_status(
-                    &repo,
-                    number,
-                    status_str.as_deref(),
-                ) {
+                if let Err(e) =
+                    rt.database
+                        .update_agent_status(&repo, number, status_str.as_deref())
+                {
                     tracing::warn!("Failed to update agent status for {repo}#{number}: {e}");
                 }
             }
@@ -1832,9 +1860,7 @@ async fn execute_commands(
                         tracing::warn!("Failed to send re-review to {tmux_window}: {e}");
                         return;
                     }
-                    if let Err(e) =
-                        db.update_agent_status(&repo, number, Some("reviewing"))
-                    {
+                    if let Err(e) = db.update_agent_status(&repo, number, Some("reviewing")) {
                         tracing::warn!("Failed to update agent status: {e}");
                     }
                     let _ = tx.send(Message::ReviewStatusUpdated {
@@ -1855,10 +1881,14 @@ async fn execute_commands(
                 new_window,
                 old_pane_id,
                 old_window,
-            } => rt.exec_swap_split_pane(app, task_id, &new_window, old_pane_id.as_deref(), old_window.as_deref()),
-            Command::CheckSplitPaneExists { pane_id } => {
-                rt.exec_check_split_pane(app, &pane_id)
-            }
+            } => rt.exec_swap_split_pane(
+                app,
+                task_id,
+                &new_window,
+                old_pane_id.as_deref(),
+                old_window.as_deref(),
+            ),
+            Command::CheckSplitPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
         }
     }
 
@@ -1889,10 +1919,7 @@ mod tests {
         setup_tmux_for_tui(&mock);
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(
-            calls[0].1,
-            vec!["rename-window", "-t", "", TUI_WINDOW_NAME]
-        );
+        assert_eq!(calls[0].1, vec!["rename-window", "-t", "", TUI_WINDOW_NAME]);
         assert_eq!(
             calls[1].1,
             vec![
@@ -1930,17 +1957,26 @@ mod tests {
         assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
     }
 
+    fn make_runtime(
+        db: Arc<dyn db::TaskStore>,
+        tx: mpsc::UnboundedSender<Message>,
+        runner: Arc<dyn ProcessRunner>,
+    ) -> TuiRuntime {
+        TuiRuntime {
+            task_svc: crate::service::TaskService::new(db.clone()),
+            epic_svc: crate::service::EpicService::new(db.clone()),
+            database: db,
+            msg_tx: tx,
+            input_paused: Arc::new(AtomicBool::new(false)),
+            runner,
+        }
+    }
+
     fn test_runtime() -> (TuiRuntime, App) {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner,
-        };
+        let rt = make_runtime(db.clone(), tx, runner);
         let tasks = db.list_all().unwrap();
         let app = App::new(tasks, Duration::from_secs(300));
         (rt, app)
@@ -2100,13 +2136,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // for select-window
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock.clone(),
-        };
+        let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
         let mut app = App::new(tasks, Duration::from_secs(300));
 
@@ -2137,13 +2167,7 @@ mod tests {
             MockProcessRunner::ok(), // tmux send-keys -l
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
             .create_task_returning("Test Task", "desc", repo, None, models::TaskStatus::Backlog)
@@ -2167,13 +2191,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::fail("fatal: not a git repository"), // git worktree add fails
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
             .create_task_returning(
@@ -2217,13 +2235,7 @@ mod tests {
             // capture-pane
             MockProcessRunner::ok_with_stdout(b"Hello from tmux\n"),
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         rt.exec_capture_tmux(TaskId(1), "test-window".to_string());
 
@@ -2252,13 +2264,7 @@ mod tests {
             // has_window: list-windows returns other window names (not our window)
             MockProcessRunner::ok_with_stdout(b"other-window\n"),
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         rt.exec_capture_tmux(TaskId(1), "gone-window".to_string());
 
@@ -2279,13 +2285,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::fail("no such window"), // simulate tmux failure
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock.clone(),
-        };
+        let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
         let mut app = App::new(tasks, Duration::from_secs(300));
 
@@ -2366,13 +2366,7 @@ mod tests {
             MockProcessRunner::ok(),     // git merge --ff-only (fast-forward)
                                          // Worktree is preserved; cleanup happens later during archive.
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
             .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
@@ -2415,13 +2409,7 @@ mod tests {
             }),
             MockProcessRunner::ok(), // git rebase --abort
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
             .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
@@ -2490,13 +2478,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
             MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD (not main)
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
             .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
@@ -2534,13 +2516,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // notify-send call
         ]));
-        let rt = TuiRuntime {
-            database: db,
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock.clone(),
-        };
+        let rt = make_runtime(db, tx, mock.clone());
         rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
@@ -2554,13 +2530,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
-        let rt = TuiRuntime {
-            database: db,
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock.clone(),
-        };
+        let rt = make_runtime(db, tx, mock.clone());
         rt.exec_send_notification("Task #1: Fix bug", "Agent needs your input", true);
         let calls = mock.recorded_calls();
         assert!(calls[0].1.contains(&"critical".to_string()));
@@ -2573,13 +2543,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
             "command not found",
         )]));
-        let rt = TuiRuntime {
-            database: db,
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock.clone(),
-        };
+        let rt = make_runtime(db, tx, mock.clone());
         // Should not panic — just logs a warning
         rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
     }
@@ -2606,13 +2570,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
             MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
         ]));
-        let rt = TuiRuntime {
-            database: db,
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db, tx, mock);
 
         rt.exec_create_pr(
             TaskId(1),
@@ -2637,13 +2595,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
             MockProcessRunner::fail("fatal: no remote"),
         ]));
-        let rt = TuiRuntime {
-            database: db,
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db, tx, mock);
 
         rt.exec_create_pr(
             TaskId(1),
@@ -2667,13 +2619,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"MERGED\n"), // gh pr view (no review decision line)
         ]));
-        let rt = TuiRuntime {
-            database: db,
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db, tx, mock);
 
         rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
@@ -2691,13 +2637,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"), // gh pr view
         ]));
-        let rt = TuiRuntime {
-            database: db,
-            msg_tx: tx,
-
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db, tx, mock);
 
         rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
@@ -2784,12 +2724,7 @@ mod tests {
             MockProcessRunner::ok(), // tmux send-keys -l (claude command)
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
         let mut app = App::new(tasks, Duration::from_secs(300));
 
@@ -2833,12 +2768,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::fail("not a git repo"), // detect_default_branch
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
         let mut app = App::new(tasks, Duration::from_secs(300));
 
@@ -2872,12 +2802,7 @@ mod tests {
             MockProcessRunner::ok(), // tmux send-keys -l (claude --continue)
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         let mut task = db
             .create_task_returning(
@@ -2915,12 +2840,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::fail("no tmux session"), // tmux new-window fails
         ]));
-        let rt = TuiRuntime {
-            database: db.clone(),
-            msg_tx: tx,
-            input_paused: Arc::new(AtomicBool::new(false)),
-            runner: mock,
-        };
+        let rt = make_runtime(db.clone(), tx, mock);
 
         let task = db
             .create_task_returning(

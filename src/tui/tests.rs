@@ -99,7 +99,12 @@ fn move_task_forward() {
         direction: MoveDirection::Forward,
     });
     assert_eq!(
-        app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap().status,
+        app.board
+            .tasks
+            .iter()
+            .find(|t| t.id == TaskId(1))
+            .unwrap()
+            .status,
         TaskStatus::Running
     );
     // Should produce a PersistTask command
@@ -115,7 +120,12 @@ fn move_task_backward_at_start_is_noop() {
         direction: MoveDirection::Backward,
     });
     assert_eq!(
-        app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap().status,
+        app.board
+            .tasks
+            .iter()
+            .find(|t| t.id == TaskId(1))
+            .unwrap()
+            .status,
         TaskStatus::Backlog
     );
     assert!(cmds.is_empty());
@@ -286,7 +296,10 @@ fn delete_task_without_worktree_no_cleanup() {
 fn error_sets_error_popup() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::Error("Something went wrong".to_string()));
-    assert_eq!(app.status.error_popup.as_deref(), Some("Something went wrong"));
+    assert_eq!(
+        app.status.error_popup.as_deref(),
+        Some("Something went wrong")
+    );
 }
 
 #[test]
@@ -360,9 +373,9 @@ fn repo_path_empty_uses_saved_path() {
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")
-    ));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")));
 }
 
 #[test]
@@ -433,9 +446,9 @@ fn repo_path_nonempty_used_as_is() {
 
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")
-    ));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")));
     assert_eq!(app.board.tasks.len(), 0); // task not added until TaskCreated
 }
 
@@ -455,7 +468,10 @@ fn task_edited_updates_fields() {
     assert_eq!(app.board.tasks[0].description, "Desc");
     assert_eq!(app.board.tasks[0].repo_path, "/new");
     assert_eq!(app.board.tasks[0].status, TaskStatus::Running);
-    assert_eq!(app.board.tasks[0].plan_path.as_deref(), Some("docs/plan.md"));
+    assert_eq!(
+        app.board.tasks[0].plan_path.as_deref(),
+        Some("docs/plan.md")
+    );
 }
 
 #[test]
@@ -523,7 +539,8 @@ fn d_key_on_running_with_window_shows_warning() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("already running"));
@@ -570,7 +587,8 @@ fn d_key_on_running_no_worktree_no_window_shows_warning() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("No worktree"));
@@ -611,7 +629,8 @@ fn g_key_without_window_shows_message() {
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("No active session"));
@@ -1390,7 +1409,8 @@ fn d_key_on_review_with_window_shows_warning() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("already running"));
@@ -1417,7 +1437,8 @@ fn d_key_on_review_no_worktree_no_window_shows_warning() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("No worktree"));
@@ -1476,7 +1497,10 @@ fn action_hints_backlog_task() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"[d]"), "should have dispatch/brainstorm hint");
+    assert!(
+        keys.contains(&"[d]"),
+        "should have dispatch/brainstorm hint"
+    );
     assert!(keys.contains(&"[e]"), "should have edit hint");
     assert!(keys.contains(&"[m]"), "should have move hint");
     assert!(!keys.contains(&"[M]"), "backlog has no back movement");
@@ -1550,7 +1574,10 @@ fn action_hints_running_no_worktree_no_window() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(!keys.contains(&"[d]"), "no dispatch/resume without worktree");
+    assert!(
+        !keys.contains(&"[d]"),
+        "no dispatch/resume without worktree"
+    );
     assert!(!keys.contains(&"[g]"), "no go-to-session without window");
     assert!(keys.contains(&"[e]"), "still has edit");
 }
@@ -1905,7 +1932,9 @@ fn description_editor_result_multiline() {
         title: "T".to_string(),
         ..Default::default()
     });
-    app.update(Message::DescriptionEditorResult("Line 1\nLine 2".to_string()));
+    app.update(Message::DescriptionEditorResult(
+        "Line 1\nLine 2".to_string(),
+    ));
     assert_eq!(app.input.mode, InputMode::InputRepoPath);
     assert_eq!(
         app.input.task_draft.as_ref().unwrap().description,
@@ -1922,7 +1951,9 @@ fn description_editor_result_for_epic() {
         description: String::new(),
         repo_path: String::new(),
     });
-    app.update(Message::DescriptionEditorResult("epic desc\nline 2".to_string()));
+    app.update(Message::DescriptionEditorResult(
+        "epic desc\nline 2".to_string(),
+    ));
     assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
     assert_eq!(
         app.input.epic_draft.as_ref().unwrap().description,
@@ -3389,7 +3420,8 @@ fn x_key_on_epic_enters_confirm_archive_epic() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("Archive epic"));
@@ -3423,12 +3455,14 @@ fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("Cannot archive epic"));
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("2 subtasks not done"));
@@ -3466,7 +3500,8 @@ fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("1 subtask not done"));
@@ -3492,7 +3527,8 @@ fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("Archive epic"));
@@ -3509,7 +3545,8 @@ fn confirm_archive_epic_no_subtasks_allows_archive() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::ConfirmArchiveEpic);
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("Archive epic"));
@@ -3633,7 +3670,8 @@ fn dispatch_epic_on_non_backlog_shows_status() {
     let cmds = app.update(Message::DispatchEpic(EpicId(10)));
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_ref()
         .unwrap()
         .contains("No backlog tasks"));
@@ -4499,7 +4537,8 @@ fn finish_failed_with_conflict_sets_flag() {
         .find_task(TaskId(1))
         .is_some_and(|t| t.sub_status == SubStatus::Conflict));
     assert!(app
-        .status.message
+        .status
+        .message
         .as_ref()
         .unwrap()
         .contains("Rebase conflict"));
@@ -5371,7 +5410,12 @@ fn pr_failed_shows_error() {
         error: "Push failed".to_string(),
     });
 
-    assert!(app.status.message.as_deref().unwrap().contains("Push failed"));
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("Push failed"));
 }
 
 #[test]
@@ -6185,7 +6229,8 @@ fn dispatch_epic_all_done_shows_message() {
     // Epic status is Done — should not dispatch
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("No backlog tasks"));
@@ -6286,7 +6331,12 @@ fn review_prs_fetch_failed_sets_error() {
     let mut app = make_app();
     app.update(Message::ReviewPrsFetchFailed("auth error".to_string()));
     assert!(!app.review_board_loading());
-    assert!(app.status.message.as_deref().unwrap().contains("auth error"));
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("auth error"));
     assert_eq!(app.last_review_error(), Some("auth error"));
 }
 
@@ -6311,7 +6361,10 @@ fn tab_in_review_board_switches_back() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Tab)); // to review board
     app.handle_key(make_key(KeyCode::Tab)); // to security board
-    assert!(matches!(app.board.view_mode, ViewMode::SecurityBoard { .. }));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::SecurityBoard { .. }
+    ));
     app.handle_key(make_key(KeyCode::Tab)); // back to task board
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
@@ -6853,7 +6906,8 @@ fn epic_wrap_up_without_review_tasks_shows_info() {
 
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app
-        .status.message
+        .status
+        .message
         .as_ref()
         .unwrap()
         .contains("No review tasks"));
@@ -7590,7 +7644,12 @@ fn handle_key_quick_dispatch_esc_cancels() {
 fn handle_key_confirm_done_yes() {
     let mut app = make_app();
     // Move task 3 (Running) to Review so ConfirmDone makes sense
-    let task_3 = app.board.tasks.iter_mut().find(|t| t.id == TaskId(3)).unwrap();
+    let task_3 = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
     task_3.status = TaskStatus::Review;
     app.input.mode = InputMode::ConfirmDone(TaskId(3));
 
@@ -7773,7 +7832,12 @@ fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
     // Give running task a window
-    let task_3 = app.board.tasks.iter_mut().find(|t| t.id == TaskId(3)).unwrap();
+    let task_3 = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
     task_3.tmux_window = Some("main:task-3".to_string());
 
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
@@ -7805,7 +7869,12 @@ fn handle_key_normal_enter_toggles_detail() {
 fn handle_key_normal_jump_to_tmux() {
     let mut app = make_app();
     // Give task 3 (running) a tmux window
-    let task = app.board.tasks.iter_mut().find(|t| t.id == TaskId(3)).unwrap();
+    let task = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
     task.tmux_window = Some("main:task-3".to_string());
     // Select running column
     app.selection_mut().set_column(1);
@@ -7820,7 +7889,12 @@ fn handle_key_normal_jump_to_tmux() {
 #[test]
 fn handle_key_normal_open_pr_url() {
     let mut app = make_app();
-    let task = app.board.tasks.iter_mut().find(|t| t.id == TaskId(1)).unwrap();
+    let task = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(1))
+        .unwrap();
     task.pr_url = Some("https://github.com/example/repo/pull/42".to_string());
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
@@ -7857,7 +7931,10 @@ fn handle_key_review_board_tab_switches_back() {
     app.handle_key(make_key(KeyCode::Tab)); // to review board
     assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
     app.handle_key(make_key(KeyCode::Tab)); // to security board
-    assert!(matches!(app.board.view_mode, ViewMode::SecurityBoard { .. }));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::SecurityBoard { .. }
+    ));
     app.handle_key(make_key(KeyCode::Tab)); // back to task board
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
@@ -8561,12 +8638,12 @@ fn review_agent_dispatched_sets_status() {
         tmux_window: "review-my-repo-99".to_string(),
         worktree: "/tmp/worktree".to_string(),
     });
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::PersistReviewAgent { .. }))
-    );
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistReviewAgent { .. })));
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("my-repo#99"));
@@ -8583,7 +8660,8 @@ fn review_agent_failed_sets_status() {
     });
     assert!(cmds.is_empty());
     assert!(app
-        .status.message
+        .status
+        .message
         .as_deref()
         .unwrap()
         .contains("git fetch failed"));
@@ -8635,7 +8713,10 @@ fn review_repo_filter_hides_prs() {
     assert_eq!(app.filtered_review_prs().len(), 2);
 
     // Filter to repo-a only
-    app.review.review.repo_filter.insert("org/repo-a".to_string());
+    app.review
+        .review
+        .repo_filter
+        .insert("org/repo-a".to_string());
     assert_eq!(app.filtered_review_prs().len(), 1);
     assert_eq!(app.filtered_review_prs()[0].repo, "org/repo-a");
 }
@@ -8778,7 +8859,10 @@ fn review_repo_filter_selected_pr_uses_filter() {
     assert_eq!(selected.number, 1);
 
     // Filter to repo-b only, first visible PR should be #2
-    app.review.review.repo_filter.insert("org/repo-b".to_string());
+    app.review
+        .review
+        .repo_filter
+        .insert("org/repo-b".to_string());
     let selected = app.selected_review_pr().unwrap();
     assert_eq!(selected.number, 2);
 }
@@ -8858,7 +8942,8 @@ fn active_review_prs_returns_reviewer_prs_in_reviewer_mode() {
         ReviewDecision::ReviewRequired,
     )]);
     app.review
-        .authored.set_prs(vec![make_review_pr(2, "me", ReviewDecision::Approved)]);
+        .authored
+        .set_prs(vec![make_review_pr(2, "me", ReviewDecision::Approved)]);
     app.update(Message::SwitchToReviewBoard);
     assert_eq!(app.active_review_prs().len(), 1);
     assert_eq!(app.active_review_prs()[0].number, 1);
@@ -8873,7 +8958,8 @@ fn active_review_prs_returns_my_prs_in_author_mode() {
         ReviewDecision::ReviewRequired,
     )]);
     app.review
-        .authored.set_prs(vec![make_review_pr(2, "me", ReviewDecision::Approved)]);
+        .authored
+        .set_prs(vec![make_review_pr(2, "me", ReviewDecision::Approved)]);
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::ToggleReviewBoardMode);
     assert_eq!(app.active_review_prs().len(), 1);
@@ -9458,9 +9544,8 @@ fn render_status_bar_confirm_batch_approve() {
 #[test]
 fn render_status_bar_confirm_batch_merge() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmBatchMerge(vec![
-        "https://github.com/org/repo/pull/1".to_string(),
-    ]);
+    app.input.mode =
+        InputMode::ConfirmBatchMerge(vec!["https://github.com/org/repo/pull/1".to_string()]);
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "Merge 1 PRs?"),
@@ -10346,7 +10431,10 @@ fn merge_pr_key_on_approved_task_enters_confirm_mode() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('P')));
     assert!(cmds.is_empty());
-    assert!(matches!(app.input.mode, InputMode::ConfirmMergePr(TaskId(1))));
+    assert!(matches!(
+        app.input.mode,
+        InputMode::ConfirmMergePr(TaskId(1))
+    ));
 }
 
 #[test]
@@ -10355,7 +10443,12 @@ fn merge_pr_key_on_non_review_task_shows_status() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('P')));
     assert!(cmds.is_empty());
-    assert!(app.status.message.as_deref().unwrap().contains("not in review"));
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("not in review"));
 }
 
 #[test]
@@ -10392,7 +10485,12 @@ fn merge_pr_key_on_awaiting_review_shows_status() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('P')));
     assert!(cmds.is_empty());
-    assert!(app.status.message.as_deref().unwrap().contains("awaiting review"));
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("awaiting review"));
 }
 
 #[test]
@@ -10428,7 +10526,12 @@ fn merge_pr_failed_sets_status_message() {
         error: "CI checks failing".to_string(),
     });
     assert!(cmds.is_empty());
-    assert!(app.status.message.as_deref().unwrap().contains("CI checks failing"));
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("CI checks failing"));
 }
 
 // ---------------------------------------------------------------------------
@@ -10446,7 +10549,10 @@ fn task_card_title_truncated_in_narrow_terminal() {
 
     // Full title should NOT appear — it's too long for the column
     assert!(
-        !buffer_contains(&buf, "This is a very long task title that should be truncated"),
+        !buffer_contains(
+            &buf,
+            "This is a very long task title that should be truncated"
+        ),
         "full title should be truncated in narrow terminal"
     );
     // Truncated title with ellipsis should appear
@@ -10501,7 +10607,10 @@ fn epic_card_title_truncated_in_narrow_terminal() {
 
     let buf = render_to_buffer(&mut app, 80, 10);
     assert!(
-        !buffer_contains(&buf, "This is a very long epic title that should be truncated to fit"),
+        !buffer_contains(
+            &buf,
+            "This is a very long epic title that should be truncated to fit"
+        ),
         "full epic title should be truncated in narrow terminal"
     );
 }
@@ -10539,11 +10648,17 @@ fn selected_review_pr_agrees_with_sorted_order() {
 
     // Row 0 should be "org/alpha" (sorted first), row 1 should be "org/zebra"
     let pr0 = app.selected_review_pr().unwrap();
-    assert_eq!(pr0.repo, "org/alpha", "row 0 should be the alphabetically first repo");
+    assert_eq!(
+        pr0.repo, "org/alpha",
+        "row 0 should be the alphabetically first repo"
+    );
 
     app.navigate_review_row(1);
     let pr1 = app.selected_review_pr().unwrap();
-    assert_eq!(pr1.repo, "org/zebra", "row 1 should be the alphabetically second repo");
+    assert_eq!(
+        pr1.repo, "org/zebra",
+        "row 1 should be the alphabetically second repo"
+    );
 }
 
 #[test]
@@ -10594,11 +10709,17 @@ fn selected_security_alert_agrees_with_sorted_order() {
 
     // Default selection is column 0 (Critical). Row 0 should be "org/alpha" (sorted first).
     let a0 = app.selected_security_alert().unwrap();
-    assert_eq!(a0.repo, "org/alpha", "row 0 should be the alphabetically first repo");
+    assert_eq!(
+        a0.repo, "org/alpha",
+        "row 0 should be the alphabetically first repo"
+    );
 
     app.navigate_security_row(1);
     let a1 = app.selected_security_alert().unwrap();
-    assert_eq!(a1.repo, "org/zebra", "row 1 should be the alphabetically second repo");
+    assert_eq!(
+        a1.repo, "org/zebra",
+        "row 1 should be the alphabetically second repo"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -10881,7 +11002,10 @@ fn security_board_d_with_no_alert_is_noop() {
 fn security_board_r_without_idle_agent_is_noop() {
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds.is_empty(), "r without idle agent should do nothing (refresh removed)");
+    assert!(
+        cmds.is_empty(),
+        "r without idle agent should do nothing (refresh removed)"
+    );
 }
 
 #[test]
@@ -10988,7 +11112,10 @@ fn review_board_q_quits() {
 fn review_board_tab_switches_to_security_board() {
     let mut app = make_review_board_app();
     app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(app.board.view_mode, ViewMode::SecurityBoard { .. }));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::SecurityBoard { .. }
+    ));
 }
 
 #[test]
@@ -11093,7 +11220,10 @@ fn review_board_p_with_no_prs_is_noop() {
 fn review_board_r_without_idle_agent_is_noop() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds.is_empty(), "r without idle agent should do nothing (refresh removed)");
+    assert!(
+        cmds.is_empty(),
+        "r without idle agent should do nothing (refresh removed)"
+    );
 }
 
 #[test]
@@ -11170,9 +11300,7 @@ fn review_board_e_edits_github_queries() {
 fn refresh_review_prs_returns_fetch_command() {
     let mut app = make_review_board_app();
     let cmds = app.update(Message::RefreshReviewPrs);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchReviewPrs)));
+    assert!(cmds.iter().any(|c| matches!(c, Command::FetchReviewPrs)));
 }
 
 #[test]
@@ -11296,10 +11424,7 @@ fn dependabot_capital_a_starts_batch_approve() {
     // Select some PRs first
     app.handle_key(make_key(KeyCode::Char('a'))); // select all
     app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(matches!(
-        app.input.mode,
-        InputMode::ConfirmBatchApprove(_)
-    ));
+    assert!(matches!(app.input.mode, InputMode::ConfirmBatchApprove(_)));
 }
 
 #[test]
@@ -11316,7 +11441,7 @@ fn dependabot_m_starts_batch_merge() {
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::ToggleReviewBoardMode); // Author
     app.update(Message::ToggleReviewBoardMode); // Dependabot
-    // Merge requires CI-passing + approved
+                                                // Merge requires CI-passing + approved
     let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
     pr.ci_status = CiStatus::Success;
     app.update(Message::BotPrsLoaded(vec![pr]));
@@ -11383,10 +11508,7 @@ fn confirm_batch_approve_y_confirms() {
     let mut app = make_dependabot_board_app();
     app.handle_key(make_key(KeyCode::Char('a'))); // select all
     app.handle_key(make_key(KeyCode::Char('A'))); // start batch approve
-    assert!(matches!(
-        app.input.mode,
-        InputMode::ConfirmBatchApprove(_)
-    ));
+    assert!(matches!(app.input.mode, InputMode::ConfirmBatchApprove(_)));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds
         .iter()
@@ -11419,9 +11541,7 @@ fn confirm_batch_merge_y_confirms() {
     app.handle_key(make_key(KeyCode::Char('m'))); // start batch merge
     assert!(matches!(app.input.mode, InputMode::ConfirmBatchMerge(_)));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::BatchMergePrs(_))));
+    assert!(cmds.iter().any(|c| matches!(c, Command::BatchMergePrs(_))));
 }
 
 #[test]
@@ -11566,9 +11686,9 @@ fn g_on_review_board_jumps_to_agent() {
     app.update(Message::ReviewPrsLoaded(vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:review-42")
-    ));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:review-42")));
 }
 
 #[test]
@@ -11593,9 +11713,9 @@ fn g_on_security_board_jumps_to_agent() {
     app.update(Message::SecurityAlertsLoaded(vec![alert]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:fix-1")
-    ));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::JumpToTmux { window } if window == "dispatch:fix-1")));
 }
 
 #[test]
@@ -11634,7 +11754,10 @@ fn review_status_updated_sets_agent_status_on_pr() {
 
     let prs = &app.review_prs();
     let pr = prs.iter().find(|p| p.number == 42).unwrap();
-    assert_eq!(pr.agent_status, Some(crate::models::ReviewAgentStatus::FindingsReady));
+    assert_eq!(
+        pr.agent_status,
+        Some(crate::models::ReviewAgentStatus::FindingsReady)
+    );
 }
 
 #[test]
@@ -11653,7 +11776,10 @@ fn review_status_updated_sets_agent_status_on_security_alert() {
 
     let alerts = app.filtered_security_alerts();
     let alert = alerts.iter().find(|a| a.number == 1).unwrap();
-    assert_eq!(alert.agent_status, Some(crate::models::ReviewAgentStatus::Idle));
+    assert_eq!(
+        alert.agent_status,
+        Some(crate::models::ReviewAgentStatus::Idle)
+    );
 }
 
 #[test]
@@ -11677,8 +11803,12 @@ fn detach_review_agent_clears_fields_and_returns_commands() {
     });
 
     // Should have kill tmux and update agent status commands
-    assert!(cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })));
-    assert!(cmds.iter().any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::KillTmuxWindow { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
 
     // In-memory PR should be cleared
     let prs = &app.review_prs();
@@ -11708,7 +11838,10 @@ fn review_agent_dispatched_sets_agent_status_reviewing() {
 
     let prs = &app.review_prs();
     let pr = prs.iter().find(|p| p.number == 99).unwrap();
-    assert_eq!(pr.agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+    assert_eq!(
+        pr.agent_status,
+        Some(crate::models::ReviewAgentStatus::Reviewing)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -11719,7 +11852,12 @@ fn review_agent_dispatched_sets_agent_status_reviewing() {
 fn review_board_r_on_idle_agent_emits_re_review() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let mut pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    let mut pr = make_review_pr_for_repo(
+        42,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
     pr.tmux_window = Some("dispatch:review-42".to_string());
     pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
     app.update(Message::ReviewPrsLoaded(vec![pr]));
@@ -11732,7 +11870,12 @@ fn review_board_r_on_idle_agent_emits_re_review() {
 fn review_board_r_without_agent_does_nothing() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    let pr = make_review_pr_for_repo(
+        42,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
     app.update(Message::ReviewPrsLoaded(vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
@@ -11743,7 +11886,12 @@ fn review_board_r_without_agent_does_nothing() {
 fn review_board_r_on_reviewing_agent_does_nothing() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let mut pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    let mut pr = make_review_pr_for_repo(
+        42,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
     pr.tmux_window = Some("dispatch:review-42".to_string());
     pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
     app.update(Message::ReviewPrsLoaded(vec![pr]));
@@ -11756,21 +11904,33 @@ fn review_board_r_on_reviewing_agent_does_nothing() {
 fn review_board_t_on_agent_emits_detach() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let mut pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    let mut pr = make_review_pr_for_repo(
+        42,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
     pr.tmux_window = Some("dispatch:review-42".to_string());
     app.update(Message::ReviewPrsLoaded(vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
     // DetachReviewAgent is a Message, not a Command — so it's handled inline
     // and should produce KillTmuxWindow + UpdateAgentStatus commands
-    assert!(cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::KillTmuxWindow { .. })));
 }
 
 #[test]
 fn review_board_t_without_agent_does_nothing() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    let pr = make_review_pr_for_repo(
+        42,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
     app.update(Message::ReviewPrsLoaded(vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
@@ -11933,7 +12093,9 @@ fn review_agent_dispatch_in_flight_blocks_second_dispatch() {
     let req = make_review_agent_req("acme/app", 42);
     // First dispatch succeeds
     let cmds = app.update(Message::DispatchReviewAgent(req.clone()));
-    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
     // Second dispatch of same PR is blocked
     let cmds = app.update(Message::DispatchReviewAgent(req));
     assert!(cmds.is_empty());
@@ -11972,17 +12134,27 @@ fn review_agent_failed_clears_in_flight() {
     assert!(!app.is_dispatching_review("acme/app", 42));
     // Can dispatch again
     let cmds = app.update(Message::DispatchReviewAgent(req));
-    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
 }
 
 #[test]
 fn review_agent_different_prs_both_dispatch() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
-    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req("acme/app", 42)));
-    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
-    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req("acme/app", 43)));
-    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req(
+        "acme/app", 42,
+    )));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
+    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req(
+        "acme/app", 43,
+    )));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
 }
 
 // ---------------------------------------------------------------------------
@@ -12004,7 +12176,9 @@ fn fix_agent_dispatch_in_flight_blocks_second_dispatch() {
     };
     // First dispatch succeeds
     let cmds = app.update(msg.clone());
-    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
     // Second dispatch of same alert is blocked
     let cmds = app.update(msg);
     assert!(cmds.is_empty());
@@ -12073,7 +12247,9 @@ fn fix_agent_different_alerts_both_dispatch() {
         package: None,
         fixed_version: None,
     });
-    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
     // CodeScanning alert on same repo+number — different kind, should succeed
     let cmds = app.update(Message::DispatchFixAgent {
         repo: "org/repo".to_string(),
@@ -12084,7 +12260,9 @@ fn fix_agent_different_alerts_both_dispatch() {
         package: None,
         fixed_version: None,
     });
-    assert!(cmds.iter().any(|c| matches!(c, Command::DispatchFixAgent { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::DispatchFixAgent { .. })));
 }
 
 // ---------------------------------------------------------------------------
@@ -12218,7 +12396,13 @@ fn handle_key_normal_copy_task() {
     app.handle_key(make_key(KeyCode::Char('c')));
     // CopyTask skips title/tag and goes straight to repo path with pre-filled buffer
     assert_eq!(*app.mode(), InputMode::InputRepoPath);
-    assert!(app.input.task_draft.as_ref().unwrap().title.contains("Task 1"));
+    assert!(app
+        .input
+        .task_draft
+        .as_ref()
+        .unwrap()
+        .title
+        .contains("Task 1"));
 }
 
 #[test]
@@ -12236,9 +12420,7 @@ fn handle_key_normal_reorder_j_down() {
     app.selection_mut().set_row(0, 0);
     let cmds = app.handle_key(make_key(KeyCode::Char('J')));
     // Reorder should produce a persist command
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
 }
 
 #[test]
@@ -12247,9 +12429,7 @@ fn handle_key_normal_reorder_k_up() {
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 1);
     let cmds = app.handle_key(make_key(KeyCode::Char('K')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistTask(_))));
+    assert!(cmds.iter().any(|c| matches!(c, Command::PersistTask(_))));
 }
 
 #[test]
@@ -12352,10 +12532,7 @@ fn handle_key_normal_detach_tmux_review_task() {
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
     app.handle_key(make_key(KeyCode::Char('T')));
-    assert!(matches!(
-        *app.mode(),
-        InputMode::ConfirmDetachTmux(_)
-    ));
+    assert!(matches!(*app.mode(), InputMode::ConfirmDetachTmux(_)));
 }
 
 #[test]
@@ -12400,7 +12577,9 @@ fn handle_key_normal_enter_on_select_all_row() {
 
     app.handle_key(make_key(KeyCode::Enter));
     // Should have toggled select all — tasks should be selected
-    assert!(!app.select.tasks.is_empty() || app.select.epics.len() > 0 || app.selection().on_select_all);
+    assert!(
+        !app.select.tasks.is_empty() || app.select.epics.len() > 0 || app.selection().on_select_all
+    );
 }
 
 #[test]
@@ -12508,7 +12687,10 @@ fn handle_key_archive_e_enters_confirm_edit() {
     app.archive.selected_row = 0;
 
     app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(matches!(*app.mode(), InputMode::ConfirmEditTask(TaskId(100))));
+    assert!(matches!(
+        *app.mode(),
+        InputMode::ConfirmEditTask(TaskId(100))
+    ));
 }
 
 #[test]
@@ -12597,9 +12779,7 @@ fn handle_key_text_input_repo_enter_selects_cursor_repo() {
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     // Should submit the selected repo path and create a task
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::InsertTask { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
 }
 
 #[test]
@@ -12614,9 +12794,7 @@ fn handle_key_text_input_enter_submits_typed_text() {
     app.input.buffer = "/tmp".to_string();
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::InsertTask { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
 }
 
 #[test]
@@ -13048,13 +13226,12 @@ fn security_board_g_no_window_shows_status() {
     // Alerts have no tmux window by default
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
-    assert!(
-        app.status
-            .message
-            .as_deref()
-            .unwrap_or("")
-            .contains("No active session")
-    );
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("No active session"));
 }
 
 #[test]
@@ -13106,7 +13283,7 @@ fn make_dependabot_app() -> App {
     // Toggle to Author, then Dependabot
     app.update(Message::ToggleReviewBoardMode); // Reviewer -> Author
     app.update(Message::ToggleReviewBoardMode); // Author -> Dependabot
-    // Load bot PRs with CI Success so they land in column 0
+                                                // Load bot PRs with CI Success so they land in column 0
     let mut pr1 = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     pr1.ci_status = crate::models::CiStatus::Success;
     let mut pr2 = make_review_pr(11, "dependabot[bot]", ReviewDecision::ReviewRequired);
@@ -13155,10 +13332,7 @@ fn review_board_capital_a_starts_batch_approve_in_dependabot() {
         app.update(Message::ToggleSelectBotPr(url));
     }
     app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(matches!(
-        *app.mode(),
-        InputMode::ConfirmBatchApprove(_)
-    ));
+    assert!(matches!(*app.mode(), InputMode::ConfirmBatchApprove(_)));
 }
 
 #[test]
@@ -13166,7 +13340,7 @@ fn review_board_m_starts_batch_merge_in_dependabot() {
     let mut app = make_review_board_app();
     app.update(Message::ToggleReviewBoardMode); // Reviewer -> Author
     app.update(Message::ToggleReviewBoardMode); // Author -> Dependabot
-    // Need Approved + CI Success PRs for merge eligibility
+                                                // Need Approved + CI Success PRs for merge eligibility
     let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
     pr.ci_status = crate::models::CiStatus::Success;
     app.update(Message::BotPrsLoaded(vec![pr]));
@@ -13199,13 +13373,12 @@ fn review_board_g_no_window_shows_status() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
-    assert!(
-        app.status
-            .message
-            .as_deref()
-            .unwrap_or("")
-            .contains("No active session")
-    );
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap_or("")
+        .contains("No active session"));
 }
 
 #[test]

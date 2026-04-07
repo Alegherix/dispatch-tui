@@ -148,7 +148,8 @@ impl App {
                 } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
                     // Prefer blocked Running subtasks, then Review, by sort_order
                     let window = self
-                        .board.tasks
+                        .board
+                        .tasks
                         .iter()
                         .filter(|t| {
                             t.epic_id == Some(epic.id)
@@ -158,7 +159,8 @@ impl App {
                         })
                         .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
                         .or_else(|| {
-                            self.board.tasks
+                            self.board
+                                .tasks
                                 .iter()
                                 .filter(|t| {
                                     t.epic_id == Some(epic.id)
@@ -172,9 +174,7 @@ impl App {
                     if let Some(window) = window {
                         vec![Command::JumpToTmux { window }]
                     } else {
-                        self.update(Message::StatusInfo(
-                            "No active subtask session".to_string(),
-                        ))
+                        self.update(Message::StatusInfo("No active subtask session".to_string()))
                     }
                 } else {
                     vec![]

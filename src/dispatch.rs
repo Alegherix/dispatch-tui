@@ -1105,7 +1105,15 @@ pub fn dispatch_fix_agent(
     fixed_version: Option<&str>,
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
-    let prompt = build_fix_prompt(github_repo, number, kind, title, description, package, fixed_version);
+    let prompt = build_fix_prompt(
+        github_repo,
+        number,
+        kind,
+        title,
+        description,
+        package,
+        fixed_version,
+    );
 
     provision_and_dispatch(
         AgentDispatchConfig {
@@ -2179,10 +2187,7 @@ mod tests {
         )]);
         let result = check_pr_status("https://github.com/org/repo/pull/42", &mock).unwrap();
         assert_eq!(result.state, PrState::Open);
-        assert_eq!(
-            result.review_decision,
-            Some(ReviewDecision::ReviewRequired)
-        );
+        assert_eq!(result.review_decision, Some(ReviewDecision::ReviewRequired));
     }
 
     #[test]
@@ -2453,9 +2458,11 @@ mod tests {
 
         let calls = mock.recorded_calls();
         // Verify git worktree add was called with correct args
-        let wt_call = calls
-            .iter()
-            .find(|(prog, args)| prog == "git" && args.contains(&"add".to_string()) && args.contains(&"worktree".to_string()));
+        let wt_call = calls.iter().find(|(prog, args)| {
+            prog == "git"
+                && args.contains(&"add".to_string())
+                && args.contains(&"worktree".to_string())
+        });
         assert!(
             wt_call.is_some(),
             "git worktree add should be called when dir is missing"
@@ -2470,8 +2477,8 @@ mod tests {
         let repo_path = dir.path().to_str().unwrap().to_string();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"\n"),              // has_window: no match
-            MockProcessRunner::ok(),                               // git worktree prune
+            MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+            MockProcessRunner::ok(),                  // git worktree prune
             MockProcessRunner::fail("fatal: couldn't find remote ref"), // git fetch fails
         ]);
 
@@ -2602,8 +2609,17 @@ mod tests {
             MockProcessRunner::ok(),                  // tmux send-keys Enter
         ]);
 
-        dispatch_review_agent(&repo_path, "acme/app", 99, "Fix it", "body", "feature-branch", false, &mock)
-            .unwrap();
+        dispatch_review_agent(
+            &repo_path,
+            "acme/app",
+            99,
+            "Fix it",
+            "body",
+            "feature-branch",
+            false,
+            &mock,
+        )
+        .unwrap();
 
         let calls = mock.recorded_calls();
         let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
@@ -2634,12 +2650,31 @@ mod tests {
             MockProcessRunner::ok(),                // tmux send-keys -l
             MockProcessRunner::ok(),                // tmux send-keys Enter
         ]);
-        dispatch_review_agent(&repo_path, "acme/app", 42, "Fix it", "body", "feature-branch", false, &mock).unwrap();
+        dispatch_review_agent(
+            &repo_path,
+            "acme/app",
+            42,
+            "Fix it",
+            "body",
+            "feature-branch",
+            false,
+            &mock,
+        )
+        .unwrap();
 
         let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
-        assert!(prompt.contains("/review-pr"), "prompt should invoke /review-pr skill");
-        assert!(prompt.contains("update_review_status"), "prompt should reference MCP tool");
-        assert!(!prompt.contains("gh pr review"), "prompt should NOT tell agent to submit review directly");
+        assert!(
+            prompt.contains("/review-pr"),
+            "prompt should invoke /review-pr skill"
+        );
+        assert!(
+            prompt.contains("update_review_status"),
+            "prompt should reference MCP tool"
+        );
+        assert!(
+            !prompt.contains("gh pr review"),
+            "prompt should NOT tell agent to submit review directly"
+        );
     }
 
     #[test]
@@ -2657,11 +2692,27 @@ mod tests {
             MockProcessRunner::ok(),                // tmux send-keys -l
             MockProcessRunner::ok(),                // tmux send-keys Enter
         ]);
-        dispatch_review_agent(&repo_path, "acme/app", 42, "Bump lodash", "body", "dependabot/npm", true, &mock).unwrap();
+        dispatch_review_agent(
+            &repo_path,
+            "acme/app",
+            42,
+            "Bump lodash",
+            "body",
+            "dependabot/npm",
+            true,
+            &mock,
+        )
+        .unwrap();
 
         let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
-        assert!(prompt.contains("dependency update"), "dependabot prompt should mention dependency update");
-        assert!(prompt.contains("update_review_status"), "prompt should reference MCP tool");
+        assert!(
+            prompt.contains("dependency update"),
+            "dependabot prompt should mention dependency update"
+        );
+        assert!(
+            prompt.contains("update_review_status"),
+            "prompt should reference MCP tool"
+        );
     }
 
     #[test]
@@ -2675,7 +2726,10 @@ mod tests {
             Some("lodash"),
             Some("4.17.21"),
         );
-        assert!(prompt.contains("update_review_status"), "fix prompt should include MCP lifecycle call");
+        assert!(
+            prompt.contains("update_review_status"),
+            "fix prompt should include MCP lifecycle call"
+        );
     }
 
     #[test]

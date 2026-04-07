@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::McpState;
 use crate::models::TaskStatus;
-use crate::service::{CreateEpicParams, EpicService, UpdateEpicParams};
+use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicParams};
 
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
@@ -175,6 +175,16 @@ pub(super) fn handle_update_epic(
         Err(resp) => return resp,
     };
     tracing::info!(epic_id = parsed.epic_id, "MCP update_epic");
+
+    // MCP-specific restriction: agents cannot set epic status to archived
+    if matches!(parsed.status, Some(TaskStatus::Archived)) {
+        return service_err_to_response(
+            id,
+            ServiceError::Validation(
+                "Cannot set epic status to archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
+            ),
+        );
+    }
 
     let params = UpdateEpicParams {
         epic_id: parsed.epic_id,

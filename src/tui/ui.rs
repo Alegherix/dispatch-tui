@@ -988,10 +988,7 @@ fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
     let desc_style = Style::default().fg(MUTED_LIGHT);
     let mut lines = vec![Line::from(line1_spans)];
     for desc_line in task.description.lines() {
-        lines.push(Line::from(Span::styled(
-            desc_line.to_string(),
-            desc_style,
-        )));
+        lines.push(Line::from(Span::styled(desc_line.to_string(), desc_style)));
     }
     if task.description.is_empty() {
         lines.push(Line::from(Span::styled(String::new(), desc_style)));
@@ -1022,10 +1019,7 @@ fn epic_detail_lines(app: &App, epic: &Epic) -> Vec<Line<'static>> {
     let desc_style = Style::default().fg(MUTED_LIGHT);
     let mut lines = vec![line1];
     for desc_line in epic.description.lines() {
-        lines.push(Line::from(Span::styled(
-            desc_line.to_string(),
-            desc_style,
-        )));
+        lines.push(Line::from(Span::styled(desc_line.to_string(), desc_style)));
     }
     if epic.description.is_empty() {
         lines.push(Line::from(Span::styled(String::new(), desc_style)));
@@ -1183,10 +1177,7 @@ fn input_tag_lines(app: &App, completed: Style, active: Style, hint: Style) -> V
             active,
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            "  [Enter] skip  [Esc] cancel",
-            hint,
-        )),
+        Line::from(Span::styled("  [Enter] skip  [Esc] cancel", hint)),
     ]
 }
 
@@ -1296,10 +1287,7 @@ fn dispatch_repo_path_lines<'a>(
         .map(|p| p.github_repo())
         .unwrap_or("unknown");
     let mut lines = vec![
-        Line::from(Span::styled(
-            format!("  Repo: {github_repo}"),
-            hint,
-        )),
+        Line::from(Span::styled(format!("  Repo: {github_repo}"), hint)),
         Line::from(Span::styled(
             format!("  Local path: {}_ ", app.input.buffer),
             active,
@@ -1479,9 +1467,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::InputEpicRepoPath => {
             input_epic_repo_path_lines(app, area, completed, active, hint)
         }
-        InputMode::InputDispatchRepoPath => {
-            dispatch_repo_path_lines(app, area, active, hint)
-        }
+        InputMode::InputDispatchRepoPath => dispatch_repo_path_lines(app, area, active, hint),
         _ => return false,
     };
 
@@ -1923,7 +1909,11 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
         let is_broken = !std::path::Path::new(path).is_dir();
         let broken_mark = if is_broken { " [!]" } else { "" };
         if i == cursor {
-            let style = if is_broken { broken_style } else { cursor_style };
+            let style = if is_broken {
+                broken_style
+            } else {
+                cursor_style
+            };
             lines.push(Line::from(vec![
                 Span::styled("  ►", style),
                 Span::styled(format!(" [{checked}] {path}{broken_mark}"), style),
@@ -1932,7 +1922,10 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
             let num = i + 1;
             let style = if is_broken { broken_style } else { desc_style };
             lines.push(Line::from(vec![
-                Span::styled(format!("  {num}"), if is_broken { broken_style } else { key_style }),
+                Span::styled(
+                    format!("  {num}"),
+                    if is_broken { broken_style } else { key_style },
+                ),
                 Span::styled(format!(". [{checked}] {path}{broken_mark}"), style),
             ]));
         }
@@ -1987,7 +1980,10 @@ fn render_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 .map(|p| p.as_str())
                 .unwrap_or("?");
             lines.push(Line::from(vec![
-                Span::styled(format!("  Delete {path_label}?  "), Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!("  Delete {path_label}?  "),
+                    Style::default().fg(Color::Yellow),
+                ),
                 Span::styled("y", key_style),
                 Span::styled(": yes  ", note_style),
                 Span::styled("n/Esc", key_style),
@@ -2173,7 +2169,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::InputTag => {
             let text = app
-                .status.message
+                .status
+                .message
                 .as_deref()
                 .unwrap_or("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2191,7 +2188,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::InputDispatchRepoPath => {
             let text = app
-                .status.message
+                .status
+                .message
                 .as_deref()
                 .unwrap_or("Select local repo path for dispatch");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
@@ -2209,7 +2207,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmDone(_) => {
             let text = app
-                .status.message
+                .status
+                .message
                 .as_deref()
                 .unwrap_or("Move to Done? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2232,7 +2231,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmDeleteEpic => {
             let text = app
-                .status.message
+                .status
+                .message
                 .as_deref()
                 .unwrap_or("Delete epic and subtasks? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
@@ -2254,16 +2254,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmMergePr(_) => {
-            let text = app
-                .status.message
-                .as_deref()
-                .unwrap_or("Merge PR? [y/n]");
+            let text = app.status.message.as_deref().unwrap_or("Merge PR? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Green));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmWrapUp(_) => {
             let text = app
-                .status.message
+                .status
+                .message
                 .as_deref()
                 .unwrap_or("Wrap up: [r] rebase  [p] create PR  [Esc] cancel");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2286,7 +2284,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmEpicWrapUp(_) => {
             let text = app
-                .status.message
+                .status
+                .message
                 .as_deref()
                 .unwrap_or("Epic wrap up: [r] rebase all  [p] PR all  [Esc] cancel");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2294,7 +2293,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
         InputMode::ConfirmDetachTmux(_) => {
             let text = app
-                .status.message
+                .status
+                .message
                 .as_deref()
                 .unwrap_or("Detach tmux panel? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
@@ -2700,7 +2700,11 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
             let hints = Paragraph::new(Line::from(bot_action_hints(has_pr, agent_status)));
             frame.render_widget(hints, chunks[4]);
         } else {
-            let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode, agent_status)));
+            let hints = Paragraph::new(Line::from(review_action_hints(
+                has_pr,
+                is_author_mode,
+                agent_status,
+            )));
             frame.render_widget(hints, chunks[4]);
         }
     }
@@ -2970,10 +2974,7 @@ fn build_review_pr_item(
         Some(crate::models::ReviewAgentStatus::Idle) => "\u{25cb} ",
         None => "",
     };
-    let header = format!(
-        "{select_prefix}{agent_badge}#{} {}",
-        pr.number, pr.title
-    );
+    let header = format!("{select_prefix}{agent_badge}#{} {}", pr.number, pr.title);
     // stripe(2) + header + ci_status(" " + symbol)
     let ci_symbol_width = match pr.ci_status {
         CiStatus::Pending => 2, // ⏳ is a wide character
@@ -3127,7 +3128,11 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         let has_alert = app.selected_security_alert().is_some();
         let agent_status = app.selected_security_alert().and_then(|a| a.agent_status);
-        let hints = Paragraph::new(Line::from(security_action_hints(app, has_alert, agent_status)));
+        let hints = Paragraph::new(Line::from(security_action_hints(
+            app,
+            has_alert,
+            agent_status,
+        )));
         frame.render_widget(hints, chunks[4]);
     }
 
@@ -3508,7 +3513,11 @@ mod tests {
         });
         app.input.buffer = "some desc".into();
         let lines = input_description_lines(&app, dummy_style(), dummy_style(), dummy_style());
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("Tag: bug"), "expected tag line, got:\n{text}");
         assert!(text.contains("Title: My task"));
         assert!(text.contains("Description: opening $EDITOR"));
@@ -3523,8 +3532,15 @@ mod tests {
             ..Default::default()
         });
         let lines = input_description_lines(&app, dummy_style(), dummy_style(), dummy_style());
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
-        assert!(text.contains("Tag: none"), "expected 'Tag: none', got:\n{text}");
+        let text: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("Tag: none"),
+            "expected 'Tag: none', got:\n{text}"
+        );
     }
 
     #[test]
@@ -3539,8 +3555,15 @@ mod tests {
         app.input.buffer = "/some/path".into();
         let area = Rect::new(0, 0, 80, 24);
         let lines = input_repo_path_lines(&app, area, dummy_style(), dummy_style(), dummy_style());
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
-        assert!(text.contains("Tag: feature"), "expected tag line, got:\n{text}");
+        let text: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("Tag: feature"),
+            "expected tag line, got:\n{text}"
+        );
         assert!(text.contains("Title: Feature task"));
         assert!(text.contains("Description: A description"));
         assert!(text.contains("Repo path: /some/path_"));
@@ -3558,8 +3581,15 @@ mod tests {
         app.input.buffer.clear();
         let area = Rect::new(0, 0, 80, 24);
         let lines = input_repo_path_lines(&app, area, dummy_style(), dummy_style(), dummy_style());
-        let text: String = lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
-        assert!(text.contains("Tag: none"), "expected 'Tag: none', got:\n{text}");
+        let text: String = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("Tag: none"),
+            "expected 'Tag: none', got:\n{text}"
+        );
     }
 
     #[test]

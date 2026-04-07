@@ -206,10 +206,7 @@ pub fn current_pane_id(runner: &dyn ProcessRunner) -> Result<String> {
 
 /// Create a horizontal split (right pane) at 40% width, keeping focus on the
 /// left pane. Returns the new pane's ID.
-pub fn split_window_horizontal(
-    target_pane: &str,
-    runner: &dyn ProcessRunner,
-) -> Result<String> {
+pub fn split_window_horizontal(target_pane: &str, runner: &dyn ProcessRunner) -> Result<String> {
     let output = runner.run(
         "tmux",
         &[

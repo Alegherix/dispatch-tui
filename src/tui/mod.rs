@@ -231,37 +231,37 @@ impl App {
         &self.filter.presets
     }
     pub fn review_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.review.prs
+        &self.review.review.prs
     }
     pub fn review_board_loading(&self) -> bool {
-        self.review.loading
+        self.review.review.loading
     }
     pub fn last_review_error(&self) -> Option<&str> {
-        self.review.last_error.as_deref()
+        self.review.review.last_error.as_deref()
     }
     pub fn review_detail_visible(&self) -> bool {
         self.review.detail_visible
     }
     pub fn review_repo_filter(&self) -> &HashSet<String> {
-        &self.review.repo_filter
+        &self.review.review.repo_filter
     }
     pub fn review_repo_filter_mode(&self) -> RepoFilterMode {
-        self.review.repo_filter_mode
+        self.review.review.repo_filter_mode
     }
     pub fn my_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.review.my_prs
+        &self.review.authored.prs
     }
     pub fn my_prs_loading(&self) -> bool {
-        self.review.my_prs_loading
+        self.review.authored.loading
     }
     pub fn dispatch_pr_filter(&self) -> bool {
         self.review.dispatch_pr_filter
     }
     pub fn bot_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.review.bot_prs
+        &self.review.bot.prs
     }
     pub fn bot_prs_loading(&self) -> bool {
-        self.review.bot_prs_loading
+        self.review.bot.loading
     }
     pub fn selected_bot_prs(&self) -> &HashSet<String> {
         &self.select.bot_prs
@@ -386,11 +386,11 @@ impl App {
     }
 
     pub fn set_review_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
-        self.review.set_prs(prs);
+        self.review.review.set_prs(prs);
     }
 
     pub fn set_bot_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
-        self.review.set_bot_prs(prs);
+        self.review.bot.set_prs(prs);
     }
 
     pub fn set_security_alerts(&mut self, alerts: Vec<crate::models::SecurityAlert>) {
@@ -897,31 +897,31 @@ impl App {
                         mode: ReviewBoardMode::Author,
                         ..
                     } => {
-                        self.review.my_prs_loading = true;
+                        self.review.authored.loading = true;
                         cmds.push(Command::FetchMyPrs);
                     }
                     ViewMode::ReviewBoard {
                         mode: ReviewBoardMode::Dependabot,
                         ..
                     } => {
-                        self.review.bot_prs_loading = true;
+                        self.review.bot.loading = true;
                         cmds.push(Command::FetchBotPrs);
                     }
                     _ => {
-                        self.review.loading = true;
+                        self.review.review.loading = true;
                         cmds.push(Command::FetchReviewPrs);
                     }
                 }
                 cmds
             }
             Message::RefreshBotPrs => {
-                self.review.bot_prs_loading = true;
+                self.review.bot.loading = true;
                 vec![Command::FetchBotPrs]
             }
             Message::BotPrsLoaded(prs) => self.handle_bot_prs_loaded(prs),
             Message::BotPrsFetchFailed(err) => {
-                self.review.bot_prs_loading = false;
-                self.review.last_error = Some(err);
+                self.review.bot.loading = false;
+                self.review.review.last_error = Some(err);
                 vec![]
             }
             Message::ToggleSelectBotPr(url) => {
@@ -1101,10 +1101,11 @@ impl App {
                 // Update in-memory state across all PR lists
                 for pr in self
                     .review
+                    .review
                     .prs
                     .iter_mut()
-                    .chain(self.review.my_prs.iter_mut())
-                    .chain(self.review.bot_prs.iter_mut())
+                    .chain(self.review.authored.prs.iter_mut())
+                    .chain(self.review.bot.prs.iter_mut())
                 {
                     if pr.repo == repo && pr.number == number {
                         pr.agent_status = Some(status);
@@ -1131,10 +1132,11 @@ impl App {
                 let mut cmds = Vec::new();
                 for pr in self
                     .review
+                    .review
                     .prs
                     .iter_mut()
-                    .chain(self.review.my_prs.iter_mut())
-                    .chain(self.review.bot_prs.iter_mut())
+                    .chain(self.review.authored.prs.iter_mut())
+                    .chain(self.review.bot.prs.iter_mut())
                 {
                     if pr.repo == repo && pr.number == number {
                         if let Some(window) = pr.tmux_window.take() {
@@ -1743,14 +1745,14 @@ impl App {
         }
 
         // Refresh review board data if stale (> 30s), regardless of active tab
-        if self.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.loading {
-            self.review.loading = true;
+        if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
+            self.review.review.loading = true;
             cmds.push(Command::FetchReviewPrs);
         }
 
         // Also refresh my PRs data if stale (> 30s)
-        if self.review.needs_my_prs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.my_prs_loading {
-            self.review.my_prs_loading = true;
+        if self.review.authored.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.authored.loading {
+            self.review.authored.loading = true;
             cmds.push(Command::FetchMyPrs);
         }
 
@@ -2978,8 +2980,8 @@ impl App {
             selection: ReviewBoardSelection::new(),
             saved_board,
         };
-        if self.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.loading {
-            self.review.loading = true;
+        if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
+            self.review.review.loading = true;
             vec![Command::FetchReviewPrs]
         } else {
             vec![]
@@ -3011,24 +3013,24 @@ impl App {
         if let ViewMode::ReviewBoard { mode, .. } = &self.board.view_mode {
             match mode {
                 ReviewBoardMode::Author => {
-                    if self.review.needs_my_prs_fetch(REVIEW_REFRESH_INTERVAL)
-                        && !self.review.my_prs_loading
+                    if self.review.authored.needs_fetch(REVIEW_REFRESH_INTERVAL)
+                        && !self.review.authored.loading
                     {
-                        self.review.my_prs_loading = true;
+                        self.review.authored.loading = true;
                         cmds.push(Command::FetchMyPrs);
                     }
                 }
                 ReviewBoardMode::Reviewer => {
-                    if self.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.loading {
-                        self.review.loading = true;
+                    if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
+                        self.review.review.loading = true;
                         cmds.push(Command::FetchReviewPrs);
                     }
                 }
                 ReviewBoardMode::Dependabot => {
-                    if self.review.needs_bot_prs_fetch(REVIEW_REFRESH_INTERVAL)
-                        && !self.review.bot_prs_loading
+                    if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL)
+                        && !self.review.bot.loading
                     {
-                        self.review.bot_prs_loading = true;
+                        self.review.bot.loading = true;
                         cmds.push(Command::FetchBotPrs);
                     }
                 }
@@ -3039,10 +3041,10 @@ impl App {
 
     fn handle_review_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
         let cmds = vec![Command::PersistReviewPrs(prs.clone())];
-        self.review.set_prs(prs);
-        self.review.loading = false;
-        self.review.last_fetch = Some(Instant::now());
-        self.review.last_error = None;
+        self.review.review.set_prs(prs);
+        self.review.review.loading = false;
+        self.review.review.last_fetch = Some(Instant::now());
+        self.review.review.last_error = None;
         self.clamp_review_selection();
         cmds
     }
@@ -3076,24 +3078,24 @@ impl App {
 
     fn handle_review_prs_fetch_failed(&mut self, error: String) -> Vec<Command> {
         tracing::warn!(error = %error, "review PR fetch failed");
-        self.review.loading = false;
-        self.review.last_error = Some(error.clone());
+        self.review.review.loading = false;
+        self.review.review.last_error = Some(error.clone());
         self.set_status(format!("Failed to fetch review PRs: {error}"));
         vec![]
     }
 
     fn handle_my_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
         let cmds = vec![Command::PersistMyPrs(prs.clone())];
-        self.review.set_my_prs(prs);
-        self.review.my_prs_loading = false;
-        self.review.last_my_prs_fetch = Some(Instant::now());
+        self.review.authored.set_prs(prs);
+        self.review.authored.loading = false;
+        self.review.authored.last_fetch = Some(Instant::now());
         self.clamp_review_selection();
         cmds
     }
 
     fn handle_my_prs_fetch_failed(&mut self, error: String) -> Vec<Command> {
         tracing::warn!(error = %error, "my PRs fetch failed");
-        self.review.my_prs_loading = false;
+        self.review.authored.loading = false;
         self.set_status(format!("Failed to fetch my PRs: {error}"));
         vec![]
     }
@@ -3190,7 +3192,7 @@ impl App {
         tmux_window: &str,
         worktree: &str,
     ) -> String {
-        for pr in self.review.prs.iter_mut() {
+        for pr in self.review.review.prs.iter_mut() {
             if pr.repo == github_repo && pr.number == number {
                 pr.tmux_window = Some(tmux_window.to_string());
                 pr.worktree = Some(worktree.to_string());
@@ -3198,7 +3200,7 @@ impl App {
                 return "review_prs".to_string();
             }
         }
-        for pr in self.review.my_prs.iter_mut() {
+        for pr in self.review.authored.prs.iter_mut() {
             if pr.repo == github_repo && pr.number == number {
                 pr.tmux_window = Some(tmux_window.to_string());
                 pr.worktree = Some(worktree.to_string());
@@ -3206,7 +3208,7 @@ impl App {
                 return "my_prs".to_string();
             }
         }
-        for pr in self.review.bot_prs.iter_mut() {
+        for pr in self.review.bot.prs.iter_mut() {
             if pr.repo == github_repo && pr.number == number {
                 pr.tmux_window = Some(tmux_window.to_string());
                 pr.worktree = Some(worktree.to_string());
@@ -3230,9 +3232,9 @@ impl App {
 
     fn handle_bot_prs_loaded(&mut self, prs: Vec<crate::models::ReviewPr>) -> Vec<Command> {
         let cmds = vec![Command::PersistBotPrs(prs.clone())];
-        self.review.set_bot_prs(prs);
-        self.review.bot_prs_loading = false;
-        self.review.last_bot_prs_fetch = Some(Instant::now());
+        self.review.bot.set_prs(prs);
+        self.review.bot.loading = false;
+        self.review.bot.last_fetch = Some(Instant::now());
         self.clamp_review_selection();
         cmds
     }
@@ -3281,7 +3283,8 @@ impl App {
         // Only merge PRs that are CI-passing and approved
         let eligible: Vec<String> = self
             .review
-            .bot_prs
+            .bot
+            .prs
             .iter()
             .filter(|pr| self.select.bot_prs.contains(&pr.url))
             .filter(|pr| {
@@ -3327,11 +3330,11 @@ impl App {
     /// Return review PRs filtered by the review repo filter.
     /// When the filter is empty, all PRs are returned.
     pub fn filtered_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.review.filtered_prs()
+        self.review.review.filtered()
     }
 
     pub fn filtered_my_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        let base = self.review.filtered_my_prs();
+        let base = self.review.authored.filtered();
         if self.review.dispatch_pr_filter {
             let dispatch_urls = self.dispatch_pr_urls();
             base.into_iter()
@@ -3343,7 +3346,7 @@ impl App {
     }
 
     pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.review.filtered_bot_prs()
+        self.review.bot.filtered()
     }
 
     /// Return the PR list appropriate for the current review board mode.
@@ -3367,12 +3370,12 @@ impl App {
             ViewMode::ReviewBoard {
                 mode: ReviewBoardMode::Author,
                 ..
-            } => &self.review.my_prs_repos,
+            } => &self.review.authored.repos,
             ViewMode::ReviewBoard {
                 mode: ReviewBoardMode::Dependabot,
                 ..
-            } => &self.review.bot_prs_repos,
-            _ => &self.review.repos,
+            } => &self.review.bot.repos,
+            _ => &self.review.review.repos,
         }
     }
 
@@ -3820,8 +3823,8 @@ impl App {
     }
 
     fn handle_toggle_review_repo_filter(&mut self, repo: String) -> Vec<Command> {
-        if !self.review.repo_filter.remove(&repo) {
-            self.review.repo_filter.insert(repo);
+        if !self.review.review.repo_filter.remove(&repo) {
+            self.review.review.repo_filter.insert(repo);
         }
         self.clamp_review_selection();
         vec![]
@@ -3829,17 +3832,17 @@ impl App {
 
     fn handle_toggle_all_review_repo_filter(&mut self) -> Vec<Command> {
         let all_repos = self.active_review_repos();
-        if self.review.repo_filter.len() == all_repos.len() {
-            self.review.repo_filter.clear();
+        if self.review.review.repo_filter.len() == all_repos.len() {
+            self.review.review.repo_filter.clear();
         } else {
-            self.review.repo_filter = all_repos.iter().cloned().collect();
+            self.review.review.repo_filter = all_repos.iter().cloned().collect();
         }
         self.clamp_review_selection();
         vec![]
     }
 
     fn handle_toggle_review_repo_filter_mode(&mut self) -> Vec<Command> {
-        self.review.repo_filter_mode = match self.review.repo_filter_mode {
+        self.review.review.repo_filter_mode = match self.review.review.repo_filter_mode {
             RepoFilterMode::Include => RepoFilterMode::Exclude,
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };

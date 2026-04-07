@@ -793,39 +793,24 @@ impl FilterState {
 }
 
 // ---------------------------------------------------------------------------
-// ReviewBoardState — review board data and loading state
+// PrListState — per-list state shared by review / authored / bot PR lists
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
-pub struct ReviewBoardState {
+pub struct PrListState {
     pub prs: Vec<crate::models::ReviewPr>,
     pub repos: Vec<String>,
     pub loading: bool,
     pub last_fetch: Option<Instant>,
     pub last_error: Option<String>,
-    pub detail_visible: bool,
     pub repo_filter: HashSet<String>,
     pub repo_filter_mode: RepoFilterMode,
-    pub my_prs: Vec<crate::models::ReviewPr>,
-    pub my_prs_repos: Vec<String>,
-    pub my_prs_loading: bool,
-    pub last_my_prs_fetch: Option<Instant>,
-    pub my_prs_repo_filter: HashSet<String>,
-    pub my_prs_repo_filter_mode: RepoFilterMode,
-    pub dispatch_pr_filter: bool,
-    // Bot (dependabot/renovate) PRs
-    pub bot_prs: Vec<crate::models::ReviewPr>,
-    pub bot_prs_repos: Vec<String>,
-    pub bot_prs_loading: bool,
-    pub last_bot_prs_fetch: Option<Instant>,
-    pub bot_prs_repo_filter: HashSet<String>,
-    pub bot_prs_repo_filter_mode: RepoFilterMode,
-    pub review_flash: HashMap<(String, i64), Instant>,
 }
 
-impl ReviewBoardState {
-    /// Set review PRs and rebuild the cached distinct repos list.
-    /// Preserves agent fields (tmux_window, worktree) from old PRs.
+impl PrListState {
+    /// Replace the PR list, preserving agent fields (tmux_window, worktree,
+    /// agent_status) from the previous list when the new PR lacks them.
+    /// Also rebuilds the cached distinct repos list.
     pub fn set_prs(&mut self, mut prs: Vec<crate::models::ReviewPr>) {
         for new_pr in prs.iter_mut() {
             if let Some(old_pr) = self
@@ -848,43 +833,11 @@ impl ReviewBoardState {
         self.prs = prs;
     }
 
-    /// Set author PRs and rebuild the cached distinct repos list.
-    /// Preserves agent fields (tmux_window, worktree) from old PRs.
-    pub fn set_my_prs(&mut self, mut prs: Vec<crate::models::ReviewPr>) {
-        for new_pr in prs.iter_mut() {
-            if let Some(old_pr) = self
-                .my_prs
-                .iter()
-                .find(|p| p.repo == new_pr.repo && p.number == new_pr.number)
-            {
-                if new_pr.tmux_window.is_none() {
-                    new_pr.tmux_window = old_pr.tmux_window.clone();
-                }
-                if new_pr.worktree.is_none() {
-                    new_pr.worktree = old_pr.worktree.clone();
-                }
-                if new_pr.agent_status.is_none() {
-                    new_pr.agent_status = old_pr.agent_status;
-                }
-            }
-        }
-        self.my_prs_repos = distinct_repos(&prs);
-        self.my_prs = prs;
-    }
-
-    /// Return review PRs filtered by repo filter. Empty filter means all PRs.
-    pub fn filtered_prs(&self) -> Vec<&crate::models::ReviewPr> {
+    /// Return PRs filtered by repo filter. Empty filter means all PRs.
+    pub fn filtered(&self) -> Vec<&crate::models::ReviewPr> {
         self.prs
             .iter()
             .filter(|pr| self.repo_matches(&pr.repo))
-            .collect()
-    }
-
-    /// Return author's PRs filtered by repo filter. Empty filter means all PRs.
-    pub fn filtered_my_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.my_prs
-            .iter()
-            .filter(|pr| self.my_prs_repo_matches(&pr.repo))
             .collect()
     }
 
@@ -898,78 +851,26 @@ impl ReviewBoardState {
         }
     }
 
-    pub fn my_prs_repo_matches(&self, repo: &str) -> bool {
-        if self.my_prs_repo_filter.is_empty() {
-            return true;
-        }
-        match self.my_prs_repo_filter_mode {
-            RepoFilterMode::Include => self.my_prs_repo_filter.contains(repo),
-            RepoFilterMode::Exclude => !self.my_prs_repo_filter.contains(repo),
-        }
-    }
-
-    /// Whether review PRs need a refresh given the interval.
+    /// Whether this list needs a refresh given the interval.
     pub fn needs_fetch(&self, interval: Duration) -> bool {
         self.last_fetch
             .map(|t| t.elapsed() > interval)
             .unwrap_or(true)
     }
+}
 
-    /// Whether author PRs need a refresh given the interval.
-    pub fn needs_my_prs_fetch(&self, interval: Duration) -> bool {
-        self.last_my_prs_fetch
-            .map(|t| t.elapsed() > interval)
-            .unwrap_or(true)
-    }
+// ---------------------------------------------------------------------------
+// ReviewBoardState — review board data and loading state
+// ---------------------------------------------------------------------------
 
-    /// Set bot PRs and rebuild the cached distinct repos list.
-    /// Preserves agent fields (tmux_window, worktree) from old PRs.
-    pub fn set_bot_prs(&mut self, mut prs: Vec<crate::models::ReviewPr>) {
-        for new_pr in prs.iter_mut() {
-            if let Some(old_pr) = self
-                .bot_prs
-                .iter()
-                .find(|p| p.repo == new_pr.repo && p.number == new_pr.number)
-            {
-                if new_pr.tmux_window.is_none() {
-                    new_pr.tmux_window = old_pr.tmux_window.clone();
-                }
-                if new_pr.worktree.is_none() {
-                    new_pr.worktree = old_pr.worktree.clone();
-                }
-                if new_pr.agent_status.is_none() {
-                    new_pr.agent_status = old_pr.agent_status;
-                }
-            }
-        }
-        self.bot_prs_repos = distinct_repos(&prs);
-        self.bot_prs = prs;
-    }
-
-    /// Return bot PRs filtered by repo filter. Empty filter means all PRs.
-    pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.bot_prs
-            .iter()
-            .filter(|pr| self.bot_prs_repo_matches(&pr.repo))
-            .collect()
-    }
-
-    pub fn bot_prs_repo_matches(&self, repo: &str) -> bool {
-        if self.bot_prs_repo_filter.is_empty() {
-            return true;
-        }
-        match self.bot_prs_repo_filter_mode {
-            RepoFilterMode::Include => self.bot_prs_repo_filter.contains(repo),
-            RepoFilterMode::Exclude => !self.bot_prs_repo_filter.contains(repo),
-        }
-    }
-
-    /// Whether bot PRs need a refresh given the interval.
-    pub fn needs_bot_prs_fetch(&self, interval: Duration) -> bool {
-        self.last_bot_prs_fetch
-            .map(|t| t.elapsed() > interval)
-            .unwrap_or(true)
-    }
+#[derive(Debug, Default)]
+pub struct ReviewBoardState {
+    pub review: PrListState,
+    pub authored: PrListState,
+    pub bot: PrListState,
+    pub detail_visible: bool,
+    pub dispatch_pr_filter: bool,
+    pub review_flash: HashMap<(String, i64), Instant>,
 }
 
 /// Compute a sorted, deduplicated list of repo names from a slice of review PRs.
@@ -1375,3 +1276,163 @@ impl SubtaskStats {
 
 /// Pre-computed subtask stats for all epics, keyed by EpicId.
 pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    fn make_pr(number: i64, repo: &str) -> ReviewPr {
+        ReviewPr {
+            number,
+            title: format!("PR {number}"),
+            author: "alice".to_string(),
+            repo: repo.to_string(),
+            url: format!("https://github.com/{repo}/pull/{number}"),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 10,
+            deletions: 5,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: CiStatus::None,
+            reviewers: vec![],
+            tmux_window: None,
+            worktree: None,
+            agent_status: None,
+        }
+    }
+
+    // -- PrListState::set_prs --
+
+    #[test]
+    fn pr_list_state_set_prs_stores_prs_and_computes_repos() {
+        let mut state = PrListState::default();
+        state.set_prs(vec![make_pr(1, "org/beta"), make_pr(2, "org/alpha")]);
+        assert_eq!(state.prs.len(), 2);
+        // repos should be sorted and deduplicated
+        assert_eq!(state.repos, vec!["org/alpha", "org/beta"]);
+    }
+
+    #[test]
+    fn pr_list_state_set_prs_preserves_agent_fields() {
+        let mut state = PrListState::default();
+
+        let mut old = make_pr(1, "org/app");
+        old.tmux_window = Some("win-1".to_string());
+        old.worktree = Some("/tmp/wt".to_string());
+        old.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+        state.set_prs(vec![old]);
+
+        // Simulate a refresh: new PR has no agent fields
+        let fresh = make_pr(1, "org/app");
+        assert!(fresh.tmux_window.is_none());
+        state.set_prs(vec![fresh]);
+
+        assert_eq!(state.prs[0].tmux_window.as_deref(), Some("win-1"));
+        assert_eq!(state.prs[0].worktree.as_deref(), Some("/tmp/wt"));
+        assert_eq!(
+            state.prs[0].agent_status,
+            Some(crate::models::ReviewAgentStatus::Reviewing)
+        );
+    }
+
+    #[test]
+    fn pr_list_state_set_prs_does_not_overwrite_new_agent_fields() {
+        let mut state = PrListState::default();
+
+        let mut old = make_pr(1, "org/app");
+        old.tmux_window = Some("old-win".to_string());
+        state.set_prs(vec![old]);
+
+        let mut fresh = make_pr(1, "org/app");
+        fresh.tmux_window = Some("new-win".to_string());
+        state.set_prs(vec![fresh]);
+
+        assert_eq!(
+            state.prs[0].tmux_window.as_deref(),
+            Some("new-win"),
+            "new non-None agent fields should not be overwritten by old values"
+        );
+    }
+
+    // -- PrListState::filtered --
+
+    #[test]
+    fn pr_list_state_filtered_returns_all_when_no_filter() {
+        let mut state = PrListState::default();
+        state.set_prs(vec![make_pr(1, "org/a"), make_pr(2, "org/b")]);
+        assert_eq!(state.filtered().len(), 2);
+    }
+
+    #[test]
+    fn pr_list_state_filtered_include_mode() {
+        let mut state = PrListState::default();
+        state.set_prs(vec![make_pr(1, "org/a"), make_pr(2, "org/b")]);
+        state.repo_filter.insert("org/a".to_string());
+        state.repo_filter_mode = RepoFilterMode::Include;
+        let result = state.filtered();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].repo, "org/a");
+    }
+
+    #[test]
+    fn pr_list_state_filtered_exclude_mode() {
+        let mut state = PrListState::default();
+        state.set_prs(vec![make_pr(1, "org/a"), make_pr(2, "org/b")]);
+        state.repo_filter.insert("org/a".to_string());
+        state.repo_filter_mode = RepoFilterMode::Exclude;
+        let result = state.filtered();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].repo, "org/b");
+    }
+
+    // -- PrListState::repo_matches --
+
+    #[test]
+    fn pr_list_state_repo_matches_empty_filter_matches_all() {
+        let state = PrListState::default();
+        assert!(state.repo_matches("anything"));
+    }
+
+    #[test]
+    fn pr_list_state_repo_matches_include_mode() {
+        let mut state = PrListState::default();
+        state.repo_filter.insert("org/a".to_string());
+        state.repo_filter_mode = RepoFilterMode::Include;
+        assert!(state.repo_matches("org/a"));
+        assert!(!state.repo_matches("org/b"));
+    }
+
+    #[test]
+    fn pr_list_state_repo_matches_exclude_mode() {
+        let mut state = PrListState::default();
+        state.repo_filter.insert("org/a".to_string());
+        state.repo_filter_mode = RepoFilterMode::Exclude;
+        assert!(!state.repo_matches("org/a"));
+        assert!(state.repo_matches("org/b"));
+    }
+
+    // -- PrListState::needs_fetch --
+
+    #[test]
+    fn pr_list_state_needs_fetch_true_when_never_fetched() {
+        let state = PrListState::default();
+        assert!(state.needs_fetch(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn pr_list_state_needs_fetch_false_when_recently_fetched() {
+        let mut state = PrListState::default();
+        state.last_fetch = Some(Instant::now());
+        assert!(!state.needs_fetch(Duration::from_secs(60)));
+    }
+}

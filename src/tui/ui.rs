@@ -285,12 +285,26 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let hint = match app.view_mode() {
-        ViewMode::ReviewBoard { .. } => "  [Tab] security  [S-Tab] toggle",
-        ViewMode::SecurityBoard { .. } => "  [Tab] tasks  [Esc] back",
-        _ => "  [Tab]",
-    };
-    spans.push(Span::styled(hint, hint_style.add_modifier(Modifier::BOLD)));
+    let key_hint = Style::default()
+        .fg(MUTED_LIGHT)
+        .add_modifier(Modifier::BOLD);
+    match app.view_mode() {
+        ViewMode::ReviewBoard { .. } => {
+            spans.push(Span::styled("  [Tab]", key_hint));
+            spans.push(Span::styled(" security  ", hint_style));
+            spans.push(Span::styled("[S-Tab]", key_hint));
+            spans.push(Span::styled(" toggle", hint_style));
+        }
+        ViewMode::SecurityBoard { .. } => {
+            spans.push(Span::styled("  [Tab]", key_hint));
+            spans.push(Span::styled(" tasks  ", hint_style));
+            spans.push(Span::styled("[Esc]", key_hint));
+            spans.push(Span::styled(" back", hint_style));
+        }
+        _ => {
+            spans.push(Span::styled("  [Tab]", key_hint));
+        }
+    }
 
     let line = Line::from(spans);
     let paragraph = Paragraph::new(line);

@@ -653,6 +653,10 @@ impl TaskStore for Database {
     }
 
     fn set_pr_agent(&self, table: &str, repo: &str, number: i64, tmux_window: &str, worktree: &str) -> Result<()> {
+        anyhow::ensure!(
+            matches!(table, "review_prs" | "my_prs" | "bot_prs"),
+            "invalid PR table: {table}"
+        );
         let conn = self.conn()?;
         conn.execute(
             &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2 WHERE repo = ?3 AND number = ?4"),
@@ -676,6 +680,10 @@ impl TaskStore for Database {
 // ---------------------------------------------------------------------------
 
 fn save_prs_to_table(conn: &rusqlite::Connection, table: &str, prs: &[ReviewPr]) -> Result<()> {
+    assert!(
+        matches!(table, "review_prs" | "my_prs" | "bot_prs"),
+        "invalid PR table: {table}"
+    );
     let tx = conn.unchecked_transaction()?;
 
     // Upsert all PRs — ON CONFLICT preserves tmux_window and worktree
@@ -733,17 +741,25 @@ fn save_prs_to_table(conn: &rusqlite::Connection, table: &str, prs: &[ReviewPr])
     if prs.is_empty() {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
     } else {
-        let keys: Vec<String> = prs
-            .iter()
-            .map(|pr| format!("('{}', {})", pr.repo.replace('\'', "''"), pr.number))
+        let placeholders: Vec<String> = (0..prs.len())
+            .map(|i| format!("(?{}, ?{})", i * 2 + 1, i * 2 + 2))
             .collect();
-        tx.execute(
-            &format!(
-                "DELETE FROM {table} WHERE (repo, number) NOT IN ({})",
-                keys.join(", ")
-            ),
-            [],
-        )?;
+        let sql = format!(
+            "DELETE FROM {table} WHERE (repo, number) NOT IN (VALUES {})",
+            placeholders.join(", ")
+        );
+        let params: Vec<Box<dyn rusqlite::types::ToSql>> = prs
+            .iter()
+            .flat_map(|pr| {
+                vec![
+                    Box::new(pr.repo.clone()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(pr.number) as Box<dyn rusqlite::types::ToSql>,
+                ]
+            })
+            .collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        tx.execute(&sql, param_refs.as_slice())?;
     }
 
     tx.commit()?;
@@ -911,24 +927,26 @@ fn save_security_alerts_impl(
     if alerts.is_empty() {
         tx.execute("DELETE FROM security_alerts", [])?;
     } else {
-        let keys: Vec<String> = alerts
+        let placeholders: Vec<String> = (0..alerts.len())
+            .map(|i| format!("(?{}, ?{}, ?{})", i * 3 + 1, i * 3 + 2, i * 3 + 3))
+            .collect();
+        let sql = format!(
+            "DELETE FROM security_alerts WHERE (repo, number, kind) NOT IN (VALUES {})",
+            placeholders.join(", ")
+        );
+        let params: Vec<Box<dyn rusqlite::types::ToSql>> = alerts
             .iter()
-            .map(|a| {
-                format!(
-                    "('{}', {}, '{}')",
-                    a.repo.replace('\'', "''"),
-                    a.number,
-                    a.kind.as_db_str()
-                )
+            .flat_map(|a| {
+                vec![
+                    Box::new(a.repo.clone()) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(a.number) as Box<dyn rusqlite::types::ToSql>,
+                    Box::new(a.kind.as_db_str()) as Box<dyn rusqlite::types::ToSql>,
+                ]
             })
             .collect();
-        tx.execute(
-            &format!(
-                "DELETE FROM security_alerts WHERE (repo, number, kind) NOT IN ({})",
-                keys.join(", ")
-            ),
-            [],
-        )?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        tx.execute(&sql, param_refs.as_slice())?;
     }
 
     tx.commit()?;

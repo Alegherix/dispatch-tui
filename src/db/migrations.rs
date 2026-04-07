@@ -496,12 +496,16 @@ fn migrate_v25_rename_plan_to_plan_path(conn: &Connection) -> Result<()> {
 
 fn migrate_v26_add_agent_columns(conn: &Connection) -> Result<()> {
     for table in &["review_prs", "my_prs", "bot_prs", "security_alerts"] {
-        let _ = conn.execute_batch(&format!(
+        if let Err(e) = conn.execute_batch(&format!(
             "ALTER TABLE {table} ADD COLUMN tmux_window TEXT"
-        ));
-        let _ = conn.execute_batch(&format!(
+        )) {
+            tracing::debug!("ALTER {table} ADD tmux_window (may already exist): {e}");
+        }
+        if let Err(e) = conn.execute_batch(&format!(
             "ALTER TABLE {table} ADD COLUMN worktree TEXT"
-        ));
+        )) {
+            tracing::debug!("ALTER {table} ADD worktree (may already exist): {e}");
+        }
     }
     Ok(())
 }

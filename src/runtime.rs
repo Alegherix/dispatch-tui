@@ -626,6 +626,12 @@ impl TuiRuntime {
         ) {
             app.update(Message::Error(Self::db_error("updating task", e)));
         }
+        // Recalculate parent epic status if status changed via editor
+        if new_status != task.status {
+            if let Some(epic_id) = task.epic_id {
+                let _ = self.database.recalculate_epic_status(epic_id);
+            }
+        }
         app.update(Message::TaskEdited(tui::TaskEdit {
             id: task_id,
             title,

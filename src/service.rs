@@ -285,6 +285,50 @@ impl TaskService {
         Ok(task_id)
     }
 
+    /// CLI update command: change task status with optional condition and sub_status.
+    /// Returns true if the update was applied (false if only_if condition didn't match).
+    pub fn cli_update_task(
+        &self,
+        task_id: TaskId,
+        new_status: TaskStatus,
+        only_if: Option<TaskStatus>,
+        sub_status: Option<SubStatus>,
+    ) -> Result<bool, ServiceError> {
+        let updated = if let Some(expected) = only_if {
+            let changed = self
+                .db
+                .update_status_if(task_id, new_status, expected)
+                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+            if changed {
+                if let Some(ss) = sub_status {
+                    self.db
+                        .patch_task(task_id, &crate::db::TaskPatch::new().sub_status(ss))
+                        .map_err(|e| ServiceError::Internal(e.to_string()))?;
+                }
+            }
+            changed
+        } else {
+            let mut patch = crate::db::TaskPatch::new().status(new_status);
+            if let Some(ss) = sub_status {
+                patch = patch.sub_status(ss);
+            }
+            self.db
+                .patch_task(task_id, &patch)
+                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+            true
+        };
+
+        if updated {
+            if let Ok(Some(task)) = self.db.get_task(task_id) {
+                if let Some(epic_id) = task.epic_id {
+                    let _ = self.db.recalculate_epic_status(epic_id);
+                }
+            }
+        }
+
+        Ok(updated)
+    }
+
     pub fn create_task(&self, params: CreateTaskParams) -> Result<TaskId, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 

@@ -1771,6 +1771,113 @@ fn recalculate_epic_status_review_beats_running() {
 }
 
 #[test]
+fn cli_update_conditional_sets_epic_to_review() {
+    use crate::service::TaskService;
+
+    let db = std::sync::Arc::new(in_memory_db());
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+    let task = db
+        .create_task_returning("T1", "", "/repo", None, TaskStatus::Running)
+        .unwrap();
+    db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
+    db.recalculate_epic_status(epic.id).unwrap();
+
+    // Simulate hook: dispatch update <id> review --only-if running
+    let svc = TaskService::new(db.clone());
+    let updated = svc
+        .cli_update_task(task.id, TaskStatus::Review, Some(TaskStatus::Running), None)
+        .unwrap();
+    assert!(updated);
+
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Review);
+}
+
+#[test]
+fn cli_update_unconditional_sets_epic_to_running() {
+    use crate::service::TaskService;
+
+    let db = std::sync::Arc::new(in_memory_db());
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+    let task = db
+        .create_task_returning("T1", "", "/repo", None, TaskStatus::Backlog)
+        .unwrap();
+    db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
+
+    // Simulate: dispatch update <id> running (no --only-if)
+    let svc = TaskService::new(db.clone());
+    let updated = svc
+        .cli_update_task(task.id, TaskStatus::Running, None, None)
+        .unwrap();
+    assert!(updated);
+
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Running);
+}
+
+#[test]
+fn cli_update_epic_drops_back_when_review_task_done() {
+    use crate::service::TaskService;
+
+    let db = std::sync::Arc::new(in_memory_db());
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+
+    let t1 = db
+        .create_task_returning("T1", "", "/repo", None, TaskStatus::Running)
+        .unwrap();
+    let t2 = db
+        .create_task_returning("T2", "", "/repo", None, TaskStatus::Review)
+        .unwrap();
+    db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
+    db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
+    db.recalculate_epic_status(epic.id).unwrap();
+    assert_eq!(
+        db.get_epic(epic.id).unwrap().unwrap().status,
+        TaskStatus::Review
+    );
+
+    // t2 moves to done — epic should drop to Running (t1 still running)
+    let svc = TaskService::new(db.clone());
+    svc.cli_update_task(t2.id, TaskStatus::Done, Some(TaskStatus::Review), None)
+        .unwrap();
+
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Running);
+}
+
+#[test]
+fn cli_update_with_substatus_keeps_running_and_recalculates_epic() {
+    use crate::service::TaskService;
+
+    let db = std::sync::Arc::new(in_memory_db());
+    let epic = db.create_epic("E", "", "/repo").unwrap();
+    let task = db
+        .create_task_returning("T1", "", "/repo", None, TaskStatus::Running)
+        .unwrap();
+    db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
+    db.recalculate_epic_status(epic.id).unwrap();
+
+    // Hook sets needs_input while staying running:
+    // dispatch update <id> running --only-if running --sub-status needs_input
+    let svc = TaskService::new(db.clone());
+    svc.cli_update_task(
+        task.id,
+        TaskStatus::Running,
+        Some(TaskStatus::Running),
+        Some(SubStatus::NeedsInput),
+    )
+    .unwrap();
+
+    // Epic should still be Running
+    let epic = db.get_epic(epic.id).unwrap().unwrap();
+    assert_eq!(epic.status, TaskStatus::Running);
+
+    // Task sub_status should be NeedsInput
+    let task = db.get_task(task.id).unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::NeedsInput);
+}
+
+#[test]
 fn security_alerts_round_trip() {
     use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 

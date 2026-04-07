@@ -5,7 +5,7 @@ use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
 use dispatch_tui::db::TaskStore;
-use dispatch_tui::{db, models, plan, runtime};
+use dispatch_tui::{db, models, plan, runtime, service};
 
 #[derive(Parser)]
 #[command(name = "dispatch")]
@@ -157,24 +157,21 @@ async fn main() -> Result<()> {
                 None
             };
 
-            if let Some(ref condition) = only_if {
-                let expected = parse_status(condition)?;
-                let updated = db.update_status_if(task_id, new_status, expected)?;
-                if updated {
-                    if let Some(ss) = resolved_sub_status {
-                        db.patch_task(task_id, &db::TaskPatch::new().sub_status(ss))?;
-                    }
-                    println!("Task {} updated to {}", id, status);
-                } else {
-                    println!("Task {} not updated (status is not {})", id, condition);
-                }
-            } else {
-                let mut patch = db::TaskPatch::new().status(new_status);
-                if let Some(ss) = resolved_sub_status {
-                    patch = patch.sub_status(ss);
-                }
-                db.patch_task(task_id, &patch)?;
+            let only_if_status = only_if
+                .as_deref()
+                .map(parse_status)
+                .transpose()?;
+            let svc = service::TaskService::new(std::sync::Arc::new(db));
+            let updated =
+                svc.cli_update_task(task_id, new_status, only_if_status, resolved_sub_status)?;
+            if updated {
                 println!("Task {} updated to {}", id, status);
+            } else {
+                println!(
+                    "Task {} not updated (status is not {})",
+                    id,
+                    only_if.as_deref().unwrap_or("?")
+                );
             }
         }
         Commands::List { status } => {

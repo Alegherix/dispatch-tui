@@ -10108,6 +10108,93 @@ fn render_tab_bar_review_board_dependabot_tab() {
 }
 
 // ---------------------------------------------------------------------------
+// Tab bar key hint highlighting
+// ---------------------------------------------------------------------------
+
+/// Find a text span in the buffer and return the style of its first character.
+fn find_style_of(buf: &Buffer, text: &str) -> Option<ratatui::style::Style> {
+    let area = buf.area();
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            let remaining = (area.right() - x) as usize;
+            if remaining < text.len() {
+                break;
+            }
+            let segment: String = (0..text.len() as u16)
+                .map(|dx| buf[(x + dx, y)].symbol().to_string())
+                .collect();
+            if segment == text {
+                return Some(buf[(x, y)].style());
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn tab_bar_board_mode_highlights_tab_key() {
+    let mut app = make_app();
+    let buf = render_to_buffer(&mut app, 100, 30);
+    let style = find_style_of(&buf, "[Tab]").expect("[Tab] text not found in buffer");
+    assert!(
+        style.add_modifier.contains(Modifier::BOLD),
+        "[Tab] should be bold"
+    );
+    assert_eq!(
+        style.fg,
+        Some(Color::Rgb(120, 124, 153)),
+        "[Tab] should use MUTED_LIGHT color"
+    );
+}
+
+#[test]
+fn tab_bar_review_board_highlights_keys() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ReviewPrsLoaded(vec![]));
+    let buf = render_to_buffer(&mut app, 120, 30);
+
+    let tab_style = find_style_of(&buf, "[Tab]").expect("[Tab] not found");
+    assert!(tab_style.add_modifier.contains(Modifier::BOLD));
+    assert_eq!(tab_style.fg, Some(Color::Rgb(120, 124, 153)));
+
+    let stab_style = find_style_of(&buf, "[S-Tab]").expect("[S-Tab] not found");
+    assert!(stab_style.add_modifier.contains(Modifier::BOLD));
+    assert_eq!(stab_style.fg, Some(Color::Rgb(120, 124, 153)));
+
+    // Description text "security" should use MUTED (not highlighted)
+    let sec_style = find_style_of(&buf, "security").expect("'security' not found");
+    assert_eq!(
+        sec_style.fg,
+        Some(Color::Rgb(86, 95, 137)),
+        "description text should use MUTED color"
+    );
+}
+
+#[test]
+fn tab_bar_security_board_highlights_keys() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    let buf = render_to_buffer(&mut app, 120, 30);
+
+    let tab_style = find_style_of(&buf, "[Tab]").expect("[Tab] not found");
+    assert!(tab_style.add_modifier.contains(Modifier::BOLD));
+    assert_eq!(tab_style.fg, Some(Color::Rgb(120, 124, 153)));
+
+    let esc_style = find_style_of(&buf, "[Esc]").expect("[Esc] not found");
+    assert!(esc_style.add_modifier.contains(Modifier::BOLD));
+    assert_eq!(esc_style.fg, Some(Color::Rgb(120, 124, 153)));
+
+    // Description text "back" should use MUTED
+    let back_style = find_style_of(&buf, "back").expect("'back' not found");
+    assert_eq!(
+        back_style.fg,
+        Some(Color::Rgb(86, 95, 137)),
+        "description text should use MUTED color"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Review board Author and Dependabot mode rendering tests
 // ---------------------------------------------------------------------------
 

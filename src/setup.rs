@@ -228,6 +228,34 @@ fn plugin_needs_update_in(dir: &std::path::Path) -> Result<bool> {
 }
 
 // ---------------------------------------------------------------------------
+// Removal functions
+// ---------------------------------------------------------------------------
+
+pub fn remove_mcp_config(mcp_path: &std::path::Path) -> Result<bool> {
+    let existing = match read_json_file(mcp_path)? {
+        Some(v) => v,
+        None => return Ok(false),
+    };
+
+    let mut root = match existing {
+        Value::Object(map) => map,
+        _ => return Ok(false),
+    };
+
+    let had_dispatch = if let Some(Value::Object(servers)) = root.get_mut("mcpServers") {
+        servers.remove("dispatch").is_some()
+    } else {
+        false
+    };
+
+    if had_dispatch {
+        write_json_file(mcp_path, &Value::Object(root))?;
+    }
+
+    Ok(had_dispatch)
+}
+
+// ---------------------------------------------------------------------------
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
 
@@ -590,6 +618,52 @@ mod tests {
         write_json_file(&path, &value).unwrap();
         let read_back = read_json_file(&path).unwrap().unwrap();
         assert_eq!(read_back, value);
+    }
+
+    // -- MCP config removal --
+
+    #[test]
+    fn remove_mcp_config_removes_dispatch_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".mcp.json");
+        let existing = json!({
+            "mcpServers": {
+                "dispatch": {"type": "http", "url": "http://localhost:3142/mcp"},
+                "github": {"type": "http", "url": "http://localhost:9999/mcp"}
+            }
+        });
+        write_json_file(&path, &existing).unwrap();
+
+        let removed = remove_mcp_config(&path).unwrap();
+        assert!(removed);
+
+        let result = read_json_file(&path).unwrap().unwrap();
+        assert!(result["mcpServers"].get("dispatch").is_none());
+        assert!(result["mcpServers"]["github"].is_object());
+    }
+
+    #[test]
+    fn remove_mcp_config_noop_when_no_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".mcp.json");
+        let existing = json!({
+            "mcpServers": {
+                "github": {"type": "http", "url": "http://localhost:9999/mcp"}
+            }
+        });
+        write_json_file(&path, &existing).unwrap();
+
+        let removed = remove_mcp_config(&path).unwrap();
+        assert!(!removed);
+    }
+
+    #[test]
+    fn remove_mcp_config_noop_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".mcp.json");
+
+        let removed = remove_mcp_config(&path).unwrap();
+        assert!(!removed);
     }
 
     // -- plugin_needs_update --

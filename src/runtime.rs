@@ -1443,6 +1443,7 @@ impl TuiRuntime {
         tokio::task::spawn_blocking(move || {
             match crate::dispatch::dispatch_review_agent(
                 &req.repo,
+                &req.github_repo,
                 req.number,
                 &req.title,
                 &req.body,
@@ -1506,6 +1507,14 @@ async fn run_loop(
                     mcp::McpEvent::Refresh => rt.exec_refresh_from_db(app),
                     mcp::McpEvent::MessageSent { to_task_id } => {
                         app.update(Message::MessageReceived(to_task_id));
+                        rt.exec_refresh_from_db(app)
+                    }
+                    mcp::McpEvent::ReviewReady { repo, number } => {
+                        app.update(Message::ReviewStatusUpdated {
+                            repo,
+                            number,
+                            status: crate::models::ReviewAgentStatus::FindingsReady,
+                        });
                         rt.exec_refresh_from_db(app)
                     }
                 }

@@ -754,6 +754,60 @@ pub(super) fn handle_send_message(
     )
 }
 
+// ---------------------------------------------------------------------------
+// update_review_status
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(super) struct UpdateReviewStatusArgs {
+    repo: String,
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    number: i64,
+    status: String,
+}
+
+pub(super) fn handle_update_review_status(
+    state: &McpState,
+    id: Option<Value>,
+    args: Value,
+) -> JsonRpcResponse {
+    let parsed: UpdateReviewStatusArgs = match parse_args(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+
+    let status_enum = match crate::models::ReviewAgentStatus::from_db_str(&parsed.status) {
+        Some(s) => s,
+        None => {
+            return JsonRpcResponse::err(
+                id,
+                -32602,
+                format!("Invalid status: {}", parsed.status),
+            )
+        }
+    };
+
+    match state
+        .db
+        .update_agent_status(&parsed.repo, parsed.number, Some(&parsed.status))
+    {
+        Ok(_table) => {
+            state.notify();
+            if status_enum == crate::models::ReviewAgentStatus::FindingsReady {
+                state.notify_review_ready(parsed.repo.clone(), parsed.number);
+            }
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format!(
+                    "Updated agent status for {}#{} to {}",
+                    parsed.repo, parsed.number, parsed.status
+                )}]}),
+            )
+        }
+        Err(e) => JsonRpcResponse::err(id, -32602, format!("Failed: {e}")),
+    }
+}
+
 pub(super) fn handle_report_usage(
     state: &McpState,
     id: Option<Value>,

@@ -997,6 +997,7 @@ fn provision_and_dispatch(
 /// Dispatch a Claude agent to review a PR in an isolated worktree.
 pub fn dispatch_review_agent(
     repo_path: &str,
+    github_repo: &str,
     number: i64,
     title: &str,
     body: &str,
@@ -1006,30 +1007,21 @@ pub fn dispatch_review_agent(
 ) -> Result<DispatchResult> {
     let prompt = if is_dependabot {
         format!(
-            "You are reviewing a dependency update PR #{number}: {title}\n\n\
-             ## PR Description\n\n{body}\n\n\
-             ## Instructions\n\n\
-             This is an automated dependency update from dependabot or renovate.\n\
-             Focus your review on:\n\n\
-             1. Read the diff: `gh pr diff {number}`\n\
-             2. **Breaking changes**: Check if this is a major version bump that could break the build\n\
-             3. **Changelog**: Look for notable changes, deprecations, or security fixes in the update\n\
-             4. **Version bump type**: Identify if this is a patch, minor, or major update\n\
-             5. **Dependency health**: Check if the dependency is actively maintained\n\n\
-             If the update is a routine patch/minor bump with passing CI, approve with `gh pr review {number} --approve`.\n\
-             If it's a major bump or you find concerns, use `--request-changes` with specific feedback.\n\n\
-             Be concise. Dependency updates rarely need extensive review unless they're major version bumps."
+            "You are reviewing a dependency update PR #{number} in {github_repo}: {title}\n\n\
+             {body}\n\n\
+             This is an automated dependency update. Run `/review-pr {number}` to review.\n\n\
+             After the review completes, call the `update_review_status` MCP tool:\n\
+             update_review_status(repo=\"{github_repo}\", number={number}, status=\"findings_ready\")\n\n\
+             Wait for the user."
         )
     } else {
         format!(
-            "You are reviewing PR #{number}: {title}\n\n\
-             ## PR Description\n\n{body}\n\n\
-             ## Instructions\n\n\
-             1. Read the diff: `gh pr diff {number}`\n\
-             2. Review the changes for correctness, style, bugs, and security issues\n\
-             3. Submit your review using `gh pr review {number}` with appropriate comments\n\
-             4. If changes are needed, use `--request-changes`. If it looks good, use `--approve`.\n\n\
-             Focus on substantive issues. Don't nitpick style unless it affects readability."
+            "You are reviewing PR #{number} in {github_repo}: {title}\n\n\
+             {body}\n\n\
+             Run `/review-pr {number}` to perform a comprehensive code review.\n\n\
+             After the review completes, call the `update_review_status` MCP tool:\n\
+             update_review_status(repo=\"{github_repo}\", number={number}, status=\"findings_ready\")\n\n\
+             Wait for the user."
         )
     };
 
@@ -1074,7 +1066,10 @@ pub fn build_fix_prompt(
                  2. Run the project's tests to verify nothing breaks\n\
                  3. Commit with a descriptive message referencing the alert\n\
                  4. Create a PR with `gh pr create`\n\n\
-                 Focus on the minimal change needed to resolve the vulnerability."
+                 Focus on the minimal change needed to resolve the vulnerability.\n\n\
+                 When done, call the `update_review_status` MCP tool:\n\
+                 update_review_status(repo=\"{repo}\", number={number}, status=\"findings_ready\")\n\n\
+                 Wait for the user."
             )
         }
         crate::models::AlertKind::CodeScanning => {
@@ -1088,7 +1083,10 @@ pub fn build_fix_prompt(
                  2. Understand the vulnerability and apply the appropriate fix\n\
                  3. Run tests to verify the fix doesn't break anything\n\
                  4. Commit and create a PR with `gh pr create`\n\n\
-                 Focus on the minimal change needed to resolve the vulnerability."
+                 Focus on the minimal change needed to resolve the vulnerability.\n\n\
+                 When done, call the `update_review_status` MCP tool:\n\
+                 update_review_status(repo=\"{repo}\", number={number}, status=\"findings_ready\")\n\n\
+                 Wait for the user."
             )
         }
     }
@@ -2291,6 +2289,7 @@ mod tests {
 
         let result = dispatch_review_agent(
             &repo_path,
+            "acme/app",
             99,
             "Fix it",
             "body",
@@ -2329,6 +2328,7 @@ mod tests {
 
         let result = dispatch_review_agent(
             &repo_path,
+            "acme/app",
             99,
             "Fix it",
             "desc",
@@ -2373,6 +2373,7 @@ mod tests {
 
         let result = dispatch_review_agent(
             &repo_path,
+            "acme/app",
             99,
             "Fix it",
             "PR body here",
@@ -2409,12 +2410,12 @@ mod tests {
             "prompt should include PR body"
         );
         assert!(
-            prompt.contains("gh pr diff 99"),
-            "prompt should instruct reading the diff"
+            prompt.contains("/review-pr 99"),
+            "prompt should invoke /review-pr skill"
         );
         assert!(
-            prompt.contains("gh pr review 99"),
-            "prompt should instruct submitting review"
+            prompt.contains("update_review_status"),
+            "prompt should reference MCP tool"
         );
 
         let repo_short = dir.path().file_name().unwrap().to_str().unwrap();
@@ -2440,6 +2441,7 @@ mod tests {
         // The function will error at fs::write since mock doesn't create the dir
         let result = dispatch_review_agent(
             &repo_path,
+            "acme/app",
             99,
             "Fix it",
             "body",
@@ -2475,6 +2477,7 @@ mod tests {
 
         let result = dispatch_review_agent(
             &repo_path,
+            "acme/app",
             99,
             "Fix it",
             "body",
@@ -2505,6 +2508,7 @@ mod tests {
 
         dispatch_review_agent(
             &repo_path,
+            "acme/app",
             99,
             "Fix it",
             "body",
@@ -2598,7 +2602,7 @@ mod tests {
             MockProcessRunner::ok(),                  // tmux send-keys Enter
         ]);
 
-        dispatch_review_agent(&repo_path, 99, "Fix it", "body", "feature-branch", false, &mock)
+        dispatch_review_agent(&repo_path, "acme/app", 99, "Fix it", "body", "feature-branch", false, &mock)
             .unwrap();
 
         let calls = mock.recorded_calls();
@@ -2614,6 +2618,65 @@ mod tests {
     }
 
     // --- build_fix_prompt tests ---
+
+    #[test]
+    fn review_prompt_invokes_review_skill() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("review-42");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b""), // has_window: no match
+            MockProcessRunner::ok(),                // git worktree prune
+            MockProcessRunner::ok(),                // git fetch
+            MockProcessRunner::ok(),                // tmux new-window
+            MockProcessRunner::ok(),                // tmux send-keys -l
+            MockProcessRunner::ok(),                // tmux send-keys Enter
+        ]);
+        dispatch_review_agent(&repo_path, "acme/app", 42, "Fix it", "body", "feature-branch", false, &mock).unwrap();
+
+        let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
+        assert!(prompt.contains("/review-pr"), "prompt should invoke /review-pr skill");
+        assert!(prompt.contains("update_review_status"), "prompt should reference MCP tool");
+        assert!(!prompt.contains("gh pr review"), "prompt should NOT tell agent to submit review directly");
+    }
+
+    #[test]
+    fn review_prompt_dependabot_mentions_dependency_update() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("review-42");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b""), // has_window
+            MockProcessRunner::ok(),                // git worktree prune
+            MockProcessRunner::ok(),                // git fetch
+            MockProcessRunner::ok(),                // tmux new-window
+            MockProcessRunner::ok(),                // tmux send-keys -l
+            MockProcessRunner::ok(),                // tmux send-keys Enter
+        ]);
+        dispatch_review_agent(&repo_path, "acme/app", 42, "Bump lodash", "body", "dependabot/npm", true, &mock).unwrap();
+
+        let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
+        assert!(prompt.contains("dependency update"), "dependabot prompt should mention dependency update");
+        assert!(prompt.contains("update_review_status"), "prompt should reference MCP tool");
+    }
+
+    #[test]
+    fn fix_prompt_includes_mcp_lifecycle_call() {
+        let prompt = build_fix_prompt(
+            "acme/app",
+            42,
+            crate::models::AlertKind::Dependabot,
+            "CVE in lodash",
+            "Prototype pollution",
+            Some("lodash"),
+            Some("4.17.21"),
+        );
+        assert!(prompt.contains("update_review_status"), "fix prompt should include MCP lifecycle call");
+    }
 
     #[test]
     fn build_fix_prompt_dependabot() {

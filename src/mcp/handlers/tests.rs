@@ -1157,6 +1157,12 @@ fn tool_schemas_match_arg_structs() {
             BTreeSet::from(["epic_id"]),
             json!({"epic_id": 1}),
         ),
+        (
+            "update_review_status",
+            BTreeSet::from(["repo", "number", "status"]),
+            BTreeSet::from(["repo", "number", "status"]),
+            json!({"repo": "acme/app", "number": 42, "status": "findings_ready"}),
+        ),
     ];
 
     // Verify we cover exactly the tools that exist
@@ -1215,6 +1221,10 @@ fn tool_schemas_match_arg_structs() {
             }
             "dispatch_next" => {
                 serde_json::from_value::<DispatchNextArgs>(payload.clone()).unwrap();
+            }
+            "update_review_status" => {
+                serde_json::from_value::<super::tasks::UpdateReviewStatusArgs>(payload.clone())
+                    .unwrap();
             }
             other => panic!("No deserialization check for tool: {other}"),
         }
@@ -3756,4 +3766,89 @@ async fn dispatch_next_respects_tag_routing() {
 
     let task = db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
+}
+
+// ---------------------------------------------------------------------------
+// update_review_status tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn update_review_status_updates_pr() {
+    use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let state = test_state();
+    let pr = ReviewPr {
+        number: 42,
+        title: "Test PR".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 10,
+        deletions: 5,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    state.db.save_review_prs(&[pr]).unwrap();
+    state
+        .db
+        .set_pr_agent("review_prs", "acme/app", 42, "dispatch:review-42", "/tmp/wt")
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_review_status",
+            "arguments": { "repo": "acme/app", "number": 42, "status": "findings_ready" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let loaded = state.db.load_review_prs().unwrap();
+    assert_eq!(
+        loaded[0].agent_status,
+        Some(ReviewAgentStatus::FindingsReady)
+    );
+}
+
+#[tokio::test]
+async fn update_review_status_no_match_errors() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_review_status",
+            "arguments": { "repo": "acme/unknown", "number": 999, "status": "idle" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_some());
+}
+
+#[tokio::test]
+async fn update_review_status_invalid_status_errors() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_review_status",
+            "arguments": { "repo": "acme/app", "number": 1, "status": "bogus" }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_some());
 }

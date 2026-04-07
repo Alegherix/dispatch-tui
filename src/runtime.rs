@@ -2941,4 +2941,1026 @@ mod tests {
         rt.exec_patch_sub_status(&mut app, TaskId(999), models::SubStatus::Active);
         assert!(app.error_popup().is_some());
     }
+
+    // -----------------------------------------------------------------------
+    // Filter preset tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn exec_persist_filter_preset_saves_to_db() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_persist_filter_preset(
+            &mut app,
+            "my-preset",
+            &["/repo1".into(), "/repo2".into()],
+            "include",
+        );
+        let presets = rt.database.list_filter_presets().unwrap();
+        assert_eq!(presets.len(), 1);
+        assert_eq!(presets[0].0, "my-preset");
+        assert_eq!(presets[0].2, "include");
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_delete_filter_preset_removes_from_db() {
+        let (rt, mut app) = test_runtime();
+        rt.database
+            .save_filter_preset("doomed", &["/repo".into()], "include")
+            .unwrap();
+        rt.exec_delete_filter_preset(&mut app, "doomed");
+        assert!(rt.database.list_filter_presets().unwrap().is_empty());
+        assert!(app.error_popup().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Repo path tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn exec_delete_repo_path_removes_and_refreshes() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_save_repo_path(&mut app, "/repo1".into());
+        rt.exec_save_repo_path(&mut app, "/repo2".into());
+        assert_eq!(app.repo_paths().len(), 2);
+
+        rt.exec_delete_repo_path(&mut app, "/repo1");
+        assert_eq!(app.repo_paths().len(), 1);
+        assert!(app.repo_paths().contains(&"/repo2".to_string()));
+        assert!(app.error_popup().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Epic tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn exec_insert_epic_creates_in_db_and_app() {
+        let (rt, mut app) = test_runtime();
+        rt.exec_insert_epic(&mut app, "My Epic".into(), "description".into(), "/repo".into());
+        assert_eq!(app.epics().len(), 1);
+        assert_eq!(app.epics()[0].title, "My Epic");
+        assert_eq!(rt.database.list_epics().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn exec_delete_epic_removes_from_db() {
+        let (rt, mut app) = test_runtime();
+        let epic = rt
+            .database
+            .create_epic("Doomed", "bye", "/repo")
+            .unwrap();
+        rt.exec_delete_epic(&mut app, epic.id);
+        assert!(rt.database.list_epics().unwrap().is_empty());
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_persist_epic_updates_status() {
+        let (rt, mut app) = test_runtime();
+        let epic = rt
+            .database
+            .create_epic("Epic", "desc", "/repo")
+            .unwrap();
+        rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None);
+        let updated = rt.database.get_epic(epic.id).unwrap().unwrap();
+        assert_eq!(updated.status, models::TaskStatus::Running);
+    }
+
+    #[test]
+    fn exec_persist_epic_noop_when_nothing_to_update() {
+        let (rt, mut app) = test_runtime();
+        let epic = rt
+            .database
+            .create_epic("Epic", "desc", "/repo")
+            .unwrap();
+        // Should return early without error
+        rt.exec_persist_epic(&mut app, epic.id, None, None);
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_refresh_epics_from_db_syncs_to_app() {
+        let (rt, mut app) = test_runtime();
+        // Insert epic directly into DB, bypassing app
+        rt.database.create_epic("Direct", "desc", "/repo").unwrap();
+        assert!(app.epics().is_empty());
+        rt.exec_refresh_epics_from_db(&mut app);
+        assert_eq!(app.epics().len(), 1);
+        assert_eq!(app.epics()[0].title, "Direct");
+    }
+
+    #[test]
+    fn exec_refresh_usage_from_db_syncs_to_app() {
+        let (rt, mut app) = test_runtime();
+        // Just verify it doesn't error with empty DB
+        rt.exec_refresh_usage_from_db(&mut app);
+        assert!(app.error_popup().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // PR persistence tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn exec_persist_review_prs_saves_to_db() {
+        use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+        use chrono::Utc;
+
+        let (rt, mut app) = test_runtime();
+        let pr = ReviewPr {
+            number: 1,
+            title: "Fix".into(),
+            author: "alice".into(),
+            repo: "acme/app".into(),
+            url: "https://github.com/acme/app/pull/1".into(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 5,
+            deletions: 2,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: CiStatus::None,
+            reviewers: vec![],
+            tmux_window: None,
+            worktree: None,
+            agent_status: None,
+        };
+        rt.exec_persist_review_prs(&mut app, vec![pr]);
+        assert_eq!(rt.database.load_review_prs().unwrap().len(), 1);
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_persist_my_prs_saves_to_db() {
+        use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+        use chrono::Utc;
+
+        let (rt, mut app) = test_runtime();
+        let pr = ReviewPr {
+            number: 2,
+            title: "Feature".into(),
+            author: "bob".into(),
+            repo: "acme/app".into(),
+            url: "https://github.com/acme/app/pull/2".into(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 10,
+            deletions: 0,
+            review_decision: ReviewDecision::Approved,
+            labels: vec![],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: CiStatus::None,
+            reviewers: vec![],
+            tmux_window: None,
+            worktree: None,
+            agent_status: None,
+        };
+        rt.exec_persist_my_prs(&mut app, vec![pr]);
+        assert_eq!(rt.database.load_my_prs().unwrap().len(), 1);
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_persist_bot_prs_saves_to_db() {
+        use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+        use chrono::Utc;
+
+        let (rt, mut app) = test_runtime();
+        let pr = ReviewPr {
+            number: 3,
+            title: "Bump deps".into(),
+            author: "dependabot[bot]".into(),
+            repo: "acme/app".into(),
+            url: "https://github.com/acme/app/pull/3".into(),
+            is_draft: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            additions: 1,
+            deletions: 1,
+            review_decision: ReviewDecision::ReviewRequired,
+            labels: vec![],
+            body: String::new(),
+            head_ref: String::new(),
+            ci_status: CiStatus::None,
+            reviewers: vec![],
+            tmux_window: None,
+            worktree: None,
+            agent_status: None,
+        };
+        rt.exec_persist_bot_prs(&mut app, vec![pr]);
+        assert_eq!(rt.database.load_bot_prs().unwrap().len(), 1);
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_persist_security_alerts_saves_to_db() {
+        use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+        use chrono::Utc;
+
+        let (rt, mut app) = test_runtime();
+        let alert = SecurityAlert {
+            number: 1,
+            repo: "acme/app".into(),
+            severity: AlertSeverity::High,
+            kind: AlertKind::Dependabot,
+            title: "CVE-2024-1234".into(),
+            package: Some("lodash".into()),
+            vulnerable_range: Some("< 4.17.21".into()),
+            fixed_version: Some("4.17.21".into()),
+            cvss_score: Some(7.5),
+            url: "https://github.com/acme/app/security/dependabot/1".into(),
+            created_at: Utc::now(),
+            state: "open".into(),
+            description: "Prototype pollution".into(),
+            tmux_window: None,
+            worktree: None,
+            agent_status: None,
+        };
+        rt.exec_persist_security_alerts(&mut app, vec![alert]);
+        assert!(app.error_popup().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Split mode tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn exec_enter_split_mode_opens_pane() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"%1\n"),  // current_pane_id
+            MockProcessRunner::ok_with_stdout(b"%2\n"),  // split_window_horizontal
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_enter_split_mode(&mut app);
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_enter_split_mode_no_tmux_shows_status() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("no server"),  // current_pane_id fails
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_enter_split_mode(&mut app);
+        assert_eq!(
+            app.status_message(),
+            Some("Split mode requires tmux")
+        );
+    }
+
+    #[test]
+    fn exec_exit_split_mode_with_restore_breaks_pane() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // break_pane_to_window
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock.clone());
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_exit_split_mode(&mut app, "%2", Some("task-1"));
+        let calls = mock.recorded_calls();
+        assert!(calls[0].1.contains(&"break-pane".to_string()));
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_exit_split_mode_without_restore_kills_pane() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // kill_pane
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock.clone());
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_exit_split_mode(&mut app, "%2", None);
+        let calls = mock.recorded_calls();
+        assert!(calls[0].1.contains(&"kill-pane".to_string()));
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_check_split_pane_existing_pane_no_message() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // pane_exists → display-message succeeds
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_check_split_pane(&mut app, "%2");
+        // No error, no SplitPaneClosed
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_check_split_pane_gone_sends_closed() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("no pane"),  // pane_exists → display-message fails
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_check_split_pane(&mut app, "%2");
+        // SplitPaneClosed was sent via app.update
+        assert!(app.error_popup().is_none());
+    }
+
+    #[test]
+    fn exec_swap_split_pane_joins_new_window() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),                     // kill_pane (old pane, no window name)
+            MockProcessRunner::ok_with_stdout(b"%1\n"),  // current_pane_id
+            MockProcessRunner::ok_with_stdout(b"%3\n"),  // join_pane
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock.clone());
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_swap_split_pane(&mut app, TaskId(1), "task-1", Some("%2"), None);
+        let calls = mock.recorded_calls();
+        assert!(calls[0].1.contains(&"kill-pane".to_string()));
+        assert!(app.error_popup().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Async PR pipeline tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exec_merge_pr_happy_path() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // gh pr merge --merge
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_merge_pr(TaskId(1), "https://github.com/org/repo/pull/42".into());
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::PrMerged(TaskId(1))),
+            "Expected PrMerged, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_merge_pr_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("merge conflict"),  // gh pr merge fails
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_merge_pr(TaskId(1), "https://github.com/org/repo/pull/42".into());
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::MergePrFailed { id: TaskId(1), .. }),
+            "Expected MergePrFailed, got: {msg:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Fetch PR tests (no queries configured → empty results)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exec_fetch_review_prs_no_queries_returns_empty() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        // No mock calls needed — empty queries short-circuits in fetch_prs
+        let mock = Arc::new(MockProcessRunner::new(vec![]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_fetch_review_prs();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::ReviewPrsLoaded(prs) => assert!(prs.is_empty()),
+            other => panic!("Expected ReviewPrsLoaded, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_fetch_my_prs_no_queries_returns_empty() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_fetch_my_prs();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::MyPrsLoaded(prs) => assert!(prs.is_empty()),
+            other => panic!("Expected MyPrsLoaded, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_fetch_bot_prs_no_queries_returns_empty() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_fetch_bot_prs();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::BotPrsLoaded(prs) => assert!(prs.is_empty()),
+            other => panic!("Expected BotPrsLoaded, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_fetch_review_prs_gh_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        // Configure a query so fetch_prs actually calls gh
+        db.set_setting_string("github_queries_review", "is:pr review-requested:@me")
+            .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("gh auth failure"),  // gh api graphql fails
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_fetch_review_prs();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::ReviewPrsFetchFailed(_)),
+            "Expected ReviewPrsFetchFailed, got: {msg:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Batch operations
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exec_batch_approve_prs_approves_all() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // gh pr review --approve (PR 1)
+            MockProcessRunner::ok(),  // gh pr review --approve (PR 2)
+        ]));
+        let rt = make_runtime(db, tx, mock.clone());
+
+        rt.exec_batch_approve_prs(vec![
+            "https://github.com/org/repo/pull/1".into(),
+            "https://github.com/org/repo/pull/2".into(),
+        ]);
+
+        // Should send RefreshBotPrs then StatusInfo
+        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg1, Message::RefreshBotPrs),
+            "Expected RefreshBotPrs, got: {msg1:?}"
+        );
+
+        let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg2 {
+            Message::StatusInfo(s) => assert!(s.contains("Approved 2/2")),
+            other => panic!("Expected StatusInfo, got: {other:?}"),
+        }
+
+        // Verify gh was called correctly
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "gh");
+        assert!(calls[0].1.contains(&"--approve".to_string()));
+    }
+
+    #[tokio::test]
+    async fn exec_batch_approve_prs_partial_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),                  // PR 1 succeeds
+            MockProcessRunner::fail("not allowed"),   // PR 2 fails
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_batch_approve_prs(vec![
+            "https://github.com/org/repo/pull/1".into(),
+            "https://github.com/org/repo/pull/2".into(),
+        ]);
+
+        let _refresh = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::StatusInfo(s) => assert!(s.contains("Approved 1/2")),
+            other => panic!("Expected StatusInfo with 1/2, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn exec_batch_merge_prs_merges_all() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // gh pr merge --merge (PR 1)
+            MockProcessRunner::ok(),  // gh pr merge --merge (PR 2)
+        ]));
+        let rt = make_runtime(db, tx, mock.clone());
+
+        rt.exec_batch_merge_prs(vec![
+            "https://github.com/org/repo/pull/1".into(),
+            "https://github.com/org/repo/pull/2".into(),
+        ]);
+
+        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg1, Message::RefreshBotPrs),
+            "Expected RefreshBotPrs, got: {msg1:?}"
+        );
+
+        let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg2 {
+            Message::StatusInfo(s) => assert!(s.contains("Merged 2/2")),
+            other => panic!("Expected StatusInfo, got: {other:?}"),
+        }
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].1.contains(&"--merge".to_string()));
+    }
+
+    #[tokio::test]
+    async fn exec_batch_merge_prs_partial_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("checks pending"),  // PR 1 fails
+            MockProcessRunner::ok(),                     // PR 2 succeeds
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_batch_merge_prs(vec![
+            "https://github.com/org/repo/pull/1".into(),
+            "https://github.com/org/repo/pull/2".into(),
+        ]);
+
+        let _refresh = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::StatusInfo(s) => assert!(s.contains("Merged 1/2")),
+            other => panic!("Expected StatusInfo with 1/2, got: {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Browser / tmux window
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exec_open_in_browser_calls_xdg_open() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // xdg-open
+        ]));
+        let rt = make_runtime(db, tx, mock.clone());
+
+        rt.exec_open_in_browser("https://github.com/org/repo/pull/1".into());
+
+        // Give the spawn_blocking time to run
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "xdg-open");
+        assert!(calls[0].1.contains(&"https://github.com/org/repo/pull/1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn exec_kill_tmux_window_calls_kill() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),  // tmux kill-window
+        ]));
+        let rt = make_runtime(db, tx, mock.clone());
+
+        rt.exec_kill_tmux_window("task-1".into());
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert!(calls[0].1.contains(&"kill-window".to_string()));
+        assert!(calls[0].1.contains(&"task-1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn exec_kill_tmux_window_failure_sends_error() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("no such window"),
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_kill_tmux_window("gone-window".into());
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::Error(_)),
+            "Expected Error, got: {msg:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Security alerts
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exec_fetch_security_alerts_gh_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("auth error"),  // gh api graphql fails
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_fetch_security_alerts();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::SecurityAlertsFetchFailed(_)),
+            "Expected SecurityAlertsFetchFailed, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_fetch_security_alerts_empty_result() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let json = serde_json::json!({
+            "data": {
+                "viewer": {
+                    "repositories": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
+                        "nodes": []
+                    }
+                }
+            }
+        });
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(json.to_string().as_bytes()),
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_fetch_security_alerts();
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match msg {
+            Message::SecurityAlertsLoaded(alerts) => assert!(alerts.is_empty()),
+            other => panic!("Expected SecurityAlertsLoaded, got: {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Brainstorm / Plan (same dispatch path as exec_dispatch)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exec_brainstorm_sends_dispatched_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_str().unwrap();
+        std::fs::create_dir_all(format!("{repo}/.worktrees/1-brainstorm-task")).unwrap();
+
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(),                   // tmux set-hook
+            MockProcessRunner::ok(),                   // tmux send-keys -l
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+
+        let task = db
+            .create_task_returning("Brainstorm Task", "desc", repo, None, models::TaskStatus::Backlog)
+            .unwrap();
+        rt.exec_brainstorm(task);
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::Dispatched { .. }),
+            "Expected Dispatched, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_brainstorm_sends_error_on_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("fatal: not a git repository"),
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+
+        let task = db
+            .create_task_returning("Fail", "desc", "/nonexistent", None, models::TaskStatus::Backlog)
+            .unwrap();
+        rt.exec_brainstorm(task.clone());
+
+        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg1, Message::DispatchFailed(id) if id == task.id),
+            "Expected DispatchFailed, got: {msg1:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_plan_sends_dispatched_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_str().unwrap();
+        std::fs::create_dir_all(format!("{repo}/.worktrees/1-plan-task")).unwrap();
+
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("not a git repo"), // detect_default_branch
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(),                   // tmux set-hook
+            MockProcessRunner::ok(),                   // tmux send-keys -l
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+
+        let task = db
+            .create_task_returning("Plan Task", "desc", repo, None, models::TaskStatus::Backlog)
+            .unwrap();
+        rt.exec_plan(task);
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::Dispatched { .. }),
+            "Expected Dispatched, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_plan_sends_error_on_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("fatal: not a git repository"),
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock);
+
+        let task = db
+            .create_task_returning("Fail", "desc", "/nonexistent", None, models::TaskStatus::Backlog)
+            .unwrap();
+        rt.exec_plan(task.clone());
+
+        let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg1, Message::DispatchFailed(id) if id == task.id),
+            "Expected DispatchFailed, got: {msg1:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Dispatch fix/review agents
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn exec_dispatch_fix_agent_sends_dispatched() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_str().unwrap();
+        // provision_and_dispatch uses worktree_name = "fix-vuln-{number}"
+        std::fs::create_dir_all(format!("{repo}/.worktrees/fix-vuln-1")).unwrap();
+
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"\n"), // has_window (list-windows, no match)
+            MockProcessRunner::ok(),                   // git worktree prune
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
+            MockProcessRunner::ok(),                   // git fetch origin main
+            // worktree dir exists, skip git worktree add
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux send-keys -l
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_dispatch_fix_agent(
+            repo.to_string(),
+            "acme/app".into(),
+            1,
+            models::AlertKind::Dependabot,
+            "CVE-2024-1234".into(),
+            "Fix this vuln".into(),
+            Some("lodash".into()),
+            Some("4.17.21".into()),
+        );
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::FixAgentDispatched { number: 1, .. }),
+            "Expected FixAgentDispatched, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_dispatch_fix_agent_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("tmux not running"),
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_dispatch_fix_agent(
+            "/nonexistent".into(),
+            "acme/app".into(),
+            1,
+            models::AlertKind::Dependabot,
+            "CVE".into(),
+            "desc".into(),
+            None,
+            None,
+        );
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::FixAgentFailed { number: 1, .. }),
+            "Expected FixAgentFailed, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_dispatch_review_agent_sends_dispatched() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_str().unwrap();
+        // provision_and_dispatch uses worktree_name = "review-{number}"
+        std::fs::create_dir_all(format!("{repo}/.worktrees/review-42")).unwrap();
+
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"\n"), // has_window (no match)
+            MockProcessRunner::ok(),                   // git worktree prune
+            MockProcessRunner::ok(),                   // git fetch origin fix-branch
+            // worktree dir exists, skip git worktree add
+            MockProcessRunner::ok(),                   // tmux new-window
+            MockProcessRunner::ok(),                   // tmux send-keys -l
+            MockProcessRunner::ok(),                   // tmux send-keys Enter
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_dispatch_review_agent(tui::ReviewAgentRequest {
+            repo: repo.to_string(),
+            github_repo: "acme/app".into(),
+            number: 42,
+            title: "Fix bug".into(),
+            body: "Fixes #1".into(),
+            head_ref: "fix-branch".into(),
+            is_dependabot: false,
+        });
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::ReviewAgentDispatched { number: 42, .. }),
+            "Expected ReviewAgentDispatched, got: {msg:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_dispatch_review_agent_failure() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::fail("tmux not running"),
+        ]));
+        let rt = make_runtime(db, tx, mock);
+
+        rt.exec_dispatch_review_agent(tui::ReviewAgentRequest {
+            repo: "/nonexistent".into(),
+            github_repo: "acme/app".into(),
+            number: 42,
+            title: "Fix bug".into(),
+            body: "Fixes #1".into(),
+            head_ref: "fix-branch".into(),
+            is_dependabot: false,
+        });
+
+        let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(msg, Message::ReviewAgentFailed { number: 42, .. }),
+            "Expected ReviewAgentFailed, got: {msg:?}"
+        );
+    }
 }

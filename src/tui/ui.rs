@@ -2471,7 +2471,12 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 // Review board rendering
 // ---------------------------------------------------------------------------
 
-fn review_action_hints(has_pr: bool, is_author_mode: bool, has_agent: bool) -> Vec<Span<'static>> {
+fn review_action_hints(
+    has_pr: bool,
+    is_author_mode: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+) -> Vec<Span<'static>> {
+    use crate::models::ReviewAgentStatus;
     let key_color = Color::Cyan;
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -2481,10 +2486,22 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool, has_agent: bool) -> V
     if has_pr {
         push_hint("Enter", "open PR");
     }
-    if has_agent {
-        push_hint("g", "go to");
+    match agent_status {
+        Some(ReviewAgentStatus::Idle) => {
+            push_hint("g", "go to");
+            push_hint("r", "re-review");
+            push_hint("T", "detach");
+        }
+        Some(_) => {
+            push_hint("g", "go to");
+            push_hint("T", "detach");
+        }
+        None => {
+            if has_pr {
+                push_hint("d", "dispatch");
+            }
+        }
     }
-    push_hint("r", "refresh");
     push_hint("e", "edit queries");
     if is_author_mode {
         push_hint("D", "dispatch filter");
@@ -2495,7 +2512,11 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool, has_agent: bool) -> V
     spans
 }
 
-fn bot_action_hints(has_pr: bool, has_agent: bool) -> Vec<Span<'static>> {
+fn bot_action_hints(
+    has_pr: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+) -> Vec<Span<'static>> {
+    use crate::models::ReviewAgentStatus;
     let key_color = Color::Cyan;
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -2505,13 +2526,22 @@ fn bot_action_hints(has_pr: bool, has_agent: bool) -> Vec<Span<'static>> {
     push_hint("Space", "select");
     push_hint("a", "select all");
     if has_pr {
-        if has_agent {
-            push_hint("g", "go to");
+        match agent_status {
+            Some(ReviewAgentStatus::Idle) => {
+                push_hint("g", "go to");
+                push_hint("r", "re-review");
+                push_hint("T", "detach");
+            }
+            Some(_) => {
+                push_hint("g", "go to");
+                push_hint("T", "detach");
+            }
+            None => {
+                push_hint("d", "dispatch");
+            }
         }
-        push_hint("d", "review");
         push_hint("p", "open");
     }
-    push_hint("r", "refresh");
     push_hint("Tab", "task board");
     spans
 }
@@ -2633,12 +2663,12 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 ..
             }
         );
-        let has_agent = app.selected_review_pr().and_then(|pr| pr.tmux_window.as_ref()).is_some();
+        let agent_status = app.selected_review_pr().and_then(|pr| pr.agent_status);
         if is_bot_mode {
-            let hints = Paragraph::new(Line::from(bot_action_hints(has_pr, has_agent)));
+            let hints = Paragraph::new(Line::from(bot_action_hints(has_pr, agent_status)));
             frame.render_widget(hints, chunks[4]);
         } else {
-            let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode, has_agent)));
+            let hints = Paragraph::new(Line::from(review_action_hints(has_pr, is_author_mode, agent_status)));
             frame.render_widget(hints, chunks[4]);
         }
     }
@@ -2796,7 +2826,6 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
-    let dispatch_urls = app.dispatch_pr_urls();
     let mode = match app.view_mode() {
         ViewMode::ReviewBoard { mode, .. } => *mode,
         _ => ReviewBoardMode::Reviewer,
@@ -2843,14 +2872,13 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
                 list_selection_idx = Some(list_items.len());
             }
 
-            let is_dispatch = dispatch_urls.contains(pr.url.as_str()) || pr.tmux_window.is_some();
             let is_selected = is_bot_mode && app.selected_bot_prs().contains(&pr.url);
             list_items.push(build_review_pr_item(
                 pr,
                 mode,
                 i,
                 is_focused && item_idx == selected_row,
-                is_dispatch,
+                pr.agent_status,
                 is_selected,
                 col_areas[i].width,
             ));
@@ -2883,7 +2911,7 @@ fn build_review_pr_item(
     mode: ReviewBoardMode,
     col: usize,
     is_cursor: bool,
-    is_dispatch: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
     is_selected: bool,
     col_width: u16,
 ) -> ListItem<'static> {
@@ -2903,12 +2931,17 @@ fn build_review_pr_item(
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
 
-    // Line 1: selection marker + stripe + dispatch badge + #number + title
+    // Line 1: selection marker + stripe + agent status badge + #number + title
     let select_prefix = if is_selected { "* " } else { "" };
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
-    let dispatch_badge = if is_dispatch { "\u{25c6} " } else { "" };
+    let agent_badge = match agent_status {
+        Some(crate::models::ReviewAgentStatus::Reviewing) => "\u{25c6} ",
+        Some(crate::models::ReviewAgentStatus::FindingsReady) => "\u{2714} ",
+        Some(crate::models::ReviewAgentStatus::Idle) => "\u{25cb} ",
+        None => "",
+    };
     let header = format!(
-        "{select_prefix}{dispatch_badge}#{} {}",
+        "{select_prefix}{agent_badge}#{} {}",
         pr.number, pr.title
     );
     // stripe(2) + header + ci_status(" " + symbol)
@@ -3063,8 +3096,8 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_widget(status, chunks[4]);
     } else {
         let has_alert = app.selected_security_alert().is_some();
-        let has_agent = app.selected_security_alert().and_then(|a| a.tmux_window.as_ref()).is_some();
-        let hints = Paragraph::new(Line::from(security_action_hints(app, has_alert, has_agent)));
+        let agent_status = app.selected_security_alert().and_then(|a| a.agent_status);
+        let hints = Paragraph::new(Line::from(security_action_hints(app, has_alert, agent_status)));
         frame.render_widget(hints, chunks[4]);
     }
 
@@ -3074,7 +3107,12 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn security_action_hints(app: &App, has_alert: bool, has_agent: bool) -> Vec<Span<'static>> {
+fn security_action_hints(
+    app: &App,
+    has_alert: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+) -> Vec<Span<'static>> {
+    use crate::models::ReviewAgentStatus;
     let key_color = Color::Cyan;
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -3083,12 +3121,22 @@ fn security_action_hints(app: &App, has_alert: bool, has_agent: bool) -> Vec<Spa
     };
     if has_alert {
         push_hint(&mut spans, "Enter", "detail".into());
-        if has_agent {
-            push_hint(&mut spans, "g", "go to".into());
+        match agent_status {
+            Some(ReviewAgentStatus::Idle) => {
+                push_hint(&mut spans, "g", "go to".into());
+                push_hint(&mut spans, "r", "re-review".into());
+                push_hint(&mut spans, "T", "detach".into());
+            }
+            Some(_) => {
+                push_hint(&mut spans, "g", "go to".into());
+                push_hint(&mut spans, "T", "detach".into());
+            }
+            None => {
+                push_hint(&mut spans, "d", "dispatch".into());
+            }
         }
         push_hint(&mut spans, "p", "open".into());
     }
-    push_hint(&mut spans, "r", "refresh".into());
     push_hint(&mut spans, "f", "filter".into());
     let kind_label = match app.security_kind_filter() {
         None => "all",

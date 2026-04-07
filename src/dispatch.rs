@@ -995,6 +995,7 @@ fn provision_and_dispatch(
 }
 
 /// Dispatch a Claude agent to review a PR in an isolated worktree.
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch_review_agent(
     repo_path: &str,
     github_repo: &str,

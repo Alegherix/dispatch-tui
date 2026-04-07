@@ -187,7 +187,7 @@ config {
 --   1 | Active           | running       | active
 --   2 | Blocked          | running       | needs_input
 --   3 | Stale            | running       | stale, crashed, conflict
---   4 | PR Created       | review        | awaiting_review  (split into "awaiting review" / "awaiting merge" sections by detach state)
+--   4 | PR Created       | review        | awaiting_review, conflict  (split into "awaiting review" / "awaiting merge" sections by detach state)
 --   5 | Revise           | review        | changes_requested
 --   6 | Approved         | review        | approved
 --   7 | Done             | done          | none
@@ -632,9 +632,6 @@ rule ArchiveTask {
     @guidance
         -- Removes the git worktree and tmux window if present.
         -- Best-effort branch deletion.
-        -- If another active task shares the same worktree (e.g. epic
-        -- subtasks), the worktree is detached from this task but not
-        -- removed from disk.
         -- The TUI typically restricts archive to Done tasks,
         -- but the handler accepts any non-archived task.
 }
@@ -735,11 +732,13 @@ rule NotifyNeedsInput {
 
     requires: task.status = running
 
-    ensures: DesktopNotification(
-        task: task,
-        urgency: urgent,
-        about: needs_input
-    )
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(
+                task: task,
+                urgency: urgent,
+                about: needs_input
+            )
 
     @guidance
         -- Notifications are deduplicated: each notification fires at most
@@ -1098,7 +1097,7 @@ rule DispatchEpicSubtask {
     requires: epic.has_plan
 
     -- Dispatches the next backlog subtask of this epic, ordered by
-    -- sort_order ascending (nulls last, tie-broken by id ascending).
+    -- sort_order ascending (nulls treated as task ID, tie-broken by id ascending).
     -- If the subtask has a plan, it is dispatched for implementation.
     -- If not, it is dispatched for brainstorming.
     ensures:

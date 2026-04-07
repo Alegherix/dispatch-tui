@@ -255,6 +255,39 @@ pub fn remove_mcp_config(mcp_path: &std::path::Path) -> Result<bool> {
     Ok(had_dispatch)
 }
 
+pub fn remove_permissions(settings_path: &std::path::Path) -> Result<bool> {
+    let existing = match read_json_file(settings_path)? {
+        Some(v) => v,
+        None => return Ok(false),
+    };
+
+    let mut root = match existing {
+        Value::Object(map) => map,
+        _ => return Ok(false),
+    };
+
+    let removed_any = if let Some(Value::Object(perms)) = root.get_mut("permissions") {
+        if let Some(Value::Array(allow)) = perms.get_mut("allow") {
+            let before = allow.len();
+            allow.retain(|v| {
+                v.as_str()
+                    .map_or(true, |s| !s.starts_with("mcp__dispatch__"))
+            });
+            before != allow.len()
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if removed_any {
+        write_json_file(settings_path, &Value::Object(root))?;
+    }
+
+    Ok(removed_any)
+}
+
 // ---------------------------------------------------------------------------
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
@@ -663,6 +696,75 @@ mod tests {
         let path = dir.path().join(".mcp.json");
 
         let removed = remove_mcp_config(&path).unwrap();
+        assert!(!removed);
+    }
+
+    // -- Permissions removal --
+
+    #[test]
+    fn remove_permissions_removes_dispatch_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let existing = json!({
+            "permissions": {
+                "allow": [
+                    "Bash(git:*)",
+                    "Read",
+                    "mcp__dispatch__update_task",
+                    "mcp__dispatch__get_task"
+                ],
+                "defaultMode": "acceptEdits"
+            },
+            "hooks": {"Stop": []}
+        });
+        write_json_file(&path, &existing).unwrap();
+
+        let removed = remove_permissions(&path).unwrap();
+        assert!(removed);
+
+        let result = read_json_file(&path).unwrap().unwrap();
+        let allow = result["permissions"]["allow"].as_array().unwrap();
+        assert_eq!(allow, &[json!("Bash(git:*)"), json!("Read")]);
+        assert_eq!(result["permissions"]["defaultMode"], "acceptEdits");
+        assert!(result["hooks"]["Stop"].is_array());
+    }
+
+    #[test]
+    fn remove_permissions_noop_when_no_dispatch_perms() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let existing = json!({
+            "permissions": {
+                "allow": ["Bash(git:*)", "Read"]
+            }
+        });
+        write_json_file(&path, &existing).unwrap();
+
+        let removed = remove_permissions(&path).unwrap();
+        assert!(!removed);
+    }
+
+    #[test]
+    fn remove_permissions_noop_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        let removed = remove_permissions(&path).unwrap();
+        assert!(!removed);
+    }
+
+    #[test]
+    fn remove_permissions_handles_empty_allow() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let existing = json!({
+            "permissions": {
+                "allow": []
+            }
+        });
+        write_json_file(&path, &existing).unwrap();
+
+        let removed = remove_permissions(&path).unwrap();
         assert!(!removed);
     }
 

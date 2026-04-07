@@ -1711,8 +1711,46 @@ async fn execute_commands(
             Command::EditGithubQueries(mode) => {
                 rt.exec_edit_github_queries(app, mode, terminal, key_rx)?
             }
-            Command::UpdateAgentStatus { .. } => {} // TODO: step 9
-            Command::ReReview { .. } => {}          // TODO: step 9
+            Command::UpdateAgentStatus {
+                repo,
+                number,
+                status,
+            } => {
+                let status_str = status.map(|s| s.as_db_str().to_string());
+                if let Err(e) = rt.database.update_agent_status(
+                    &repo,
+                    number,
+                    status_str.as_deref(),
+                ) {
+                    tracing::warn!("Failed to update agent status for {repo}#{number}: {e}");
+                }
+            }
+            Command::ReReview {
+                repo,
+                number,
+                tmux_window,
+            } => {
+                let runner = rt.runner.clone();
+                let tx = rt.msg_tx.clone();
+                let db = rt.database.clone();
+                tokio::task::spawn_blocking(move || {
+                    let cmd = format!("/review-pr {number}");
+                    if let Err(e) = crate::tmux::send_keys(&tmux_window, &cmd, &*runner) {
+                        tracing::warn!("Failed to send re-review to {tmux_window}: {e}");
+                        return;
+                    }
+                    if let Err(e) =
+                        db.update_agent_status(&repo, number, Some("reviewing"))
+                    {
+                        tracing::warn!("Failed to update agent status: {e}");
+                    }
+                    let _ = tx.send(Message::ReviewStatusUpdated {
+                        repo,
+                        number,
+                        status: crate::models::ReviewAgentStatus::Reviewing,
+                    });
+                });
+            }
         }
     }
 

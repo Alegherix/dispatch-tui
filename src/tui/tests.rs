@@ -10770,12 +10770,10 @@ fn security_board_d_with_no_alert_is_noop() {
 }
 
 #[test]
-fn security_board_r_refreshes_alerts() {
+fn security_board_r_without_idle_agent_is_noop() {
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchSecurityAlerts)));
+    assert!(cmds.is_empty(), "r without idle agent should do nothing (refresh removed)");
 }
 
 #[test]
@@ -10984,12 +10982,10 @@ fn review_board_p_with_no_prs_is_noop() {
 }
 
 #[test]
-fn review_board_r_refreshes_prs() {
+fn review_board_r_without_idle_agent_is_noop() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchReviewPrs)));
+    assert!(cmds.is_empty(), "r without idle agent should do nothing (refresh removed)");
 }
 
 #[test]
@@ -11479,5 +11475,172 @@ fn g_on_security_board_without_agent_shows_status() {
     app.update(Message::SecurityAlertsLoaded(vec![alert]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
+    assert!(cmds.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// ReviewAgentStatus lifecycle tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn review_status_updated_sets_agent_status_on_pr() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let pr = make_review_pr_for_repo(
+        42,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    app.update(Message::ReviewStatusUpdated {
+        repo: "acme/app".to_string(),
+        number: 42,
+        status: crate::models::ReviewAgentStatus::FindingsReady,
+    });
+
+    let prs = &app.review_prs();
+    let pr = prs.iter().find(|p| p.number == 42).unwrap();
+    assert_eq!(pr.agent_status, Some(crate::models::ReviewAgentStatus::FindingsReady));
+}
+
+#[test]
+fn review_status_updated_sets_agent_status_on_security_alert() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    let mut alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::High);
+    alert.tmux_window = Some("dispatch:fix-1".to_string());
+    app.update(Message::SecurityAlertsLoaded(vec![alert]));
+
+    app.update(Message::ReviewStatusUpdated {
+        repo: "acme/app".to_string(),
+        number: 1,
+        status: crate::models::ReviewAgentStatus::Idle,
+    });
+
+    let alerts = app.filtered_security_alerts();
+    let alert = alerts.iter().find(|a| a.number == 1).unwrap();
+    assert_eq!(alert.agent_status, Some(crate::models::ReviewAgentStatus::Idle));
+}
+
+#[test]
+fn detach_review_agent_clears_fields_and_returns_commands() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let mut pr = make_review_pr_for_repo(
+        42,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
+    pr.tmux_window = Some("dispatch:review-42".to_string());
+    pr.worktree = Some("/tmp/wt".to_string());
+    pr.agent_status = Some(crate::models::ReviewAgentStatus::FindingsReady);
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.update(Message::DetachReviewAgent {
+        repo: "acme/app".to_string(),
+        number: 42,
+    });
+
+    // Should have kill tmux and update agent status commands
+    assert!(cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })));
+    assert!(cmds.iter().any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
+
+    // In-memory PR should be cleared
+    let prs = &app.review_prs();
+    let pr = prs.iter().find(|p| p.number == 42).unwrap();
+    assert!(pr.tmux_window.is_none());
+    assert!(pr.agent_status.is_none());
+}
+
+#[test]
+fn review_agent_dispatched_sets_agent_status_reviewing() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let pr = make_review_pr_for_repo(
+        99,
+        "alice",
+        crate::models::ReviewDecision::ReviewRequired,
+        "org/my-repo",
+    );
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    app.update(Message::ReviewAgentDispatched {
+        github_repo: "org/my-repo".to_string(),
+        number: 99,
+        tmux_window: "review-my-repo-99".to_string(),
+        worktree: "/tmp/worktree".to_string(),
+    });
+
+    let prs = &app.review_prs();
+    let pr = prs.iter().find(|p| p.number == 99).unwrap();
+    assert_eq!(pr.agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+}
+
+// ---------------------------------------------------------------------------
+// Review/Security board key binding tests for r and T
+// ---------------------------------------------------------------------------
+
+#[test]
+fn review_board_r_on_idle_agent_emits_re_review() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let mut pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    pr.tmux_window = Some("dispatch:review-42".to_string());
+    pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert!(cmds.iter().any(|c| matches!(c, Command::ReReview { .. })));
+}
+
+#[test]
+fn review_board_r_without_agent_does_nothing() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_r_on_reviewing_agent_does_nothing() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let mut pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    pr.tmux_window = Some("dispatch:review-42".to_string());
+    pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn review_board_t_on_agent_emits_detach() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let mut pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    pr.tmux_window = Some("dispatch:review-42".to_string());
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
+    // DetachReviewAgent is a Message, not a Command — so it's handled inline
+    // and should produce KillTmuxWindow + UpdateAgentStatus commands
+    assert!(cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })));
+}
+
+#[test]
+fn review_board_t_without_agent_does_nothing() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    let pr = make_review_pr_for_repo(42, "alice", crate::models::ReviewDecision::ReviewRequired, "acme/app");
+    app.update(Message::ReviewPrsLoaded(vec![pr]));
+
+    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
     assert!(cmds.is_empty());
 }

@@ -1010,6 +1010,7 @@ impl App {
                     {
                         alert.tmux_window = Some(tmux_window.clone());
                         alert.worktree = Some(worktree.clone());
+                        alert.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
                         break;
                     }
                 }
@@ -1025,9 +1026,82 @@ impl App {
                 self.set_status(format!("Fix agent failed: {error}"));
                 vec![]
             }
-            Message::ReviewStatusUpdated { .. } => vec![], // TODO: step 8
-            Message::DetachReviewAgent { .. } => vec![],   // TODO: step 8
-            Message::DetachFixAgent { .. } => vec![],      // TODO: step 8
+            Message::ReviewStatusUpdated {
+                repo,
+                number,
+                status,
+            } => {
+                // Update in-memory state across all PR lists
+                for pr in self
+                    .review
+                    .prs
+                    .iter_mut()
+                    .chain(self.review.my_prs.iter_mut())
+                    .chain(self.review.bot_prs.iter_mut())
+                {
+                    if pr.repo == repo && pr.number == number {
+                        pr.agent_status = Some(status);
+                    }
+                }
+                for alert in self.security.alerts.iter_mut() {
+                    if alert.repo == repo && alert.number == number {
+                        alert.agent_status = Some(status);
+                    }
+                }
+                // Insert flash on findings_ready
+                if status == crate::models::ReviewAgentStatus::FindingsReady {
+                    let now = std::time::Instant::now();
+                    self.review
+                        .review_flash
+                        .insert((repo.clone(), number), now);
+                    self.security
+                        .review_flash
+                        .insert((repo, number), now);
+                }
+                vec![]
+            }
+            Message::DetachReviewAgent { repo, number } => {
+                let mut cmds = Vec::new();
+                for pr in self
+                    .review
+                    .prs
+                    .iter_mut()
+                    .chain(self.review.my_prs.iter_mut())
+                    .chain(self.review.bot_prs.iter_mut())
+                {
+                    if pr.repo == repo && pr.number == number {
+                        if let Some(window) = pr.tmux_window.take() {
+                            cmds.push(Command::KillTmuxWindow { window });
+                        }
+                        pr.worktree = None;
+                        pr.agent_status = None;
+                    }
+                }
+                cmds.push(Command::UpdateAgentStatus {
+                    repo,
+                    number,
+                    status: None,
+                });
+                cmds
+            }
+            Message::DetachFixAgent { repo, number, kind } => {
+                let mut cmds = Vec::new();
+                for alert in self.security.alerts.iter_mut() {
+                    if alert.repo == repo && alert.number == number && alert.kind == kind {
+                        if let Some(window) = alert.tmux_window.take() {
+                            cmds.push(Command::KillTmuxWindow { window });
+                        }
+                        alert.worktree = None;
+                        alert.agent_status = None;
+                    }
+                }
+                cmds.push(Command::UpdateAgentStatus {
+                    repo,
+                    number,
+                    status: None,
+                });
+                cmds
+            }
             // Filter presets
             Message::StartSavePreset => self.handle_start_save_preset(),
             Message::SaveFilterPreset(name) => self.handle_save_filter_preset(name),
@@ -1527,6 +1601,12 @@ impl App {
         // Clear expired message flash indicators
         self.agents
             .message_flash
+            .retain(|_, t| t.elapsed().as_secs() < 3);
+        self.review
+            .review_flash
+            .retain(|_, t| t.elapsed().as_secs() < 3);
+        self.security
+            .review_flash
             .retain(|_, t| t.elapsed().as_secs() < 3);
 
         let mut cmds: Vec<Command> = self
@@ -2955,6 +3035,7 @@ impl App {
             if pr.repo == github_repo && pr.number == number {
                 pr.tmux_window = Some(tmux_window.to_string());
                 pr.worktree = Some(worktree.to_string());
+                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
                 return "review_prs".to_string();
             }
         }
@@ -2962,6 +3043,7 @@ impl App {
             if pr.repo == github_repo && pr.number == number {
                 pr.tmux_window = Some(tmux_window.to_string());
                 pr.worktree = Some(worktree.to_string());
+                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
                 return "my_prs".to_string();
             }
         }
@@ -2969,6 +3051,7 @@ impl App {
             if pr.repo == github_repo && pr.number == number {
                 pr.tmux_window = Some(tmux_window.to_string());
                 pr.worktree = Some(worktree.to_string());
+                pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
                 return "bot_prs".to_string();
             }
         }

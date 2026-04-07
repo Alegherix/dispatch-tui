@@ -845,7 +845,27 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('r') => self.update(Message::RefreshSecurityAlerts),
+            KeyCode::Char('r') => {
+                if let Some(alert) = self.selected_security_alert() {
+                    if alert.agent_status == Some(crate::models::ReviewAgentStatus::Idle) {
+                        if let Some(window) = alert.tmux_window.clone() {
+                            let repo = alert.repo.clone();
+                            let number = alert.number;
+                            vec![Command::ReReview {
+                                repo,
+                                number,
+                                tmux_window: window,
+                            }]
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
             KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
             KeyCode::Char('t') => self.update(Message::ToggleSecurityKindFilter),
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
@@ -858,6 +878,21 @@ impl App {
                         }]
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('T') => {
+                if let Some(alert) = self.selected_security_alert() {
+                    if alert.tmux_window.is_some() {
+                        let repo = alert.repo.clone();
+                        let number = alert.number;
+                        let kind = alert.kind;
+                        self.update(Message::DetachFixAgent { repo, number, kind })
+                    } else {
+                        vec![]
                     }
                 } else {
                     vec![]
@@ -932,7 +967,27 @@ impl App {
                 }
             }
 
-            KeyCode::Char('r') => self.update(Message::RefreshReviewPrs),
+            KeyCode::Char('r') => {
+                if let Some(pr) = self.selected_review_pr() {
+                    if pr.agent_status == Some(crate::models::ReviewAgentStatus::Idle) {
+                        if let Some(window) = pr.tmux_window.clone() {
+                            let repo = pr.repo.clone();
+                            let number = pr.number;
+                            vec![Command::ReReview {
+                                repo,
+                                number,
+                                tmux_window: window,
+                            }]
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }
             KeyCode::Char('f') => self.update(Message::StartReviewRepoFilter),
 
             KeyCode::Char('d') => {
@@ -1054,6 +1109,20 @@ impl App {
                         }]
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
+                    }
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('T') => {
+                if let Some(pr) = self.selected_review_pr() {
+                    if pr.tmux_window.is_some() {
+                        let repo = pr.repo.clone();
+                        let number = pr.number;
+                        self.update(Message::DetachReviewAgent { repo, number })
+                    } else {
+                        vec![]
                     }
                 } else {
                     vec![]

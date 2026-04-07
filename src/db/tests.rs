@@ -2800,3 +2800,72 @@ fn migration_v20_converts_done_boolean_to_status_enum() {
         "done column should be removed after migration"
     );
 }
+
+#[test]
+fn set_pr_agent_updates_fields() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+
+    let pr = ReviewPr {
+        number: 42,
+        title: "Test".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 0,
+        deletions: 0,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+    };
+    db.save_review_prs(&[pr]).unwrap();
+
+    db.set_pr_agent("review_prs", "acme/app", 42, "dispatch:review-42", "/tmp/wt").unwrap();
+
+    let loaded = db.load_review_prs().unwrap();
+    assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:review-42"));
+    assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
+}
+
+#[test]
+fn set_alert_agent_updates_fields() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+
+    let alert = SecurityAlert {
+        number: 1,
+        repo: "acme/app".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE".to_string(),
+        package: None,
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: "https://example.com".to_string(),
+        created_at: Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
+        tmux_window: None,
+        worktree: None,
+    };
+    db.save_security_alerts(&[alert]).unwrap();
+
+    db.set_alert_agent("acme/app", 1, AlertKind::Dependabot, "dispatch:fix-1", "/tmp/wt").unwrap();
+
+    let loaded = db.load_security_alerts().unwrap();
+    assert_eq!(loaded[0].tmux_window.as_deref(), Some("dispatch:fix-1"));
+    assert_eq!(loaded[0].worktree.as_deref(), Some("/tmp/wt"));
+}

@@ -651,6 +651,24 @@ impl TaskStore for Database {
         let conn = self.conn()?;
         load_security_alerts_impl(&conn)
     }
+
+    fn set_pr_agent(&self, table: &str, repo: &str, number: i64, tmux_window: &str, worktree: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2 WHERE repo = ?3 AND number = ?4"),
+            params![tmux_window, worktree, repo, number],
+        )?;
+        Ok(())
+    }
+
+    fn set_alert_agent(&self, repo: &str, number: i64, kind: crate::models::AlertKind, tmux_window: &str, worktree: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2 WHERE repo = ?3 AND number = ?4 AND kind = ?5",
+            params![tmux_window, worktree, repo, number, kind.as_db_str()],
+        )?;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

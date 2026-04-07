@@ -259,6 +259,10 @@ pub trait TaskStore: Send + Sync {
     // Security alerts
     fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()>;
     fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>>;
+
+    // Agent tracking on PRs/alerts
+    fn set_pr_agent(&self, table: &str, repo: &str, number: i64, tmux_window: &str, worktree: &str) -> Result<()>;
+    fn set_alert_agent(&self, repo: &str, number: i64, kind: crate::models::AlertKind, tmux_window: &str, worktree: &str) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

@@ -890,6 +890,9 @@ fn provision_and_dispatch(
     std::fs::create_dir_all(format!("{}/.worktrees", config.repo_path))
         .context("failed to create .worktrees directory")?;
 
+    // Prune stale worktree entries (directories deleted without `git worktree remove`)
+    let _ = runner.run("git", &["-C", &config.repo_path, "worktree", "prune"]);
+
     // Set up the worktree according to the chosen strategy
     match &config.git_strategy {
         WorktreeStrategy::CheckoutRemote { head_ref } => {
@@ -2316,6 +2319,7 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
+            MockProcessRunner::ok(),                              // git worktree prune
             MockProcessRunner::ok(),                              // git fetch origin feature-branch
             // git worktree add is skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
@@ -2338,13 +2342,13 @@ mod tests {
         assert!(
             calls
                 .iter()
-                .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
+                .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "add"))),
             "git worktree add should be skipped when dir exists"
         );
         // git fetch should still happen
-        assert_eq!(calls[1].0, "git");
-        assert!(calls[1].1.contains(&"fetch".to_string()));
-        assert!(calls[1].1.contains(&"feature-branch".to_string()));
+        assert_eq!(calls[2].0, "git");
+        assert!(calls[2].1.contains(&"fetch".to_string()));
+        assert!(calls[2].1.contains(&"feature-branch".to_string()));
         assert_eq!(result.worktree_path, worktree_dir.to_str().unwrap());
     }
 
@@ -2359,6 +2363,7 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
+            MockProcessRunner::ok(),                              // git worktree prune
             MockProcessRunner::ok(),                              // git fetch origin feature-branch
             // git worktree add skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
@@ -2379,15 +2384,15 @@ mod tests {
 
         let calls = mock.recorded_calls();
         // Verify git fetch
-        assert_eq!(calls[1].0, "git");
-        assert!(calls[1].1.contains(&"fetch".to_string()));
-        assert!(calls[1].1.contains(&"feature-branch".to_string()));
+        assert_eq!(calls[2].0, "git");
+        assert!(calls[2].1.contains(&"fetch".to_string()));
+        assert!(calls[2].1.contains(&"feature-branch".to_string()));
         // Verify tmux new-window
-        assert_eq!(calls[2].0, "tmux");
-        assert_eq!(calls[2].1[0], "new-window");
+        assert_eq!(calls[3].0, "tmux");
+        assert_eq!(calls[3].1[0], "new-window");
         // Verify send-keys includes claude command
         assert!(
-            calls[3].1.iter().any(|a| a.contains("claude")),
+            calls[4].1.iter().any(|a| a.contains("claude")),
             "send-keys should include claude command"
         );
 
@@ -2424,6 +2429,7 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"other-window\n"), // has_window: no match
+            MockProcessRunner::ok(),                              // git worktree prune
             MockProcessRunner::ok(),                              // git fetch origin feature-branch
             MockProcessRunner::ok(),                              // git worktree add
             MockProcessRunner::ok(),                              // tmux new-window
@@ -2447,13 +2453,12 @@ mod tests {
         // Verify git worktree add was called with correct args
         let wt_call = calls
             .iter()
-            .find(|(prog, args)| prog == "git" && args.contains(&"worktree".to_string()));
+            .find(|(prog, args)| prog == "git" && args.contains(&"add".to_string()) && args.contains(&"worktree".to_string()));
         assert!(
             wt_call.is_some(),
             "git worktree add should be called when dir is missing"
         );
         let (_, args) = wt_call.unwrap();
-        assert!(args.contains(&"add".to_string()));
         assert!(args.iter().any(|a| a == "origin/feature-branch"));
     }
 
@@ -2463,7 +2468,8 @@ mod tests {
         let repo_path = dir.path().to_str().unwrap().to_string();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+            MockProcessRunner::ok_with_stdout(b"\n"),              // has_window: no match
+            MockProcessRunner::ok(),                               // git worktree prune
             MockProcessRunner::fail("fatal: couldn't find remote ref"), // git fetch fails
         ]);
 
@@ -2489,6 +2495,7 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+            MockProcessRunner::ok(),                  // git worktree prune
             MockProcessRunner::ok(),                  // git fetch
             // worktree exists, skip add
             MockProcessRunner::ok(), // tmux new-window
@@ -2508,7 +2515,7 @@ mod tests {
         .unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
         assert!(
             send_keys_arg.contains("--permission-mode acceptEdits"),
             "review agent should use acceptEdits mode, got: {send_keys_arg}"
@@ -2584,6 +2591,7 @@ mod tests {
 
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"\n"), // has_window: no match
+            MockProcessRunner::ok(),                  // git worktree prune
             MockProcessRunner::ok(),                  // git fetch
             MockProcessRunner::ok(),                  // tmux new-window
             MockProcessRunner::ok(),                  // tmux send-keys -l
@@ -2594,7 +2602,7 @@ mod tests {
             .unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
         assert!(
             send_keys_arg.contains("--plugin-dir"),
             "review_agent should include --plugin-dir, got: {send_keys_arg}"

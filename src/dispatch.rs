@@ -517,8 +517,7 @@ Your task is:\n\
 {plan_section}\
 {epic_section}\n\
 \n\
-Task status transitions (running/review) are managed automatically via hooks. \
-Do not call update_task for status changes.\n\
+Always use TDD: express intended behaviour as tests first, then implement the minimum code to make them pass.\n\
 \n\
 The dispatch MCP tools are available — use them to query and update this task \
 (get_task, update_task).\n\
@@ -551,8 +550,8 @@ This is a quick-dispatched task with a placeholder title. After you understand w
 the user wants, call `update_task` with a descriptive `title` (and optionally \
 `description`) to rename the task on the kanban board.\n\
 \n\
-Task status transitions (running/review) are managed automatically via hooks. \
-Do not call update_task for status changes.\n\
+Always use TDD: express intended behaviour as tests first, then implement the minimum code to make them pass.\n\
+\n\
 The dispatch MCP tools are available — use them to query and update tasks. \
 Use update_task to rename this task with a descriptive title, and get_task to check current state."
     )
@@ -1234,14 +1233,14 @@ mod tests {
         assert!(prompt.contains("42"));
         assert!(prompt.contains("Fix bug"));
         assert!(prompt.contains("A nasty crash"));
-        assert!(prompt.contains("automatically via hooks"));
+        assert!(prompt.contains("TDD"));
     }
 
     #[test]
-    fn build_prompt_mentions_automatic_hooks() {
+    fn build_prompt_mentions_tdd() {
         let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None);
-        assert!(prompt.contains("automatically via hooks"));
-        assert!(!prompt.contains("update the task status to 'review'"));
+        assert!(prompt.contains("TDD"));
+        assert!(prompt.contains("behaviour as tests first"));
     }
 
     #[test]

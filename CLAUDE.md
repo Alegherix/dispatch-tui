@@ -14,6 +14,10 @@ cargo run -- tui
 
 Pre-commit hook runs `cargo fmt --check` and `cargo clippy -- -D warnings` automatically — no need to run these manually.
 
+## Test-Driven Development
+
+Always use TDD when working in this repo. Start by expressing the intended behaviour as tests — capture what the code should do before writing the code that does it. Then implement the minimum code to make the tests pass. This applies to all changes — new features, bug fixes, and refactors.
+
 ## Allium Specification
 
 `docs/specs/dispatch.allium` is the **source of truth** for domain logic: task lifecycle, status transitions, sub-status invariants, dispatch rules, and epic behavior. Consult it before changing core behavior. Use `allium:tend` and `allium:weed` skills to keep spec and code aligned.

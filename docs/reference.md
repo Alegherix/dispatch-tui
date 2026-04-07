@@ -8,8 +8,8 @@
 |-----|--------|
 | `h` / `l` / `←` / `→` | Move between columns |
 | `j` / `k` / `↓` / `↑` | Move between tasks |
-| `Enter` | Toggle detail panel / enter epic |
-| `Tab` | Switch to Review Board |
+| `Enter` | Toggle detail panel |
+| `Tab` | Cycle boards: Task → Review → Security |
 | `?` | Toggle help overlay |
 | `q` | Quit (or exit epic view) |
 
@@ -20,7 +20,7 @@
 | `n` | New task |
 | `c` | Copy selected task |
 | `e` | Edit task in editor |
-| `d` | Dispatch agent (Backlog task with plan) / brainstorm (without plan) / resume (Running task whose window is gone) |
+| `d` | Dispatch agent — behavior depends on tag (see README) / resume (Running task whose window is gone) |
 | `D` | Quick dispatch — pick repo and dispatch immediately |
 | `m` / `M` | Move task forward / backward |
 | `W` | Wrap up — commit, rebase, open PR |
@@ -38,6 +38,7 @@
 | Key | Action |
 |-----|--------|
 | `E` | New epic |
+| `g` | Enter epic view (see subtasks) |
 | `d` | Dispatch next backlog subtask |
 | `D` | Quick dispatch subtask for this epic |
 | `m` | Mark epic done (when all subtasks are done) |
@@ -49,9 +50,14 @@
 | Key | Action |
 |-----|--------|
 | `h` / `l` / `j` / `k` | Navigate PRs |
-| `Enter` | Open PR in browser |
+| `Enter` | Toggle PR detail |
+| `p` | Open PR in browser |
+| `d` | Dispatch review agent |
 | `r` | Refresh |
-| `Tab` / `Esc` | Return to kanban |
+| `f` | Filter by repo |
+| `Shift+Tab` | Cycle board mode (Review PRs / My PRs / Bot PRs) |
+| `Tab` | Next board (Security) |
+| `Esc` | Return to kanban |
 
 ## How Dispatch Works
 
@@ -79,6 +85,23 @@ Requires `gh` CLI authenticated:
 ```bash
 gh auth login
 ```
+
+## Security Board
+
+Press `Tab` from the Review Board to switch to the Security Board, which shows Dependabot and code scanning alerts across your repos.
+
+Columns are grouped by severity: **Critical** → **High** → **Medium** → **Low**
+
+| Key | Action |
+|-----|--------|
+| `h` / `l` / `j` / `k` | Navigate alerts |
+| `Enter` | Toggle alert detail |
+| `p` | Open alert in browser |
+| `d` | Dispatch agent to fix the alert |
+| `r` | Refresh |
+| `f` | Filter by repo |
+| `t` | Toggle alert kind (Dependabot / code scanning) |
+| `Tab` / `Esc` | Return to kanban |
 
 ## CLI Usage
 

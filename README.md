@@ -10,7 +10,7 @@ A terminal kanban board for managing development tasks and dispatching Claude Co
 | `tmux` | Yes | `apt install tmux` / `brew install tmux` |
 | `git` | Yes | Already installed on most systems |
 | `claude` | Yes | [Claude Code CLI](https://claude.ai/code) |
-| `gh` | Optional | [GitHub CLI](https://cli.github.com) — needed for the Review Board |
+| `gh` | Optional | [GitHub CLI](https://cli.github.com) — needed for Review and Security boards |
 
 ## Getting Started
 
@@ -48,7 +48,7 @@ dispatch tui
 
 | Step | Key | What happens |
 |------|-----|--------------|
-| Create task | `n` | Enter title, description, and repo path |
+| Create task | `n` | Enter title, description, tag, and repo path |
 | Dispatch | `d` | Agent explores your codebase, writes a plan, and implements it |
 | Agent needs input *(optional)* | `g` | Desktop notification — jump to agent and interact |
 | Review the work | `g` | Task is in Review — check the result in the tmux window |
@@ -73,11 +73,32 @@ dispatch tui
 | Reorder subtasks | `J` / `K` | Change dispatch order within the epic |
 | Wrap up each subtask | `W` | Commit, rebase, and open a PR. Or use `/wrap-up` from the agent's session |
 
+### Wrap up a task
+
+There are two ways to wrap up completed work:
+
+**From the TUI** — press `W` on a task:
+
+| Option | Key | What happens |
+|--------|-----|--------------|
+| Rebase | `r` | Rebases onto main, fast-forwards main, kills tmux window |
+| Create PR | `p` | Pushes branch and opens a draft GitHub PR |
+
+**From Claude Code** — type `/wrap-up` in the agent's session. The agent commits any uncommitted changes, then asks you the same rebase-or-PR question.
+
 ## Key Concepts
 
 **Tasks** — the unit of work. Each task has a title, description, status, and optionally a plan and a linked git repo.
 
-**Plans** — markdown files describing what an agent should build. Tasks without a plan trigger "brainstorm" mode when dispatched — the agent explores and writes a plan, then implements it.
+**Tags** — optional labels (`b`=bug, `f`=feature, `c`=chore, `e`=epic) chosen during task creation that control what happens when you press `d`:
+
+| Tag | No plan | Has plan |
+|-----|---------|----------|
+| `epic` | Brainstorm (explore and ideate, no code edits) | Dispatch |
+| `feature` | Plan (write implementation plan, no code edits) | Dispatch |
+| `bug`, `chore`, none | Dispatch | Dispatch |
+
+**Plans** — markdown files describing what an agent should build. A task with a plan always dispatches directly regardless of tag.
 
 **Kanban columns:** Backlog → Running → Review → Done
 
@@ -88,7 +109,11 @@ dispatch tui
 
 **Worktrees** — each dispatched agent gets its own git worktree at `<repo>/.worktrees/<id>-<slug>`, isolating agent work from your main branch. Closing the tmux window does **not** delete the worktree — press `d` again to resume.
 
-**Epics** — a group of related tasks. Press `Enter` on an epic to see its subtasks. Press `d` on the epic to dispatch the next Backlog subtask automatically.
+**Epics** — a group of related tasks. Press `g` on an epic to see its subtasks. Press `d` on the epic to dispatch the next Backlog subtask automatically.
+
+**Review Board** — press `Tab` to see GitHub PRs where you are a requested reviewer. Requires `gh` CLI.
+
+**Security Board** — press `Tab` again to see dependency vulnerability alerts across your repos.
 
 ## Learn More
 

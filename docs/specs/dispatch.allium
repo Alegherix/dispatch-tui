@@ -33,6 +33,8 @@ external entity TmuxWindow {
 -- Enumerations
 ------------------------------------------------------------
 
+enum TaskTag { bug | feature | chore | epic }
+
 enum TaskStatus { backlog | running | review | done | archived }
 
 -- SubStatus refines the parent status into a more precise state.
@@ -93,7 +95,7 @@ entity Task {
     plan: String?
     epic: Epic?
     pr_url: String?
-    tag: String?
+    tag: TaskTag?
     sort_order: Integer?
     created_at: Timestamp
     updated_at: Timestamp
@@ -117,7 +119,7 @@ entity Task {
     has_plan: plan != null
     is_stale: sub_status == stale
     is_crashed: sub_status == crashed
-    is_epic: tag = "epic"
+    is_epic: tag = epic
     pr_number: derived from pr_url  -- extracted at runtime, not persisted
 }
 
@@ -165,6 +167,7 @@ config {
     status_message_expiry: Duration = 5.seconds
     notifications_enabled: Boolean = true
     pr_poll_interval: Duration = 30.seconds
+    default_branch: String = detect_from_remote("main")
 }
 
 ------------------------------------------------------------
@@ -214,7 +217,7 @@ concept VisualColumn {
 -- == Task Creation ==
 
 rule CreateTask {
-    when: CreateTask(title, description, repo_path, plan?, epic?)
+    when: CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?)
 
     ensures: Task.created(
         title: title,
@@ -224,6 +227,8 @@ rule CreateTask {
         sub_status: SubStatus.default_for(backlog),
         plan: plan,
         epic: epic,
+        tag: tag,
+        sort_order: sort_order,
         created_at: now,
         updated_at: now
     )
@@ -260,7 +265,7 @@ rule DispatchTask {
     -- if their tag is bug, chore or unset. Epic and feature tags route
     -- to BrainstormTask and PlanTask respectively.
     requires: task.has_plan = true
-              or task.tag not in {"epic", "feature"}
+              or task.tag not in {epic, feature}
 
     ensures: task.status = running
     ensures: task.sub_status = SubStatus.default_for(running)
@@ -293,7 +298,7 @@ rule PlanTask {
 
     requires: task.status = backlog
     requires: task.has_plan = false
-    requires: task.tag = "feature"
+    requires: task.tag = feature
 
     ensures: task.status = running
     ensures: task.sub_status = SubStatus.default_for(running)
@@ -499,20 +504,20 @@ rule WrapUpRebase {
 
     let branch = task.worktree.branch
 
-    ensures: BranchRebased(branch: branch, onto: "main")
+    ensures: BranchRebased(branch: branch, onto: config.default_branch)
     ensures: task.tmux_window = null
     ensures: task.status = done
     ensures: task.sub_status = SubStatus.default_for(done)
     ensures: task.updated_at = now
 
     @guidance
-        -- Runs `git fetch origin && git rebase origin/main` in the
-        -- task's worktree directory, then fast-forwards main to the
-        -- rebased branch. Uses the same finish_task path as
-        -- FinishTaskSuccess. The operation runs in background via
-        -- ProcessRunner; the tmux window is killed on completion.
-        -- Available from both the TUI (W then r) and MCP (wrap_up
-        -- tool with action "rebase").
+        -- Runs `git fetch origin && git rebase origin/<default_branch>`
+        -- in the task's worktree directory, then fast-forwards the
+        -- default branch to the rebased branch. Uses the same
+        -- finish_task path as FinishTaskSuccess. The operation runs
+        -- in background via ProcessRunner; the tmux window is killed
+        -- on completion. Available from both the TUI (W then r) and
+        -- MCP (wrap_up tool with action "rebase").
 }
 
 rule WrapUpPr {
@@ -534,6 +539,10 @@ rule WrapUpPr {
         -- The operation runs in background via ProcessRunner.
         -- Available from both the TUI (W then p) and MCP (wrap_up
         -- tool with action "pr").
+        -- When invoked via MCP and the task has an active tmux window,
+        -- a `/code-review {pr_url}` command is injected into the tmux
+        -- session after PR creation, triggering the agent to perform
+        -- a self-review.
 }
 
 -- == Finish (Merge) ==
@@ -547,18 +556,19 @@ rule FinishTaskSuccess {
     let branch = task.worktree.branch
 
     -- Preconditions verified at execution time:
-    -- repo root must be on main branch
+    -- repo root must be on the default branch
     -- merge must succeed (no conflicts)
 
-    ensures: BranchMerged(branch: branch, into: "main")
+    ensures: BranchMerged(branch: branch, into: config.default_branch)
     ensures: task.tmux_window = null
     ensures: task.status = done
+    ensures: task.sub_status = SubStatus.default_for(done)
     ensures: task.updated_at = now
 
     @guidance
-        -- The implementation rebases the task branch onto main (after
-        -- pulling latest from origin), then fast-forwards main to the
-        -- rebased branch.
+        -- The implementation rebases the task branch onto the default
+        -- branch (after pulling latest from origin), then fast-forwards
+        -- the default branch to the rebased branch.
         -- Worktree is preserved after finish.
         -- It will be cleaned up when the task is archived.
         -- If another active task shares the same worktree, the worktree
@@ -832,6 +842,9 @@ rule UpdateEpicViaMcp {
     requires: title != null or description != null or status != null
               or plan != null or sort_order != null or repo_path != null
 
+    -- Cannot set status to archived via MCP
+    requires: status != archived
+
     ensures:
         if title != null: epic.title = title
     ensures:
@@ -906,9 +919,9 @@ rule DispatchNextViaMcp {
         if next != null:
             if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
-            else if next.tag = "epic":
+            else if next.tag = epic:
                 AgentLaunched(task: next, mode: brainstorm)
-            else if next.tag = "feature":
+            else if next.tag = feature:
                 AgentLaunched(task: next, mode: plan)
             else:
                 AgentLaunched(task: next, mode: standard)
@@ -977,7 +990,7 @@ rule HookNotification {
 -- == Epics ==
 
 rule CreateEpic {
-    when: CreateEpic(title, description, repo_path, sort_order?)
+    when: CreateEpic(title, description?, repo_path, sort_order?)
 
     ensures: Epic.created(
         title: title,
@@ -1036,9 +1049,9 @@ rule DispatchEpicSubtask {
         if next != null:
             if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
-            else if next.tag = "epic":
+            else if next.tag = epic:
                 AgentLaunched(task: next, mode: brainstorm)
-            else if next.tag = "feature":
+            else if next.tag = feature:
                 AgentLaunched(task: next, mode: plan)
             else:
                 AgentLaunched(task: next, mode: standard)
@@ -1046,8 +1059,8 @@ rule DispatchEpicSubtask {
     @guidance
         -- Routing is based on the subtask's plan and tag:
         --   has_plan        → implementation mode
-        --   tag = "epic"    → brainstorm mode
-        --   tag = "feature" → plan mode
+        --   tag = epic    → brainstorm mode
+        --   tag = feature → plan mode
         --   other           → standard mode (dispatch without plan)
         -- When no backlog subtasks remain, the TUI shows a status
         -- message instead of dispatching. This rule only fires when
@@ -1080,20 +1093,44 @@ rule EpicBatchWrapUp {
         -- failed task) and can be cancelled at any time (Esc).
 }
 
-rule MarkEpicDone {
-    when: MarkEpicDone(epic)
+rule MoveEpicForward {
+    when: MoveEpicStatus(epic, forward)
 
-    ensures: epic.status = done
+    requires: epic.status != done
+    requires: epic.status != archived
+
+    let next = next_status(epic.status)
+
+    ensures: epic.status = next
     ensures: epic.updated_at = now
+    ensures:
+        if next = done:
+            for task in epic.subtasks where tmux_window != null:
+                task.tmux_window = null
+
+    @guidance
+        -- Uses the same next() progression as tasks:
+        --   backlog -> running -> review -> done.
+        -- Done and archived are terminal for forward movement.
+        -- When moving to done, all subtask tmux windows are killed
+        -- to clean up active agent sessions.
 }
 
-rule MarkEpicUndone {
-    when: MarkEpicUndone(epic)
+rule MoveEpicBackward {
+    when: MoveEpicStatus(epic, backward)
 
-    requires: epic.status = done
+    requires: epic.status != backlog
+    requires: epic.status != archived
 
-    ensures: epic.status = backlog
+    let prev = prev_status(epic.status)
+
+    ensures: epic.status = prev
     ensures: epic.updated_at = now
+
+    @guidance
+        -- Uses the same prev() progression as tasks:
+        --   done -> review -> running -> backlog.
+        -- Backlog and archived are terminal for backward movement.
 }
 
 rule ConfirmArchiveEpic {

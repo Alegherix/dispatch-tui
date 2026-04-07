@@ -669,7 +669,7 @@ fn enter_with_title_advances_to_tag() {
     assert_eq!(app.input.task_draft.as_ref().unwrap().title, "My Task");
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none")
+        Some("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none")
     );
 }
 
@@ -1503,7 +1503,7 @@ fn action_hints_backlog_task_with_plan() {
     assert!(keys.contains(&"[d]"), "should have dispatch hint");
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        text.contains("dispatch"),
+        text.contains("ispatch"),
         "backlog with plan dispatch means dispatch"
     );
 }
@@ -1827,7 +1827,7 @@ fn submit_title_with_text_advances_to_tag() {
     assert_eq!(app.input.task_draft.as_ref().unwrap().title, "My Task");
     assert_eq!(
         app.status_message.as_deref(),
-        Some("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none")
+        Some("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none")
     );
 }
 
@@ -2745,13 +2745,13 @@ fn render_status_bar_uses_bracket_format() {
         buffer_contains(&buf, "[q]"),
         "status bar should use [key] bracket format"
     );
-    // Should also contain the action words
+    // Should also contain the action words (embedded format: [n]ew, [q]uit)
     assert!(
-        buffer_contains(&buf, "new"),
+        buffer_contains(&buf, "[n]ew"),
         "status bar should show 'new' hint"
     );
     assert!(
-        buffer_contains(&buf, "quit"),
+        buffer_contains(&buf, "[q]uit"),
         "status bar should show 'quit' hint"
     );
 }
@@ -5454,7 +5454,7 @@ fn status_bar_shows_wrap_up_hint_for_review_task() {
 
     let buf = render_to_buffer(&mut app, 120, 20);
     assert!(
-        buffer_contains(&buf, "wrap up"),
+        buffer_contains(&buf, "[W]rap up"),
         "Status bar should show wrap up hint for Review tasks"
     );
 }
@@ -7710,7 +7710,7 @@ fn render_input_form_shows_during_input_tag() {
         "draft title should be shown as completed"
     );
     assert!(
-        buffer_contains(&buf, "[b] bug"),
+        buffer_contains(&buf, "[b]ug"),
         "tag options should be visible"
     );
 }

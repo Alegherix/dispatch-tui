@@ -1198,7 +1198,7 @@ fn input_tag_lines(app: &App, completed: Style, active: Style, hint: Style) -> V
     vec![
         Line::from(Span::styled(format!("  Title: {title}"), completed)),
         Line::from(Span::styled(
-            "  Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none",
+            "  Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none",
             active,
         )),
         Line::from(""),
@@ -2178,7 +2178,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let text = app
                 .status_message
                 .as_deref()
-                .unwrap_or("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none");
+                .unwrap_or("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
@@ -2336,6 +2336,39 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// Push a keybinding hint as styled spans.
+///
+/// When the key is a single char matching the label's first letter (e.g. `d` / `dispatch`),
+/// renders the compact `[d]ispatch` form. Otherwise renders `[key] label`.
+fn push_hint_spans(
+    spans: &mut Vec<Span<'static>>,
+    key: &str,
+    label: &str,
+    key_color: Color,
+    label_style: Style,
+) {
+    let can_embed = key.len() == 1
+        && label
+            .chars()
+            .next()
+            .map(|c| c.eq_ignore_ascii_case(&key.chars().next().unwrap()))
+            .unwrap_or(false);
+
+    if can_embed {
+        spans.push(Span::styled(
+            format!("[{key}]"),
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!("{}  ", &label[1..]), label_style));
+    } else {
+        spans.push(Span::styled(
+            format!("[{key}]"),
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!(" {label}  "), label_style));
+    }
+}
+
 /// Build context-sensitive keybinding hint spans for the status bar.
 /// Returns styled spans showing available actions for the selected task.
 pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec<Span<'static>> {
@@ -2344,11 +2377,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(
-            format!("[{key}]"),
-            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {label}  "), label_style));
+        push_hint_spans(&mut spans, key, label, key_color, label_style);
     };
 
     if let Some(task) = task {
@@ -2423,11 +2452,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(
-            format!("[{key}]"),
-            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {label}  "), label_style));
+        push_hint_spans(&mut spans, key, label, key_color, label_style);
     };
 
     if epic.plan_path.is_some() {
@@ -2463,11 +2488,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
     spans.push(Span::styled(format!("{count} selected  "), count_style));
 
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(
-            format!("[{key}]"),
-            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {label}  "), label_style));
+        push_hint_spans(&mut spans, key, label, key_color, label_style);
     };
 
     if has_tasks {
@@ -2490,11 +2511,7 @@ fn review_action_hints(has_pr: bool, is_author_mode: bool) -> Vec<Span<'static>>
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(
-            format!("[{key}]"),
-            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {label}  "), label_style));
+        push_hint_spans(&mut spans, key, label, key_color, label_style);
     };
     if has_pr {
         push_hint("Enter", "open PR");
@@ -2515,11 +2532,7 @@ fn bot_action_hints(has_pr: bool) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut push_hint = |key: &'static str, label: &'static str| {
-        spans.push(Span::styled(
-            format!("[{key}]"),
-            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {label}  "), label_style));
+        push_hint_spans(&mut spans, key, label, key_color, label_style);
     };
     push_hint("Space", "select");
     push_hint("a", "select all");
@@ -3093,11 +3106,7 @@ fn security_action_hints(app: &App, has_alert: bool) -> Vec<Span<'static>> {
     let label_style = Style::default().fg(MUTED);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: String| {
-        spans.push(Span::styled(
-            format!("[{key}]"),
-            Style::default().fg(key_color).add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {label}  "), label_style));
+        push_hint_spans(spans, key, &label, key_color, label_style);
     };
     if has_alert {
         push_hint(&mut spans, "Enter", "detail".into());
@@ -3392,7 +3401,7 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
         Style::default().fg(MUTED_LIGHT),
     )));
     lines.push(Line::from(Span::styled(
-        " [a] toggle all",
+        " [a]ll toggle",
         Style::default().fg(MUTED),
     )));
 

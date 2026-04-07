@@ -2025,7 +2025,7 @@ impl App {
                 tag: None,
             });
             self.input.mode = InputMode::InputTag;
-            self.set_status("Tag: [b] bug  [f] feature  [c] chore  [e] epic  [Enter] none".to_string());
+            self.set_status("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none".to_string());
         }
         vec![]
     }

@@ -12434,6 +12434,72 @@ fn tick_without_split_does_not_check_pane() {
         .any(|c| matches!(c, Command::CheckSplitPaneExists { .. })));
 }
 
+#[test]
+fn tick_skips_capture_for_split_pinned_task() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Pin task 4 in split mode
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(4));
+
+    let cmds = app.update(Message::Tick);
+
+    // Should NOT emit CaptureTmux for the pinned task (its window is a pane now)
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(4), .. })),
+        "split-pinned task should be excluded from CaptureTmux"
+    );
+}
+
+#[test]
+fn tick_captures_non_pinned_tasks_in_split_mode() {
+    let mut task3 = make_task(3, TaskStatus::Running);
+    task3.tmux_window = Some("task-3".to_string());
+    let mut task4 = make_task(4, TaskStatus::Running);
+    task4.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task3, task4], TEST_TIMEOUT);
+
+    // Pin task 4 in split mode
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(4));
+
+    let cmds = app.update(Message::Tick);
+
+    // Task 3 (not pinned) should still get captured
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(3), .. })));
+    // Task 4 (pinned in split) should NOT
+    assert!(!cmds
+        .iter()
+        .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(4), .. })));
+}
+
+#[test]
+fn window_gone_ignored_for_split_pinned_task() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Pin task 4 in split mode
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(4));
+
+    // Even if WindowGone fires for the pinned task, it should NOT crash
+    app.update(Message::WindowGone(TaskId(4)));
+    assert!(
+        !app.is_crashed(TaskId(4)),
+        "split-pinned task should not be marked as crashed"
+    );
+}
+
 // =====================================================================
 // Input handler coverage: normal mode keys
 // =====================================================================

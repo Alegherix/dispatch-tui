@@ -1528,6 +1528,11 @@ impl App {
     }
 
     fn handle_window_gone(&mut self, id: TaskId) -> Vec<Command> {
+        // Ignore WindowGone for the split-pinned task — its window is joined as
+        // a pane and isn't missing, just not a standalone window right now.
+        if self.board.split.active && self.board.split.pinned_task_id == Some(id) {
+            return vec![];
+        }
         if let Some(task) = self.find_task(id) {
             if task.status == TaskStatus::Running {
                 // Running task lost its window — likely crashed
@@ -1623,11 +1628,17 @@ impl App {
             .review_flash
             .retain(|_, t| t.elapsed().as_secs() < 3);
 
+        // Skip capturing the split-pinned task: its window has been joined as a
+        // pane and is no longer visible to `has_window`, which would falsely
+        // trigger WindowGone → Crashed.
+        let split_pinned = self.board.split.pinned_task_id.filter(|_| self.board.split.active);
+
         let mut cmds: Vec<Command> = self
             .board
             .tasks
             .iter()
             .filter(|t| t.tmux_window.is_some())
+            .filter(|t| Some(t.id) != split_pinned)
             .filter_map(|t| {
                 t.tmux_window
                     .clone()

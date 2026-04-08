@@ -23,7 +23,7 @@ const TICK_INTERVAL: Duration = Duration::from_secs(2);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::TaskStore;
+use crate::db::{AlertStore, PrStore, SettingsStore, TaskCrud};
 use crate::editor::{
     format_description_for_editor, format_editor_content, format_epic_for_editor,
     parse_description_editor_output, parse_editor_content, parse_epic_editor_output,
@@ -134,7 +134,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     }
 
     // Load cached review PRs from database
-    match database.load_review_prs() {
+    match database.load_prs(crate::db::PrKind::Review) {
         Ok(prs) => app.set_review_prs(prs),
         Err(e) => {
             app.update(Message::StatusInfo(format!(
@@ -144,7 +144,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     }
 
     // Load cached bot PRs from database
-    match database.load_bot_prs() {
+    match database.load_prs(crate::db::PrKind::Bot) {
         Ok(prs) => app.set_bot_prs(prs),
         Err(e) => {
             app.update(Message::StatusInfo(format!(
@@ -1343,11 +1343,7 @@ impl TuiRuntime {
         kind: PrListKind,
         prs: Vec<crate::models::ReviewPr>,
     ) {
-        let result = match kind {
-            PrListKind::Review => self.database.save_review_prs(&prs),
-            PrListKind::Authored => self.database.save_my_prs(&prs),
-            PrListKind::Bot => self.database.save_bot_prs(&prs),
-        };
+        let result = self.database.save_prs(kind.to_pr_kind(), &prs);
         if let Err(e) = result {
             app.update(Message::Error(Self::db_error(
                 &format!("persisting {} PRs", kind.label()),
@@ -1581,7 +1577,7 @@ async fn execute_commands(
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
             Command::PersistReviewAgent {
-                table,
+                pr_kind,
                 github_repo,
                 number,
                 tmux_window,
@@ -1589,7 +1585,7 @@ async fn execute_commands(
             } => {
                 if let Err(e) =
                     rt.database
-                        .set_pr_agent(&table, &github_repo, number, &tmux_window, &worktree)
+                        .set_pr_agent(pr_kind, &github_repo, number, &tmux_window, &worktree)
                 {
                     let extra = app.update(Message::Error(format!(
                         "Failed to persist review agent: {e}"
@@ -1888,6 +1884,20 @@ mod tests {
         (rt, app)
     }
 
+    /// Helper: create_task + get_task in one step (replaces removed trait method).
+    fn create_task_returning(
+        db: &dyn db::TaskStore,
+        title: &str,
+        description: &str,
+        repo_path: &str,
+        plan: Option<&str>,
+        status: models::TaskStatus,
+    ) -> anyhow::Result<models::Task> {
+        let id = db.create_task(title, description, repo_path, plan, status)?;
+        db.get_task(id)?
+            .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
+    }
+
     #[test]
     fn exec_insert_task_adds_to_db_and_app() {
         let (rt, mut app) = test_runtime();
@@ -2092,8 +2102,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning("Test Task", "desc", repo, None, models::TaskStatus::Backlog)
+        let task = create_task_returning(&*db,
+            "Test Task", "desc", repo, None, models::TaskStatus::Backlog)
             .unwrap();
         rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch);
 
@@ -2116,8 +2126,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning(
+        let task = create_task_returning(&*db,
+            
                 "Fail Task",
                 "desc",
                 "/nonexistent",
@@ -2291,8 +2301,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
+        let task = create_task_returning(&*db,
+            "Test", "desc", "/repo", None, models::TaskStatus::Done)
             .unwrap();
         let id = task.id;
 
@@ -2334,8 +2344,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
+        let task = create_task_returning(&*db,
+            "Test", "desc", "/repo", None, models::TaskStatus::Done)
             .unwrap();
         let id = task.id;
 
@@ -2403,8 +2413,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning("Test", "desc", "/repo", None, models::TaskStatus::Done)
+        let task = create_task_returning(&*db,
+            "Test", "desc", "/repo", None, models::TaskStatus::Done)
             .unwrap();
         let id = task.id;
 
@@ -2619,10 +2629,10 @@ mod tests {
             worktree: None,
             agent_status: None,
         };
-        rt.database.save_review_prs(&[pr]).unwrap();
+        rt.database.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
 
         // Simulate what run_tui does: load cached reviews
-        let cached = rt.database.load_review_prs().unwrap();
+        let cached = rt.database.load_prs(crate::db::PrKind::Review).unwrap();
         app.set_review_prs(cached);
 
         assert_eq!(app.review_prs().len(), 1);
@@ -2770,8 +2780,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let mut task = db
-            .create_task_returning(
+        let mut task = create_task_returning(&*db,
+            
                 "Resume Me",
                 "desc",
                 "/repo",
@@ -2808,8 +2818,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning(
+        let task = create_task_returning(&*db,
+            
                 "Fail Resume",
                 "desc",
                 "/repo",
@@ -3070,7 +3080,7 @@ mod tests {
             agent_status: None,
         };
         rt.exec_persist_prs(&mut app, PrListKind::Review, vec![pr]);
-        assert_eq!(rt.database.load_review_prs().unwrap().len(), 1);
+        assert_eq!(rt.database.load_prs(crate::db::PrKind::Review).unwrap().len(), 1);
         assert!(app.error_popup().is_none());
     }
 
@@ -3102,7 +3112,7 @@ mod tests {
             agent_status: None,
         };
         rt.exec_persist_prs(&mut app, PrListKind::Authored, vec![pr]);
-        assert_eq!(rt.database.load_my_prs().unwrap().len(), 1);
+        assert_eq!(rt.database.load_prs(crate::db::PrKind::My).unwrap().len(), 1);
         assert!(app.error_popup().is_none());
     }
 
@@ -3134,7 +3144,7 @@ mod tests {
             agent_status: None,
         };
         rt.exec_persist_prs(&mut app, PrListKind::Bot, vec![pr]);
-        assert_eq!(rt.database.load_bot_prs().unwrap().len(), 1);
+        assert_eq!(rt.database.load_prs(crate::db::PrKind::Bot).unwrap().len(), 1);
         assert!(app.error_popup().is_none());
     }
 
@@ -3702,8 +3712,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning(
+        let task = create_task_returning(&*db,
+            
                 "Brainstorm Task",
                 "desc",
                 repo,
@@ -3732,8 +3742,8 @@ mod tests {
         )]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning(
+        let task = create_task_returning(&*db,
+            
                 "Fail",
                 "desc",
                 "/nonexistent",
@@ -3771,8 +3781,8 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning("Plan Task", "desc", repo, None, models::TaskStatus::Backlog)
+        let task = create_task_returning(&*db,
+            "Plan Task", "desc", repo, None, models::TaskStatus::Backlog)
             .unwrap();
         rt.exec_dispatch_agent(task, models::DispatchMode::Plan);
 
@@ -3795,8 +3805,8 @@ mod tests {
         )]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = db
-            .create_task_returning(
+        let task = create_task_returning(&*db,
+            
                 "Fail",
                 "desc",
                 "/nonexistent",

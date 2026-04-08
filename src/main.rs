@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::TaskStore;
+use dispatch_tui::db::TaskCrud;
 use dispatch_tui::{db, models, plan, runtime, service};
 
 #[derive(Parser)]

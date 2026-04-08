@@ -7,13 +7,13 @@ use crate::models::{
     TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
 
-use super::{Database, EpicPatch, TaskPatch, TaskStore};
+use super::{Database, EpicPatch, TaskPatch};
 
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 const TASK_COLUMNS: &str = "id, title, description, repo_path, status, worktree, tmux_window, \
      plan_path, epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at";
 
-impl TaskStore for Database {
+impl super::TaskCrud for Database {
     fn create_task(
         &self,
         title: &str,
@@ -101,64 +101,6 @@ impl TaskStore for Database {
         Ok(())
     }
 
-    fn list_repo_paths(&self) -> Result<Vec<String>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC LIMIT 9")
-            .context("Failed to prepare list_repo_paths")?;
-        let paths = stmt
-            .query_map([], |row| row.get(0))
-            .context("Failed to query repo_paths")?
-            .collect::<rusqlite::Result<Vec<String>>>()
-            .context("Failed to collect repo_paths")?;
-        Ok(paths)
-    }
-
-    fn save_repo_path(&self, path: &str) -> Result<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "INSERT INTO repo_paths (path) VALUES (?1)
-             ON CONFLICT(path) DO UPDATE SET last_used = datetime('now')",
-            params![path],
-        )
-        .context("Failed to save repo_path")?;
-        Ok(())
-    }
-
-    fn delete_repo_path(&self, path: &str) -> Result<()> {
-        let conn = self.conn()?;
-        conn.execute("DELETE FROM repo_paths WHERE path = ?1", params![path])
-            .context("Failed to delete repo_path")?;
-        // Clean up filter presets that reference this path
-        let presets: Vec<(String, String)> = {
-            let mut stmt = conn
-                .prepare("SELECT name, repo_paths FROM filter_presets")
-                .context("Failed to prepare preset query")?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .context("Failed to list presets for cleanup")?;
-            rows
-        };
-        for (name, json) in presets {
-            let paths: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
-            let filtered: Vec<String> = paths.into_iter().filter(|p| p != path).collect();
-            if filtered.is_empty() {
-                conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
-            } else {
-                let updated = serde_json::to_string(&filtered)
-                    .context("Failed to serialize filtered repo_paths")?;
-                conn.execute(
-                    "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
-                    params![updated, name],
-                )?;
-            }
-        }
-        Ok(())
-    }
-
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
         let conn = self.conn()?;
         conn.query_row(
@@ -168,19 +110,6 @@ impl TaskStore for Database {
         )
         .optional()
         .context("Failed to find task by plan")
-    }
-
-    fn create_task_returning(
-        &self,
-        title: &str,
-        description: &str,
-        repo_path: &str,
-        plan: Option<&str>,
-        status: TaskStatus,
-    ) -> Result<Task> {
-        let id = self.create_task(title, description, repo_path, plan, status)?;
-        self.get_task(id)?
-            .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
     }
 
     fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()> {
@@ -202,7 +131,6 @@ impl TaskStore for Database {
             sets.push("status = ?");
             values.push(Box::new(s.as_str().to_string()));
         }
-        // When status changes without an explicit sub_status, reset to the new column's default.
         let effective_sub_status = patch
             .sub_status
             .or_else(|| patch.status.map(SubStatus::default_for));
@@ -272,165 +200,67 @@ impl TaskStore for Database {
             .context("Failed to check shared worktree")?;
         Ok(count > 0)
     }
+}
 
-    fn create_epic(&self, title: &str, description: &str, repo_path: &str) -> Result<Epic> {
-        let id = {
-            let conn = self.conn()?;
-            conn.execute(
-                "INSERT INTO epics (title, description, repo_path) VALUES (?1, ?2, ?3)",
-                params![title, description, repo_path],
-            )
-            .context("Failed to insert epic")?;
-            EpicId(conn.last_insert_rowid())
-        }; // MutexGuard dropped here — avoids deadlock when get_epic() re-locks
-        self.get_epic(id)?
-            .ok_or_else(|| anyhow::anyhow!("Epic {id} vanished after insert"))
+// ---------------------------------------------------------------------------
+// SettingsStore
+// ---------------------------------------------------------------------------
+
+impl super::SettingsStore for Database {
+    fn list_repo_paths(&self) -> Result<Vec<String>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC LIMIT 9")
+            .context("Failed to prepare list_repo_paths")?;
+        let paths = stmt
+            .query_map([], |row| row.get(0))
+            .context("Failed to query repo_paths")?
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .context("Failed to collect repo_paths")?;
+        Ok(paths)
     }
 
-    fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
+    fn save_repo_path(&self, path: &str) -> Result<()> {
         let conn = self.conn()?;
-        conn.query_row(
-            "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
-             FROM epics WHERE id = ?1",
-            params![id.0],
-            row_to_epic,
+        conn.execute(
+            "INSERT INTO repo_paths (path) VALUES (?1)
+             ON CONFLICT(path) DO UPDATE SET last_used = datetime('now')",
+            params![path],
         )
-        .optional()
-        .context("Failed to get epic")
-    }
-
-    fn list_epics(&self) -> Result<Vec<Epic>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
-                 FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-            )
-            .context("Failed to prepare list_epics")?;
-        let epics = stmt
-            .query_map([], row_to_epic)
-            .context("Failed to query epics")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect epics")?;
-        Ok(epics)
-    }
-
-    fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
-        if !patch.has_changes() {
-            return Ok(());
-        }
-        let conn = self.conn()?;
-        let mut sets: Vec<&str> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(t) = patch.title {
-            sets.push("title = ?");
-            values.push(Box::new(t.to_string()));
-        }
-        if let Some(d) = patch.description {
-            sets.push("description = ?");
-            values.push(Box::new(d.to_string()));
-        }
-        if let Some(s) = patch.status {
-            sets.push("status = ?");
-            values.push(Box::new(s.as_str().to_string()));
-        }
-        if let Some(p) = patch.plan_path {
-            sets.push("plan_path = ?");
-            values.push(Box::new(p.map(|s| s.to_string())));
-        }
-        if let Some(so) = patch.sort_order {
-            sets.push("sort_order = ?");
-            values.push(Box::new(so));
-        }
-        if let Some(rp) = patch.repo_path {
-            sets.push("repo_path = ?");
-            values.push(Box::new(rp.to_string()));
-        }
-
-        sets.push("updated_at = datetime('now')");
-        values.push(Box::new(id.0));
-
-        let sql = format!("UPDATE epics SET {} WHERE id = ?", sets.join(", "));
-        let refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
-        let rows = conn
-            .execute(&sql, refs.as_slice())
-            .context("Failed to patch epic")?;
-        if rows == 0 {
-            anyhow::bail!("Epic {id} not found");
-        }
+        .context("Failed to save repo_path")?;
         Ok(())
     }
 
-    fn delete_epic(&self, id: EpicId) -> Result<()> {
+    fn delete_repo_path(&self, path: &str) -> Result<()> {
         let conn = self.conn()?;
-        conn.execute("DELETE FROM tasks WHERE epic_id = ?1", params![id.0])
-            .context("Failed to delete epic subtasks")?;
-        let rows = conn
-            .execute("DELETE FROM epics WHERE id = ?1", params![id.0])
-            .context("Failed to delete epic")?;
-        if rows == 0 {
-            anyhow::bail!("Epic {} not found", id);
-        }
-        Ok(())
-    }
-
-    fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
-        let conn = self.conn()?;
-        let rows = conn
-            .execute(
-                "UPDATE tasks SET epic_id = ?1, updated_at = datetime('now') WHERE id = ?2",
-                params![epic_id.map(|e| e.0), task_id.0],
-            )
-            .context("Failed to set task epic_id")?;
-        if rows == 0 {
-            anyhow::bail!("Task {} not found", task_id);
-        }
-        Ok(())
-    }
-
-    fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
-            )
-            .context("Failed to prepare list_tasks_for_epic")?;
-        let tasks = stmt
-            .query_map(params![epic_id.0], row_to_task)
-            .context("Failed to query tasks for epic")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Failed to collect tasks for epic")?;
-        Ok(tasks)
-    }
-
-    fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
-        let epic = match self.get_epic(epic_id)? {
-            Some(e) => e,
-            None => return Ok(()),
+        conn.execute("DELETE FROM repo_paths WHERE path = ?1", params![path])
+            .context("Failed to delete repo_path")?;
+        // Clean up filter presets that reference this path
+        let presets: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT name, repo_paths FROM filter_presets")
+                .context("Failed to prepare preset query")?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to list presets for cleanup")?;
+            rows
         };
-
-        let subtasks = self.list_tasks_for_epic(epic_id)?;
-        let statuses: Vec<TaskStatus> = subtasks
-            .iter()
-            .filter(|t| t.status != TaskStatus::Archived)
-            .map(|t| t.status)
-            .collect();
-
-        let derived = if statuses.is_empty() {
-            TaskStatus::Backlog
-        } else if statuses.iter().all(|s| *s == TaskStatus::Done) {
-            TaskStatus::Done
-        } else if statuses.contains(&TaskStatus::Review) {
-            TaskStatus::Review
-        } else if statuses.contains(&TaskStatus::Running) {
-            TaskStatus::Running
-        } else {
-            TaskStatus::Backlog
-        };
-
-        if derived != epic.status {
-            self.patch_epic(epic_id, &EpicPatch::new().status(derived))?;
+        for (name, json) in presets {
+            let paths: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+            let filtered: Vec<String> = paths.into_iter().filter(|p| p != path).collect();
+            if filtered.is_empty() {
+                conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
+            } else {
+                let updated = serde_json::to_string(&filtered)
+                    .context("Failed to serialize filtered repo_paths")?;
+                conn.execute(
+                    "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
+                    params![updated, name],
+                )?;
+            }
         }
         Ok(())
     }
@@ -616,79 +446,204 @@ impl TaskStore for Database {
             })
             .collect())
     }
+}
 
-    fn save_review_prs(&self, prs: &[ReviewPr]) -> Result<()> {
-        let conn = self.conn()?;
-        save_prs_to_table(&conn, "review_prs", prs)
+// ---------------------------------------------------------------------------
+// EpicCrud
+// ---------------------------------------------------------------------------
+
+impl super::EpicCrud for Database {
+    fn create_epic(&self, title: &str, description: &str, repo_path: &str) -> Result<Epic> {
+        let id = {
+            let conn = self.conn()?;
+            conn.execute(
+                "INSERT INTO epics (title, description, repo_path) VALUES (?1, ?2, ?3)",
+                params![title, description, repo_path],
+            )
+            .context("Failed to insert epic")?;
+            EpicId(conn.last_insert_rowid())
+        }; // MutexGuard dropped here — avoids deadlock when get_epic() re-locks
+        self.get_epic(id)?
+            .ok_or_else(|| anyhow::anyhow!("Epic {id} vanished after insert"))
     }
 
-    fn load_review_prs(&self) -> Result<Vec<ReviewPr>> {
+    fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         let conn = self.conn()?;
-        load_prs_from_table(&conn, "review_prs")
+        conn.query_row(
+            "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
+             FROM epics WHERE id = ?1",
+            params![id.0],
+            row_to_epic,
+        )
+        .optional()
+        .context("Failed to get epic")
     }
 
-    fn save_my_prs(&self, prs: &[ReviewPr]) -> Result<()> {
+    fn list_epics(&self) -> Result<Vec<Epic>> {
         let conn = self.conn()?;
-        save_prs_to_table(&conn, "my_prs", prs)
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
+                 FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+            )
+            .context("Failed to prepare list_epics")?;
+        let epics = stmt
+            .query_map([], row_to_epic)
+            .context("Failed to query epics")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect epics")?;
+        Ok(epics)
     }
 
-    fn load_my_prs(&self) -> Result<Vec<ReviewPr>> {
+    fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
+        if !patch.has_changes() {
+            return Ok(());
+        }
         let conn = self.conn()?;
-        load_prs_from_table(&conn, "my_prs")
+        let mut sets: Vec<&str> = Vec::new();
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(t) = patch.title {
+            sets.push("title = ?");
+            values.push(Box::new(t.to_string()));
+        }
+        if let Some(d) = patch.description {
+            sets.push("description = ?");
+            values.push(Box::new(d.to_string()));
+        }
+        if let Some(s) = patch.status {
+            sets.push("status = ?");
+            values.push(Box::new(s.as_str().to_string()));
+        }
+        if let Some(p) = patch.plan_path {
+            sets.push("plan_path = ?");
+            values.push(Box::new(p.map(|s| s.to_string())));
+        }
+        if let Some(so) = patch.sort_order {
+            sets.push("sort_order = ?");
+            values.push(Box::new(so));
+        }
+        if let Some(rp) = patch.repo_path {
+            sets.push("repo_path = ?");
+            values.push(Box::new(rp.to_string()));
+        }
+
+        sets.push("updated_at = datetime('now')");
+        values.push(Box::new(id.0));
+
+        let sql = format!("UPDATE epics SET {} WHERE id = ?", sets.join(", "));
+        let refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+        let rows = conn
+            .execute(&sql, refs.as_slice())
+            .context("Failed to patch epic")?;
+        if rows == 0 {
+            anyhow::bail!("Epic {id} not found");
+        }
+        Ok(())
     }
 
-    fn save_bot_prs(&self, prs: &[ReviewPr]) -> Result<()> {
+    fn delete_epic(&self, id: EpicId) -> Result<()> {
         let conn = self.conn()?;
-        save_prs_to_table(&conn, "bot_prs", prs)
+        conn.execute("DELETE FROM tasks WHERE epic_id = ?1", params![id.0])
+            .context("Failed to delete epic subtasks")?;
+        let rows = conn
+            .execute("DELETE FROM epics WHERE id = ?1", params![id.0])
+            .context("Failed to delete epic")?;
+        if rows == 0 {
+            anyhow::bail!("Epic {} not found", id);
+        }
+        Ok(())
     }
 
-    fn load_bot_prs(&self) -> Result<Vec<ReviewPr>> {
+    fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
         let conn = self.conn()?;
-        load_prs_from_table(&conn, "bot_prs")
+        let rows = conn
+            .execute(
+                "UPDATE tasks SET epic_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+                params![epic_id.map(|e| e.0), task_id.0],
+            )
+            .context("Failed to set task epic_id")?;
+        if rows == 0 {
+            anyhow::bail!("Task {} not found", task_id);
+        }
+        Ok(())
     }
 
-    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()> {
+    fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>> {
         let conn = self.conn()?;
-        save_security_alerts_impl(&conn, alerts)
+        let mut stmt = conn
+            .prepare(
+                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
+            )
+            .context("Failed to prepare list_tasks_for_epic")?;
+        let tasks = stmt
+            .query_map(params![epic_id.0], row_to_task)
+            .context("Failed to query tasks for epic")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect tasks for epic")?;
+        Ok(tasks)
     }
 
-    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>> {
+    fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
+        let epic = match self.get_epic(epic_id)? {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+
+        let subtasks = self.list_tasks_for_epic(epic_id)?;
+        let statuses: Vec<TaskStatus> = subtasks
+            .iter()
+            .filter(|t| t.status != TaskStatus::Archived)
+            .map(|t| t.status)
+            .collect();
+
+        let derived = if statuses.is_empty() {
+            TaskStatus::Backlog
+        } else if statuses.iter().all(|s| *s == TaskStatus::Done) {
+            TaskStatus::Done
+        } else if statuses.contains(&TaskStatus::Review) {
+            TaskStatus::Review
+        } else if statuses.contains(&TaskStatus::Running) {
+            TaskStatus::Running
+        } else {
+            TaskStatus::Backlog
+        };
+
+        if derived != epic.status {
+            self.patch_epic(epic_id, &EpicPatch::new().status(derived))?;
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PrStore
+// ---------------------------------------------------------------------------
+
+impl super::PrStore for Database {
+    fn save_prs(&self, kind: super::PrKind, prs: &[ReviewPr]) -> Result<()> {
         let conn = self.conn()?;
-        load_security_alerts_impl(&conn)
+        save_prs_to_table(&conn, kind.table_name(), prs)
+    }
+
+    fn load_prs(&self, kind: super::PrKind) -> Result<Vec<ReviewPr>> {
+        let conn = self.conn()?;
+        load_prs_from_table(&conn, kind.table_name())
     }
 
     fn set_pr_agent(
         &self,
-        table: &str,
+        kind: super::PrKind,
         repo: &str,
         number: i64,
         tmux_window: &str,
         worktree: &str,
     ) -> Result<()> {
-        anyhow::ensure!(
-            matches!(table, "review_prs" | "my_prs" | "bot_prs"),
-            "invalid PR table: {table}"
-        );
+        let table = kind.table_name();
         let conn = self.conn()?;
         conn.execute(
             &format!("UPDATE {table} SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4"),
             params![tmux_window, worktree, repo, number],
-        )?;
-        Ok(())
-    }
-
-    fn set_alert_agent(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::AlertKind,
-        tmux_window: &str,
-        worktree: &str,
-    ) -> Result<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4 AND kind = ?5",
-            params![tmux_window, worktree, repo, number, kind.as_db_str()],
         )?;
         Ok(())
     }
@@ -712,6 +667,38 @@ impl TaskStore for Database {
             return Ok("security_alerts".to_string());
         }
         anyhow::bail!("No active agent found for {repo}#{number}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AlertStore
+// ---------------------------------------------------------------------------
+
+impl super::AlertStore for Database {
+    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()> {
+        let conn = self.conn()?;
+        save_security_alerts_impl(&conn, alerts)
+    }
+
+    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>> {
+        let conn = self.conn()?;
+        load_security_alerts_impl(&conn)
+    }
+
+    fn set_alert_agent(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::AlertKind,
+        tmux_window: &str,
+        worktree: &str,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE security_alerts SET tmux_window = ?1, worktree = ?2, agent_status = 'reviewing' WHERE repo = ?3 AND number = ?4 AND kind = ?5",
+            params![tmux_window, worktree, repo, number, kind.as_db_str()],
+        )?;
+        Ok(())
     }
 }
 

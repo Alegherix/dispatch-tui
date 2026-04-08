@@ -3777,11 +3777,11 @@ async fn update_review_status_updates_pr() {
         worktree: None,
         agent_status: None,
     };
-    state.db.save_review_prs(&[pr]).unwrap();
+    state.db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
     state
         .db
         .set_pr_agent(
-            "review_prs",
+            crate::db::PrKind::Review,
             "acme/app",
             42,
             "dispatch:review-42",
@@ -3800,7 +3800,7 @@ async fn update_review_status_updates_pr() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let loaded = state.db.load_review_prs().unwrap();
+    let loaded = state.db.load_prs(crate::db::PrKind::Review).unwrap();
     assert_eq!(
         loaded[0].agent_status,
         Some(ReviewAgentStatus::FindingsReady)

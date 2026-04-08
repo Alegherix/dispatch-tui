@@ -3046,7 +3046,7 @@ fn stress_rapid_status_transitions() {
 #[test]
 fn stress_db_with_many_tasks() {
     let db = crate::db::Database::open_in_memory().unwrap();
-    use crate::db::TaskStore;
+    use crate::db::TaskCrud;
     for i in 0..500 {
         db.create_task(
             &format!("Task {i}"),

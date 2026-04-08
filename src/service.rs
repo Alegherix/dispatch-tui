@@ -311,6 +311,11 @@ impl TaskService {
     }
 
     pub fn create_task(&self, params: CreateTaskParams) -> Result<TaskId, ServiceError> {
+        Ok(self.create_task_returning(params)?.id)
+    }
+
+    /// Create a task and return the full Task object (used by TUI).
+    pub fn create_task_returning(&self, params: CreateTaskParams) -> Result<Task, ServiceError> {
         let repo_path = crate::models::expand_tilde(&params.repo_path);
 
         let plan = params.plan_path.as_deref().map(|p| {
@@ -346,50 +351,7 @@ impl TaskService {
                 .patch_task(task_id, &TaskPatch::new().tag(Some(tag)));
         }
 
-        Ok(task_id)
-    }
-
-    /// Create a task and return the full Task object (used by TUI).
-    pub fn create_task_returning(&self, params: CreateTaskParams) -> Result<Task, ServiceError> {
-        let repo_path = crate::models::expand_tilde(&params.repo_path);
-
-        let plan = params.plan_path.as_deref().map(|p| {
-            std::fs::canonicalize(p)
-                .map(|abs| abs.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| p.to_string())
-        });
-
-        let mut task = self
-            .db
-            .create_task_returning(
-                &params.title,
-                &params.description,
-                &repo_path,
-                plan.as_deref(),
-                TaskStatus::Backlog,
-            )
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
-
-        if let Some(eid) = params.epic_id {
-            self.db
-                .set_task_epic_id(task.id, Some(EpicId(eid)))
-                .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
-            task.epic_id = Some(EpicId(eid));
-        }
-        if let Some(so) = params.sort_order {
-            let _ = self
-                .db
-                .patch_task(task.id, &TaskPatch::new().sort_order(Some(so)));
-            task.sort_order = Some(so);
-        }
-        if let Some(tag) = params.tag {
-            let _ = self
-                .db
-                .patch_task(task.id, &TaskPatch::new().tag(Some(tag)));
-            task.tag = Some(tag);
-        }
-
-        Ok(task)
+        self.get_task(task_id.0)
     }
 
     pub fn delete_task(&self, task_id: i64) -> Result<(), ServiceError> {
@@ -1816,5 +1778,209 @@ mod tests {
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
         assert_eq!(task.pr_url, None);
+    }
+
+    #[test]
+    fn list_tasks_filters_by_epic_id() {
+        let db = test_db();
+        let svc = task_svc(&db);
+        let esvc = epic_svc(&db);
+
+        let epic = esvc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        let id1 = svc
+            .create_task(CreateTaskParams {
+                title: "In epic".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        let _id2 = svc
+            .create_task(CreateTaskParams {
+                title: "No epic".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        let tasks = svc
+            .list_tasks(ListTasksFilter {
+                statuses: None,
+                epic_id: Some(epic.id),
+            })
+            .unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, id1);
+    }
+
+    #[test]
+    fn list_tasks_excludes_archived_by_default() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        svc.update_task(UpdateTaskParams {
+            task_id: id.0,
+            status: Some(TaskStatus::Archived),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: None,
+            tmux_window: None,
+        })
+        .unwrap();
+
+        let tasks = svc
+            .list_tasks(ListTasksFilter {
+                statuses: None,
+                epic_id: None,
+            })
+            .unwrap();
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn validate_send_message_missing_worktree() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let from_id = svc
+            .create_task(CreateTaskParams {
+                title: "Sender".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        // Target task has no worktree (still backlog)
+        let to_id = svc
+            .create_task(CreateTaskParams {
+                title: "Receiver".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        let err = svc
+            .validate_send_message(from_id.0, to_id.0)
+            .unwrap_err();
+        assert!(matches!(err, ServiceError::Validation(_)));
+        assert!(err.to_string().contains("no worktree"));
+    }
+
+    #[test]
+    fn validate_send_message_missing_tmux_window() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let from_id = svc
+            .create_task(CreateTaskParams {
+                title: "Sender".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        let to_id = svc
+            .create_task(CreateTaskParams {
+                title: "Receiver".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        // Set worktree but not tmux_window
+        svc.update_task(UpdateTaskParams {
+            task_id: to_id.0,
+            status: Some(TaskStatus::Running),
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
+            tmux_window: None,
+        })
+        .unwrap();
+
+        let err = svc
+            .validate_send_message(from_id.0, to_id.0)
+            .unwrap_err();
+        assert!(matches!(err, ServiceError::Validation(_)));
+        assert!(err.to_string().contains("no tmux window"));
+    }
+
+    #[test]
+    fn validate_send_message_target_not_found() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let from_id = svc
+            .create_task(CreateTaskParams {
+                title: "Sender".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+            })
+            .unwrap();
+
+        let err = svc.validate_send_message(from_id.0, 999).unwrap_err();
+        assert!(matches!(err, ServiceError::NotFound(_)));
     }
 }

@@ -174,10 +174,32 @@ impl<'a> EpicPatch<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// TaskStore trait
+// PrKind — selects which PR table to operate on
 // ---------------------------------------------------------------------------
 
-pub trait TaskStore: Send + Sync {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrKind {
+    Review,
+    My,
+    Bot,
+}
+
+impl PrKind {
+    pub fn table_name(self) -> &'static str {
+        match self {
+            PrKind::Review => "review_prs",
+            PrKind::My => "my_prs",
+            PrKind::Bot => "bot_prs",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-traits — focused slices of the database API
+// ---------------------------------------------------------------------------
+
+/// Task CRUD, list, patch, status updates.
+pub trait TaskCrud: Send + Sync {
     fn create_task(
         &self,
         title: &str,
@@ -197,22 +219,13 @@ pub trait TaskStore: Send + Sync {
         expected: TaskStatus,
     ) -> Result<bool>;
     fn delete_task(&self, id: TaskId) -> Result<()>;
-    fn list_repo_paths(&self) -> Result<Vec<String>>;
-    fn save_repo_path(&self, path: &str) -> Result<()>;
-    fn delete_repo_path(&self, path: &str) -> Result<()>;
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
     fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
-    fn create_task_returning(
-        &self,
-        title: &str,
-        description: &str,
-        repo_path: &str,
-        plan: Option<&str>,
-        status: TaskStatus,
-    ) -> Result<Task>;
     fn has_other_tasks_with_worktree(&self, worktree: &str, exclude_id: TaskId) -> Result<bool>;
+}
 
-    // Epic operations
+/// Epic CRUD, list, patch, recalculate status.
+pub trait EpicCrud: Send + Sync {
     fn create_epic(&self, title: &str, description: &str, repo_path: &str) -> Result<Epic>;
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
     fn list_epics(&self) -> Result<Vec<Epic>>;
@@ -223,52 +236,27 @@ pub trait TaskStore: Send + Sync {
     /// Recalculate an epic's status from its non-archived subtasks.
     /// Only advances forward (never moves backward), so manual overrides are preserved.
     fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
+}
 
-    // Settings
-    fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
-    fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
-    fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
-    fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
-
-    /// Seed default GitHub query strings if not already set.
-    /// Uses INSERT OR IGNORE so user edits are never overwritten.
-    fn seed_github_query_defaults(&self) -> Result<()>;
-
-    // Usage tracking
-    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
-
-    fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
-
-    // Filter presets
-    fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()>;
-    fn delete_filter_preset(&self, name: &str) -> Result<()>;
-    fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
-
-    // Review PRs
-    fn save_review_prs(&self, prs: &[crate::models::ReviewPr]) -> Result<()>;
-    fn load_review_prs(&self) -> Result<Vec<crate::models::ReviewPr>>;
-
-    // My PRs (authored)
-    fn save_my_prs(&self, prs: &[crate::models::ReviewPr]) -> Result<()>;
-    fn load_my_prs(&self) -> Result<Vec<crate::models::ReviewPr>>;
-
-    // Bot PRs (dependabot/renovate)
-    fn save_bot_prs(&self, prs: &[crate::models::ReviewPr]) -> Result<()>;
-    fn load_bot_prs(&self) -> Result<Vec<crate::models::ReviewPr>>;
-
-    // Security alerts
-    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()>;
-    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>>;
-
-    // Agent tracking on PRs/alerts
+/// Save/load PRs (all kinds) and agent tracking on PRs.
+pub trait PrStore: Send + Sync {
+    fn save_prs(&self, kind: PrKind, prs: &[crate::models::ReviewPr]) -> Result<()>;
+    fn load_prs(&self, kind: PrKind) -> Result<Vec<crate::models::ReviewPr>>;
     fn set_pr_agent(
         &self,
-        table: &str,
+        kind: PrKind,
         repo: &str,
         number: i64,
         tmux_window: &str,
         worktree: &str,
     ) -> Result<()>;
+    fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String>;
+}
+
+/// Save/load security alerts and agent tracking on alerts.
+pub trait AlertStore: Send + Sync {
+    fn save_security_alerts(&self, alerts: &[crate::models::SecurityAlert]) -> Result<()>;
+    fn load_security_alerts(&self) -> Result<Vec<crate::models::SecurityAlert>>;
     fn set_alert_agent(
         &self,
         repo: &str,
@@ -277,8 +265,33 @@ pub trait TaskStore: Send + Sync {
         tmux_window: &str,
         worktree: &str,
     ) -> Result<()>;
-    fn update_agent_status(&self, repo: &str, number: i64, status: Option<&str>) -> Result<String>;
 }
+
+/// Settings, filter presets, repo paths, and usage tracking.
+pub trait SettingsStore: Send + Sync {
+    fn list_repo_paths(&self) -> Result<Vec<String>>;
+    fn save_repo_path(&self, path: &str) -> Result<()>;
+    fn delete_repo_path(&self, path: &str) -> Result<()>;
+    fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
+    fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
+    fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
+    fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
+    /// Seed default GitHub query strings if not already set.
+    fn seed_github_query_defaults(&self) -> Result<()>;
+    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
+    fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
+    fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()>;
+    fn delete_filter_preset(&self, name: &str) -> Result<()>;
+    fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
+}
+
+// ---------------------------------------------------------------------------
+// TaskStore — supertrait combining all sub-traits
+// ---------------------------------------------------------------------------
+
+pub trait TaskStore: TaskCrud + EpicCrud + PrStore + AlertStore + SettingsStore {}
+
+impl<T: TaskCrud + EpicCrud + PrStore + AlertStore + SettingsStore> TaskStore for T {}
 
 // ---------------------------------------------------------------------------
 // Database

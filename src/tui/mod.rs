@@ -3125,7 +3125,7 @@ impl App {
         number: i64,
         tmux_window: &str,
         worktree: &str,
-    ) -> String {
+    ) -> crate::db::PrKind {
         self.review
             .find_and_set_pr_agent(github_repo, number, tmux_window, worktree)
     }
@@ -3886,9 +3886,9 @@ impl App {
             .remove(&(github_repo.clone(), number));
         let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
-        let table = self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
+        let pr_kind = self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
         vec![Command::PersistReviewAgent {
-            table,
+            pr_kind,
             github_repo,
             number,
             tmux_window,

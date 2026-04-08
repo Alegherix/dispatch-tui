@@ -416,7 +416,7 @@ pub enum Message {
 pub enum Command {
     PersistTask(Task),
     PersistReviewAgent {
-        table: String,
+        pr_kind: crate::db::PrKind,
         github_repo: String,
         number: i64,
         tmux_window: String,
@@ -813,10 +813,14 @@ impl PrListKind {
 
     /// Database table name.
     pub fn table_name(self) -> &'static str {
+        self.to_pr_kind().table_name()
+    }
+
+    pub fn to_pr_kind(self) -> crate::db::PrKind {
         match self {
-            Self::Review => "review_prs",
-            Self::Authored => "my_prs",
-            Self::Bot => "bot_prs",
+            Self::Review => crate::db::PrKind::Review,
+            Self::Authored => crate::db::PrKind::My,
+            Self::Bot => crate::db::PrKind::Bot,
         }
     }
 
@@ -936,18 +940,18 @@ impl ReviewBoardState {
         number: i64,
         tmux_window: &str,
         worktree: &str,
-    ) -> String {
+    ) -> crate::db::PrKind {
         for kind in [PrListKind::Review, PrListKind::Authored, PrListKind::Bot] {
             for pr in self.list_mut(kind).prs.iter_mut() {
                 if pr.repo == github_repo && pr.number == number {
                     pr.tmux_window = Some(tmux_window.to_string());
                     pr.worktree = Some(worktree.to_string());
                     pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-                    return kind.table_name().to_string();
+                    return kind.to_pr_kind();
                 }
             }
         }
-        "review_prs".to_string()
+        crate::db::PrKind::Review
     }
 }
 
@@ -1592,8 +1596,8 @@ mod tests {
         let mut state = ReviewBoardState::default();
         state.review.set_prs(vec![make_pr(42, "org/app")]);
 
-        let table = state.find_and_set_pr_agent("org/app", 42, "win-42", "/tmp/wt");
-        assert_eq!(table, "review_prs");
+        let kind = state.find_and_set_pr_agent("org/app", 42, "win-42", "/tmp/wt");
+        assert_eq!(kind, crate::db::PrKind::Review);
         assert_eq!(state.review.prs[0].tmux_window.as_deref(), Some("win-42"));
         assert_eq!(state.review.prs[0].worktree.as_deref(), Some("/tmp/wt"));
         assert_eq!(
@@ -1607,8 +1611,8 @@ mod tests {
         let mut state = ReviewBoardState::default();
         state.authored.set_prs(vec![make_pr(99, "org/lib")]);
 
-        let table = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
-        assert_eq!(table, "my_prs");
+        let kind = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
+        assert_eq!(kind, crate::db::PrKind::My);
         assert_eq!(state.authored.prs[0].tmux_window.as_deref(), Some("win-99"));
     }
 
@@ -1617,15 +1621,15 @@ mod tests {
         let mut state = ReviewBoardState::default();
         state.bot.set_prs(vec![make_pr(7, "org/infra")]);
 
-        let table = state.find_and_set_pr_agent("org/infra", 7, "win-7", "/tmp/wt3");
-        assert_eq!(table, "bot_prs");
+        let kind = state.find_and_set_pr_agent("org/infra", 7, "win-7", "/tmp/wt3");
+        assert_eq!(kind, crate::db::PrKind::Bot);
         assert_eq!(state.bot.prs[0].tmux_window.as_deref(), Some("win-7"));
     }
 
     #[test]
     fn find_and_set_pr_agent_defaults_to_review_prs_when_not_found() {
         let mut state = ReviewBoardState::default();
-        let table = state.find_and_set_pr_agent("org/unknown", 1, "win", "/wt");
-        assert_eq!(table, "review_prs");
+        let kind = state.find_and_set_pr_agent("org/unknown", 1, "win", "/wt");
+        assert_eq!(kind, crate::db::PrKind::Review);
     }
 }

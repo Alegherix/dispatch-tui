@@ -3282,9 +3282,10 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(), // kill_pane (old pane, no window name)
-            MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
-            MockProcessRunner::ok_with_stdout(b"%3\n"), // join_pane
+            MockProcessRunner::ok(),                     // kill_pane (old pane, no window name)
+            MockProcessRunner::ok_with_stdout(b"%1\n"),  // current_pane_id
+            MockProcessRunner::ok_with_stdout(b"%3\n"),  // join_pane: display-message for source pane ID
+            MockProcessRunner::ok(),                     // join_pane: join-pane command
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();

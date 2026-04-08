@@ -236,6 +236,22 @@ pub fn join_pane(
     target_pane: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<String> {
+    // Get the source pane ID first — pane IDs are preserved across moves,
+    // and join-pane does not support -P/-F for printing the result.
+    let id_output = runner.run(
+        "tmux",
+        &["display-message", "-p", "-t", source_window, "#{pane_id}"],
+    )?;
+    if !id_output.status.success() {
+        bail!(
+            "tmux display-message failed for source window '{}'",
+            source_window
+        );
+    }
+    let pane_id = String::from_utf8_lossy(&id_output.stdout)
+        .trim()
+        .to_string();
+
     let output = runner.run(
         "tmux",
         &[
@@ -248,15 +264,11 @@ pub fn join_pane(
             target_pane,
             "-l",
             "40%",
-            "-P",
-            "-F",
-            "#{pane_id}",
         ],
     )?;
     if !output.status.success() {
         bail!("tmux join-pane failed with status {}", output.status);
     }
-    let pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok(pane_id)
 }
 
@@ -677,5 +689,37 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
+    }
+
+    #[test]
+    fn join_pane_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"%5\n"), // display-message to get source pane ID
+            MockProcessRunner::ok(),                     // join-pane (no -P/-F)
+        ]);
+        let pane_id = join_pane("task-42", "%1", &mock).unwrap();
+        assert_eq!(pane_id, "%5");
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        // First call: get the source pane ID
+        assert_eq!(
+            calls[0].1,
+            vec!["display-message", "-p", "-t", "task-42", "#{pane_id}"]
+        );
+        // Second call: join-pane without -P or -F
+        assert_eq!(
+            calls[1].1,
+            vec!["join-pane", "-h", "-d", "-s", "task-42", "-t", "%1", "-l", "40%"]
+        );
+    }
+
+    #[test]
+    fn join_pane_returns_source_pane_id() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"%99\n"),
+            MockProcessRunner::ok(),
+        ]);
+        let result = join_pane("my-window", "%0", &mock).unwrap();
+        assert_eq!(result, "%99");
     }
 }

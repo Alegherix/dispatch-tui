@@ -491,6 +491,13 @@ fn build_tmux_window_name(task_id: TaskId) -> String {
     format!("task-{task_id}")
 }
 
+/// Returns `(epic_id_line, epic_section)` for embedding in agent prompts.
+fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
+    let id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
+    let section = epic.map_or(String::new(), |e| e.prompt_section());
+    (id_line, section)
+}
+
 fn build_prompt(
     task_id: TaskId,
     title: &str,
@@ -505,8 +512,7 @@ fn build_prompt(
         None => String::new(),
     };
 
-    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
-    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+    let (epic_id_line, epic_section) = epic_preamble(epic);
 
     format!(
         "You are an autonomous coding agent. \
@@ -534,8 +540,7 @@ fn build_quick_dispatch_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
-    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
-    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+    let (epic_id_line, epic_section) = epic_preamble(epic);
 
     format!(
         "You are an autonomous coding agent working interactively with the user.\n\
@@ -564,8 +569,7 @@ fn build_brainstorm_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
-    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
-    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+    let (epic_id_line, epic_section) = epic_preamble(epic);
 
     format!(
         "You are an autonomous coding agent starting a brainstorming session.\n\
@@ -598,8 +602,7 @@ fn build_plan_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
-    let epic_id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
-    let epic_section = epic.map_or(String::new(), |e| e.prompt_section());
+    let (epic_id_line, epic_section) = epic_preamble(epic);
 
     format!(
         "You are an autonomous coding agent starting a planning session.\n\
@@ -1415,6 +1418,26 @@ mod tests {
         assert_ne!(plan, brainstorm);
         assert!(plan.contains("planning"));
         assert!(brainstorm.contains("brainstorm"));
+    }
+
+    #[test]
+    fn epic_preamble_returns_empty_strings_for_none() {
+        let (id_line, section) = epic_preamble(None);
+        assert!(id_line.is_empty());
+        assert!(section.is_empty());
+    }
+
+    #[test]
+    fn epic_preamble_returns_id_line_and_section_for_some() {
+        let ctx = EpicContext {
+            epic_id: EpicId(5),
+            epic_title: "Auth Rework".to_string(),
+            sibling_summaries: vec!["[3] Setup DB (done)".to_string()],
+        };
+        let (id_line, section) = epic_preamble(Some(&ctx));
+        assert!(id_line.contains("EpicId: 5"));
+        assert!(section.contains("Auth Rework"));
+        assert!(section.contains("Setup DB"));
     }
 
     // --- ProcessRunner-based tests ---

@@ -13648,3 +13648,392 @@ fn needs_review_column_bg_matches_backlog() {
         "Needs Review column bg should match Backlog column bg"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Input routing tests — verify handle_key() dispatches to correct handler
+// ---------------------------------------------------------------------------
+
+/// In Normal mode on the Board view, known keys produce commands/state changes
+/// and unknown keys produce no commands.
+#[test]
+fn handle_key_normal_board_known_keys_produce_effects() {
+    let mut app = make_app();
+    // 'n' starts new task (switches to InputTitle mode)
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty()); // inline mutation, no commands
+    assert_eq!(app.input.mode, InputMode::InputTitle);
+}
+
+#[test]
+fn handle_key_normal_board_unknown_key_is_noop() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// In Normal mode on the ReviewBoard view, keys route to the review board handler.
+#[test]
+fn handle_key_normal_review_board_routes_correctly() {
+    let mut app = make_app();
+    app.board.view_mode = ViewMode::ReviewBoard {
+        mode: ReviewBoardMode::Reviewer,
+        selection: ReviewBoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    // Tab should switch to security board (may emit refresh commands)
+    app.handle_key(make_key(KeyCode::Tab));
+    assert!(matches!(app.board.view_mode, ViewMode::SecurityBoard { .. }));
+}
+
+/// In Normal mode on the SecurityBoard view, keys route to the security board handler.
+#[test]
+fn handle_key_normal_security_board_routes_correctly() {
+    let mut app = make_app();
+    app.board.view_mode = ViewMode::SecurityBoard {
+        selection: SecurityBoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    // Tab should switch away from security board
+    let cmds = app.handle_key(make_key(KeyCode::Tab));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+/// InputTitle mode routes to the text input handler.
+#[test]
+fn handle_key_input_title_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTitle;
+    // Esc cancels input
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputDescription mode routes to the text input handler.
+#[test]
+fn handle_key_input_description_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputDescription;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputRepoPath mode routes to the text input handler.
+#[test]
+fn handle_key_input_repo_path_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputRepoPath;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputDispatchRepoPath mode routes to the text input handler.
+#[test]
+fn handle_key_input_dispatch_repo_path_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputDispatchRepoPath;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputEpicTitle mode routes to the text input handler.
+#[test]
+fn handle_key_input_epic_title_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicTitle;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputEpicDescription mode routes to the text input handler.
+#[test]
+fn handle_key_input_epic_description_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicDescription;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputEpicRepoPath mode routes to the text input handler.
+#[test]
+fn handle_key_input_epic_repo_path_routes_to_text_input() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputEpicRepoPath;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmDelete mode routes to the confirm-delete handler.
+#[test]
+fn handle_key_confirm_delete_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDelete;
+    // 'n' cancels the delete
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputTag mode routes to the tag handler.
+#[test]
+fn handle_key_input_tag_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputTag;
+    // Esc cancels tag input
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// QuickDispatch mode routes to the quick-dispatch handler.
+#[test]
+fn handle_key_quick_dispatch_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::QuickDispatch;
+    // Esc cancels quick dispatch
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmRetry mode routes to the confirm-retry handler.
+#[test]
+fn handle_key_confirm_retry_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmRetry(TaskId(1));
+    // Esc cancels retry
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmArchive mode routes to the confirm-archive handler.
+#[test]
+fn handle_key_confirm_archive_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmArchive;
+    // 'n' cancels
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmDeleteEpic mode routes correctly.
+#[test]
+fn handle_key_confirm_delete_epic_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeleteEpic;
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmArchiveEpic mode routes correctly.
+#[test]
+fn handle_key_confirm_archive_epic_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmArchiveEpic;
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmDone mode routes correctly.
+#[test]
+fn handle_key_confirm_done_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDone(TaskId(1));
+    // 'n' cancels
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmMergePr mode routes correctly.
+#[test]
+fn handle_key_confirm_merge_pr_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmWrapUp mode routes correctly.
+#[test]
+fn handle_key_confirm_wrap_up_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmWrapUp(TaskId(1));
+    // Esc cancels wrap-up
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmEpicWrapUp mode routes correctly.
+#[test]
+fn handle_key_confirm_epic_wrap_up_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(1));
+    // Esc cancels epic wrap-up
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmDetachTmux mode routes correctly.
+#[test]
+fn handle_key_confirm_detach_tmux_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(1)]);
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmEditTask mode routes correctly.
+#[test]
+fn handle_key_confirm_edit_task_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
+    // Esc cancels
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// Help mode routes to the help handler.
+#[test]
+fn handle_key_help_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::Help;
+    // Any key exits help
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// RepoFilter mode routes correctly.
+#[test]
+fn handle_key_repo_filter_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    // Esc closes the filter (may emit refresh commands)
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ReviewRepoFilter mode routes correctly.
+#[test]
+fn handle_key_review_repo_filter_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ReviewRepoFilter;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// SecurityRepoFilter mode routes correctly.
+#[test]
+fn handle_key_security_repo_filter_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::SecurityRepoFilter;
+    let cmds = app.handle_key(make_key(KeyCode::Esc));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// InputPresetName mode routes to the preset name handler.
+#[test]
+fn handle_key_input_preset_name_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+    // Esc cancels preset input, returns to RepoFilter
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+/// ConfirmDeletePreset mode routes correctly.
+#[test]
+fn handle_key_confirm_delete_preset_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeletePreset;
+    // Esc cancels, returns to RepoFilter
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+/// ConfirmDeleteRepoPath mode routes correctly.
+#[test]
+fn handle_key_confirm_delete_repo_path_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmDeleteRepoPath;
+    // Any non-y key returns to RepoFilter
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+}
+
+/// ConfirmBatchApprove mode routes correctly.
+#[test]
+fn handle_key_confirm_batch_approve_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmBatchApprove(vec!["url".to_string()]);
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmBatchMerge mode routes correctly.
+#[test]
+fn handle_key_confirm_batch_merge_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmBatchMerge(vec!["url".to_string()]);
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// ConfirmQuit mode routes correctly.
+#[test]
+fn handle_key_confirm_quit_routes_correctly() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmQuit;
+    // 'n' cancels quit
+    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// Error popup dismisses on any key before routing to normal handler.
+#[test]
+fn handle_key_error_popup_dismisses_first() {
+    let mut app = make_app();
+    app.status.error_popup = Some("Some error".to_string());
+    let cmds = app.handle_key(make_key(KeyCode::Char('x')));
+    assert!(cmds.is_empty());
+    assert!(app.status.error_popup.is_none());
+}
+
+/// Normal mode on Epic view routes to the board handler (not review/security).
+#[test]
+fn handle_key_normal_epic_view_routes_correctly() {
+    let mut app = make_app();
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: EpicId(1),
+        selection: BoardSelection::new(),
+        saved_board: BoardSelection::new(),
+    };
+    // 'q' in epic view exits to board (doesn't quit)
+    let cmds = app.handle_key(make_key(KeyCode::Char('q')));
+    assert!(cmds.is_empty());
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}

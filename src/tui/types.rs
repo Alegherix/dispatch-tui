@@ -99,6 +99,24 @@ pub struct FixAgentRequest {
 }
 
 // ---------------------------------------------------------------------------
+// FixDispatchKey — newtype for in-flight fix agent dispatch deduplication
+// ---------------------------------------------------------------------------
+
+/// Identifies a fix agent dispatch in-flight, keyed by repo, alert number, and kind.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FixDispatchKey {
+    pub repo: String,
+    pub number: i64,
+    pub kind: AlertKind,
+}
+
+impl FixDispatchKey {
+    pub fn new(repo: String, number: i64, kind: AlertKind) -> Self {
+        Self { repo, number, kind }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PendingDispatch — held while user selects a repo path for dispatch
 // ---------------------------------------------------------------------------
 

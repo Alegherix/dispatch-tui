@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    epic_status, epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, ReviewDecision,
+    epic_status, epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
     SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn,
     DEFAULT_QUICK_TASK_TITLE,
 };
@@ -50,10 +50,10 @@ pub struct App {
     /// Task IDs with an in-flight dispatch (worktree + tmux setup running).
     /// Prevents duplicate dispatches when the user presses Enter rapidly.
     pub(in crate::tui) dispatching: HashSet<TaskId>,
-    /// Review agent dispatches in-flight, keyed by (github_repo, number).
-    pub(in crate::tui) dispatching_review: HashSet<(String, i64)>,
-    /// Fix agent dispatches in-flight, keyed by (github_repo, number, kind).
-    pub(in crate::tui) dispatching_fix: HashSet<(String, i64, crate::models::AlertKind)>,
+    /// Review agent dispatches in-flight, keyed by repo + PR number.
+    pub(in crate::tui) dispatching_review: HashSet<PrRef>,
+    /// Fix agent dispatches in-flight, keyed by repo + alert number + kind.
+    pub(in crate::tui) dispatching_fix: HashSet<FixDispatchKey>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -103,7 +103,7 @@ impl App {
     /// Returns true if a review agent dispatch is in-flight for the given PR.
     pub fn is_dispatching_review(&self, repo: &str, number: i64) -> bool {
         self.dispatching_review
-            .contains(&(repo.to_string(), number))
+            .contains(&PrRef::new(repo.to_string(), number))
     }
 
     /// Returns true if a fix agent dispatch is in-flight for the given alert.
@@ -114,7 +114,7 @@ impl App {
         kind: crate::models::AlertKind,
     ) -> bool {
         self.dispatching_fix
-            .contains(&(repo.to_string(), number, kind))
+            .contains(&FixDispatchKey::new(repo.to_string(), number, kind))
     }
 
     /// Get the current selection state (from whichever view mode is active).
@@ -3052,7 +3052,7 @@ impl App {
     }
 
     fn handle_dispatch_review_agent(&mut self, mut req: ReviewAgentRequest) -> Vec<Command> {
-        let key = (req.github_repo.clone(), req.number);
+        let key = PrRef::new(req.github_repo.clone(), req.number);
         if self.dispatching_review.contains(&key) {
             return vec![];
         }
@@ -3883,7 +3883,7 @@ impl App {
         worktree: String,
     ) -> Vec<Command> {
         self.dispatching_review
-            .remove(&(github_repo.clone(), number));
+            .remove(&PrRef::new(github_repo.clone(), number));
         let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
         let pr_kind = self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
@@ -3902,7 +3902,8 @@ impl App {
         number: i64,
         error: String,
     ) -> Vec<Command> {
-        self.dispatching_review.remove(&(github_repo, number));
+        self.dispatching_review
+            .remove(&PrRef::new(github_repo, number));
         self.set_status(format!("Review dispatch failed: {error}"));
         vec![]
     }
@@ -4076,7 +4077,7 @@ impl App {
     }
 
     fn handle_dispatch_fix_agent(&mut self, mut req: FixAgentRequest) -> Vec<Command> {
-        let fix_key = (req.github_repo.clone(), req.number, req.kind);
+        let fix_key = FixDispatchKey::new(req.github_repo.clone(), req.number, req.kind);
         if self.dispatching_fix.contains(&fix_key) {
             return vec![];
         }
@@ -4111,7 +4112,7 @@ impl App {
         worktree: String,
     ) -> Vec<Command> {
         self.dispatching_fix
-            .remove(&(github_repo.clone(), number, kind));
+            .remove(&FixDispatchKey::new(github_repo.clone(), number, kind));
         let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Fix agent dispatched for {repo_short}#{number}"));
         for alert in self.security.alerts.iter_mut() {
@@ -4138,7 +4139,8 @@ impl App {
         kind: crate::models::AlertKind,
         error: String,
     ) -> Vec<Command> {
-        self.dispatching_fix.remove(&(github_repo, number, kind));
+        self.dispatching_fix
+            .remove(&FixDispatchKey::new(github_repo, number, kind));
         self.set_status(format!("Fix agent failed: {error}"));
         vec![]
     }

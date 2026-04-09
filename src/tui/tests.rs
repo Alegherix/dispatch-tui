@@ -14356,12 +14356,20 @@ fn finish_complete_respawns_split_pane_for_pinned_task() {
     let cmds = app.update(Message::FinishComplete(TaskId(1)));
 
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        cmds.iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
         "should emit RespawnSplitPane for the pinned pane"
     );
-    assert_eq!(app.board.split.pinned_task_id, None, "pinned_task_id should be cleared");
+    assert_eq!(
+        app.board.split.pinned_task_id, None,
+        "pinned_task_id should be cleared"
+    );
     assert!(app.board.split.active, "split mode should remain active");
-    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%5"), "pane_id should be preserved");
+    assert_eq!(
+        app.board.split.right_pane_id.as_deref(),
+        Some("%5"),
+        "pane_id should be preserved"
+    );
 }
 
 #[test]
@@ -14389,10 +14397,16 @@ fn finish_complete_no_respawn_for_non_pinned_task() {
     let cmds = app.update(Message::FinishComplete(TaskId(1)));
 
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { .. })),
         "should NOT respawn when a different task finishes"
     );
-    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(2)), "pinned task should be unchanged");
+    assert_eq!(
+        app.board.split.pinned_task_id,
+        Some(TaskId(2)),
+        "pinned task should be unchanged"
+    );
 }
 
 #[test]
@@ -14411,7 +14425,9 @@ fn finish_complete_no_respawn_without_split() {
     let cmds = app.update(Message::FinishComplete(TaskId(1)));
 
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { .. })),
         "should NOT respawn when split mode is inactive"
     );
 }
@@ -14430,7 +14446,8 @@ fn pr_merged_respawns_split_pane() {
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        cmds.iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
         "should respawn split pane when pinned task's PR is merged"
     );
     assert_eq!(app.board.split.pinned_task_id, None);
@@ -14450,7 +14467,8 @@ fn confirm_done_respawns_split_pane() {
     let cmds = app.update(Message::ConfirmDone);
 
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        cmds.iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
         "should respawn split pane when pinned task is confirmed done"
     );
     assert_eq!(app.board.split.pinned_task_id, None);
@@ -14469,7 +14487,8 @@ fn archive_respawns_split_pane() {
     let cmds = app.update(Message::ArchiveTask(TaskId(1)));
 
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        cmds.iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
         "should respawn split pane when pinned task is archived"
     );
     assert_eq!(app.board.split.pinned_task_id, None);
@@ -14491,7 +14510,8 @@ fn retry_resume_respawns_split_pane() {
     let cmds = app.update(Message::RetryResume(TaskId(1)));
 
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
+        cmds.iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { pane_id } if pane_id == "%5")),
         "should respawn split pane when pinned task is retried"
     );
     assert_eq!(app.board.split.pinned_task_id, None);
@@ -14514,7 +14534,9 @@ fn pr_created_does_not_respawn_split_pane() {
     });
 
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::RespawnSplitPane { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::RespawnSplitPane { .. })),
         "should NOT respawn — agent keeps running after PR creation"
     );
     assert_eq!(

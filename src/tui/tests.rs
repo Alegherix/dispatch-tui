@@ -12535,6 +12535,23 @@ fn toggle_split_exit_restores_pinned_task_window() {
 }
 
 #[test]
+fn g_on_already_pinned_task_emits_focus_command() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(4)); // same task selected
+    app.selection_mut().set_column(1); // Running column
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(
+        &cmds[0],
+        Command::FocusSplitPane { pane_id } if pane_id == "%42"
+    ));
+}
+
+#[test]
 fn g_in_split_mode_emits_swap_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());

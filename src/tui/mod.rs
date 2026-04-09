@@ -2367,6 +2367,13 @@ impl App {
     }
 
     fn handle_swap_split_pane(&mut self, task_id: TaskId) -> Vec<Command> {
+        // If the task is already pinned in the split pane, just focus it
+        if self.board.split.pinned_task_id == Some(task_id) {
+            if let Some(pane_id) = self.board.split.right_pane_id.clone() {
+                return vec![Command::FocusSplitPane { pane_id }];
+            }
+        }
+
         let task = match self.find_task(task_id) {
             Some(t) => t,
             None => return vec![],

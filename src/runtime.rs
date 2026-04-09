@@ -1821,6 +1821,11 @@ async fn execute_commands(
                 old_pane_id.as_deref(),
                 old_window.as_deref(),
             ),
+            Command::FocusSplitPane { pane_id } => {
+                if let Err(e) = tmux::select_pane(&pane_id, &*rt.runner) {
+                    tracing::warn!("select-pane failed: {e:#}");
+                }
+            }
             Command::CheckSplitPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
             Command::RespawnSplitPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
         }

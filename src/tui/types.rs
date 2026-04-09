@@ -496,6 +496,9 @@ pub enum Command {
         old_pane_id: Option<String>,
         old_window: Option<String>,
     },
+    FocusSplitPane {
+        pane_id: String,
+    },
     CheckSplitPaneExists {
         pane_id: String,
     },

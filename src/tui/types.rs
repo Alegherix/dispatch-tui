@@ -682,6 +682,7 @@ pub struct AgentTracking {
     pub notified_needs_input: HashSet<TaskId>,
     pub last_pr_poll: HashMap<TaskId, Instant>,
     pub message_flash: HashMap<TaskId, Instant>,
+    pub last_error: HashMap<TaskId, String>,
 }
 
 impl AgentTracking {
@@ -695,6 +696,7 @@ impl AgentTracking {
             notified_needs_input: HashSet::new(),
             last_pr_poll: HashMap::new(),
             message_flash: HashMap::new(),
+            last_error: HashMap::new(),
         }
     }
 
@@ -707,6 +709,7 @@ impl AgentTracking {
         self.notified_needs_input.remove(&id);
         self.last_pr_poll.remove(&id);
         self.message_flash.remove(&id);
+        self.last_error.remove(&id);
     }
 }
 

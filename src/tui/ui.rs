@@ -911,7 +911,7 @@ fn format_usage(u: &TaskUsage) -> String {
 
 // ── Detail-panel component functions ────────────────────────────────
 
-fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
+pub(in crate::tui) fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
     let status_color = column_color(task.status);
 
     // Line 1: title (bold, colored) + inline metadata (dim)
@@ -997,6 +997,12 @@ fn task_detail_lines(app: &App, task: &Task) -> Vec<Line<'static>> {
         lines.push(Line::from(Span::styled(
             format_usage(u),
             Style::default().fg(MUTED),
+        )));
+    }
+    if let Some(error) = app.last_error(task.id) {
+        lines.push(Line::from(Span::styled(
+            format!("Last error: {error}"),
+            Style::default().fg(Color::Red),
         )));
     }
     lines

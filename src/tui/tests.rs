@@ -14189,6 +14189,77 @@ fn handle_key_error_popup_dismisses_first() {
     assert!(app.status.error_popup.is_none());
 }
 
+#[test]
+fn agent_crashed_stores_last_error_from_tmux_output() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    app.board.tasks[0].tmux_window = Some("task-4".to_string());
+    app.agents
+        .tmux_outputs
+        .insert(TaskId(4), "Error: connection refused\npanicked at main.rs:42".to_string());
+
+    app.update(Message::AgentCrashed(TaskId(4)));
+
+    assert_eq!(
+        app.agents.last_error.get(&TaskId(4)).map(|s| s.as_str()),
+        Some("Error: connection refused\npanicked at main.rs:42"),
+    );
+}
+
+#[test]
+fn resumed_clears_last_error() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/wt".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.agents
+        .last_error
+        .insert(TaskId(4), "some crash".to_string());
+
+    app.update(Message::Resumed {
+        id: TaskId(4),
+        tmux_window: "win-4".to_string(),
+    });
+
+    assert!(!app.agents.last_error.contains_key(&TaskId(4)));
+}
+
+#[test]
+fn retry_fresh_clears_last_error() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.agents
+        .last_error
+        .insert(TaskId(4), "some crash".to_string());
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+
+    app.update(Message::RetryFresh(TaskId(4)));
+
+    assert!(!app.agents.last_error.contains_key(&TaskId(4)));
+}
+
+#[test]
+fn task_detail_lines_include_last_error() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
+    app.board.tasks[0].tmux_window = Some("task-4".to_string());
+    app.agents
+        .last_error
+        .insert(TaskId(4), "Error: something went wrong".to_string());
+    app.board.detail_visible = true;
+
+    let task = app.board.tasks[0].clone();
+    let lines = super::ui::task_detail_lines(&app, &task);
+
+    let error_text: String = lines
+        .iter()
+        .flat_map(|line| line.spans.iter().map(|s| s.content.to_string()))
+        .collect::<Vec<_>>()
+        .join("");
+    assert!(
+        error_text.contains("Error: something went wrong"),
+        "Expected last_error in detail lines, got: {error_text}"
+    );
+}
+
 /// Normal mode on Epic view routes to the board handler (not review/security).
 #[test]
 fn handle_key_normal_epic_view_routes_correctly() {

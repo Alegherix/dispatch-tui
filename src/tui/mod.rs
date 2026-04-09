@@ -180,6 +180,9 @@ impl App {
     pub fn error_popup(&self) -> Option<&str> {
         self.status.error_popup.as_deref()
     }
+    pub fn last_error(&self, id: TaskId) -> Option<&str> {
+        self.agents.last_error.get(&id).map(|s| s.as_str())
+    }
     pub fn repo_paths(&self) -> &[String] {
         &self.board.repo_paths
     }
@@ -1778,6 +1781,13 @@ impl App {
             return vec![];
         }
 
+        // Capture last tmux output as crash context
+        if let Some(output) = self.agents.tmux_outputs.get(&id) {
+            if !output.is_empty() {
+                self.agents.last_error.insert(id, output.clone());
+            }
+        }
+
         let mut cmds = Vec::new();
 
         if let Some(task) = self.find_task_mut(id) {
@@ -1823,6 +1833,7 @@ impl App {
             task.sub_status = SubStatus::Active;
             let task_clone = task.clone();
             self.agents.last_output_change.insert(id, Instant::now());
+            self.agents.last_error.remove(&id);
             self.clamp_selection();
             self.set_status(format!("Task {id} resumed"));
             vec![Command::PersistTask(task_clone)]

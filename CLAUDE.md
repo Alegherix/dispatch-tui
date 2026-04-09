@@ -12,7 +12,11 @@ cargo test
 cargo run -- tui
 ```
 
-Pre-commit hook runs `cargo fmt --check` and `cargo clippy -- -D warnings` automatically — no need to run these manually.
+Pre-push hook runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` automatically before each push. One-time setup:
+
+```bash
+git config core.hooksPath .githooks
+```
 
 ## Test-Driven Development
 

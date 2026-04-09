@@ -26,7 +26,6 @@ tempfile = "3"
 
 [dev-dependencies]
 proptest = "1"
-cargo-husky = "1"
 
 [[bin]]
 name = "dispatch"

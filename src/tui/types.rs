@@ -1597,8 +1597,14 @@ mod tests {
     fn review_board_state_list_returns_correct_list() {
         let mut state = ReviewBoardState::default();
         state.review.set_prs(vec![make_pr(1, "org/a")]);
-        state.authored.set_prs(vec![make_pr(2, "org/b"), make_pr(3, "org/c")]);
-        state.bot.set_prs(vec![make_pr(4, "org/d"), make_pr(5, "org/e"), make_pr(6, "org/f")]);
+        state
+            .authored
+            .set_prs(vec![make_pr(2, "org/b"), make_pr(3, "org/c")]);
+        state.bot.set_prs(vec![
+            make_pr(4, "org/d"),
+            make_pr(5, "org/e"),
+            make_pr(6, "org/f"),
+        ]);
 
         assert_eq!(state.list(PrListKind::Review).prs.len(), 1);
         assert_eq!(state.list(PrListKind::Authored).prs.len(), 2);

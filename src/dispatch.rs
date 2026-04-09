@@ -1010,7 +1010,13 @@ pub fn dispatch_review_agent(
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
-            req.number, req.github_repo, req.title, req.body, req.number, req.github_repo, req.number
+            req.number,
+            req.github_repo,
+            req.title,
+            req.body,
+            req.number,
+            req.github_repo,
+            req.number
         )
     } else {
         format!(
@@ -1020,7 +1026,13 @@ pub fn dispatch_review_agent(
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
-            req.number, req.github_repo, req.title, req.body, req.number, req.github_repo, req.number
+            req.number,
+            req.github_repo,
+            req.title,
+            req.body,
+            req.number,
+            req.github_repo,
+            req.number
         )
     };
 
@@ -2269,7 +2281,12 @@ mod tests {
 
     // --- dispatch_review_agent tests ---
 
-    fn review_req(repo_path: &str, number: i64, head_ref: &str, is_dependabot: bool) -> crate::tui::ReviewAgentRequest {
+    fn review_req(
+        repo_path: &str,
+        number: i64,
+        head_ref: &str,
+        is_dependabot: bool,
+    ) -> crate::tui::ReviewAgentRequest {
         review_req_with(repo_path, number, "Fix it", "body", head_ref, is_dependabot)
     }
 
@@ -2304,8 +2321,9 @@ mod tests {
             MockProcessRunner::ok_with_stdout(tmux_window.as_bytes()),
         ]);
 
-        let result = dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock)
-            .unwrap();
+        let result =
+            dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock)
+                .unwrap();
 
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1, "only list-windows should be called");
@@ -2334,8 +2352,9 @@ mod tests {
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
-        let result = dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock)
-            .unwrap();
+        let result =
+            dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock)
+                .unwrap();
 
         let calls = mock.recorded_calls();
         assert!(
@@ -2371,7 +2390,14 @@ mod tests {
         ]);
 
         let result = dispatch_review_agent(
-            &review_req_with(&repo_path, 99, "Fix it", "PR body here", "feature-branch", false),
+            &review_req_with(
+                &repo_path,
+                99,
+                "Fix it",
+                "PR body here",
+                "feature-branch",
+                false,
+            ),
             &mock,
         )
         .unwrap();
@@ -2432,7 +2458,8 @@ mod tests {
         ]);
 
         // The function will error at fs::write since mock doesn't create the dir
-        let result = dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock);
+        let result =
+            dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock);
         assert!(result.is_err());
 
         let calls = mock.recorded_calls();
@@ -2461,7 +2488,8 @@ mod tests {
             MockProcessRunner::fail("fatal: couldn't find remote ref"), // git fetch fails
         ]);
 
-        let result = dispatch_review_agent(&review_req(&repo_path, 99, "nonexistent", false), &mock);
+        let result =
+            dispatch_review_agent(&review_req(&repo_path, 99, "nonexistent", false), &mock);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("git fetch failed"));
     }
@@ -2483,8 +2511,7 @@ mod tests {
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
-        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock)
-            .unwrap();
+        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
 
         let calls = mock.recorded_calls();
         let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
@@ -2570,8 +2597,7 @@ mod tests {
             MockProcessRunner::ok(),                  // tmux send-keys Enter
         ]);
 
-        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock)
-            .unwrap();
+        dispatch_review_agent(&review_req(&repo_path, 99, "feature-branch", false), &mock).unwrap();
 
         let calls = mock.recorded_calls();
         let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
@@ -2602,8 +2628,7 @@ mod tests {
             MockProcessRunner::ok(),                // tmux send-keys -l
             MockProcessRunner::ok(),                // tmux send-keys Enter
         ]);
-        dispatch_review_agent(&review_req(&repo_path, 42, "feature-branch", false), &mock)
-            .unwrap();
+        dispatch_review_agent(&review_req(&repo_path, 42, "feature-branch", false), &mock).unwrap();
 
         let prompt = std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap();
         assert!(
@@ -2636,7 +2661,14 @@ mod tests {
             MockProcessRunner::ok(),                // tmux send-keys Enter
         ]);
         dispatch_review_agent(
-            &review_req_with(&repo_path, 42, "Bump lodash", "body", "dependabot/npm", true),
+            &review_req_with(
+                &repo_path,
+                42,
+                "Bump lodash",
+                "body",
+                "dependabot/npm",
+                true,
+            ),
             &mock,
         )
         .unwrap();
@@ -2674,7 +2706,14 @@ mod tests {
 
     #[test]
     fn fix_prompt_includes_mcp_lifecycle_call() {
-        let req = fix_req(42, crate::models::AlertKind::Dependabot, "CVE in lodash", "Prototype pollution", Some("lodash"), Some("4.17.21"));
+        let req = fix_req(
+            42,
+            crate::models::AlertKind::Dependabot,
+            "CVE in lodash",
+            "Prototype pollution",
+            Some("lodash"),
+            Some("4.17.21"),
+        );
         let prompt = build_fix_prompt(&req);
         assert!(
             prompt.contains("update_review_status"),
@@ -2684,7 +2723,14 @@ mod tests {
 
     #[test]
     fn build_fix_prompt_dependabot() {
-        let req = fix_req(42, crate::models::AlertKind::Dependabot, "CVE-2024-1234 in lodash", "Prototype pollution", Some("lodash"), Some("4.17.21"));
+        let req = fix_req(
+            42,
+            crate::models::AlertKind::Dependabot,
+            "CVE-2024-1234 in lodash",
+            "Prototype pollution",
+            Some("lodash"),
+            Some("4.17.21"),
+        );
         let prompt = build_fix_prompt(&req);
         assert!(prompt.contains("lodash"));
         assert!(prompt.contains("4.17.21"));
@@ -2693,7 +2739,14 @@ mod tests {
 
     #[test]
     fn build_fix_prompt_code_scanning() {
-        let req = fix_req(7, crate::models::AlertKind::CodeScanning, "SQL injection", "src/db.rs:42", None, None);
+        let req = fix_req(
+            7,
+            crate::models::AlertKind::CodeScanning,
+            "SQL injection",
+            "src/db.rs:42",
+            None,
+            None,
+        );
         let prompt = build_fix_prompt(&req);
         assert!(prompt.contains("SQL injection"));
         assert!(prompt.contains("src/db.rs:42"));

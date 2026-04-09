@@ -1746,7 +1746,9 @@ mod tests {
             description: None,
             repo_path: None,
             sort_order: None,
-            pr_url: Some(FieldUpdate::Set("https://github.com/org/repo/pull/1".to_string())),
+            pr_url: Some(FieldUpdate::Set(
+                "https://github.com/org/repo/pull/1".to_string(),
+            )),
             tag: None,
             sub_status: None,
             epic_id: None,
@@ -1902,9 +1904,7 @@ mod tests {
             })
             .unwrap();
 
-        let err = svc
-            .validate_send_message(from_id.0, to_id.0)
-            .unwrap_err();
+        let err = svc.validate_send_message(from_id.0, to_id.0).unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
         assert!(err.to_string().contains("no worktree"));
     }
@@ -1956,9 +1956,7 @@ mod tests {
         })
         .unwrap();
 
-        let err = svc
-            .validate_send_message(from_id.0, to_id.0)
-            .unwrap_err();
+        let err = svc.validate_send_message(from_id.0, to_id.0).unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
         assert!(err.to_string().contains("no tmux window"));
     }

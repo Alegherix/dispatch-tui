@@ -1633,7 +1633,11 @@ impl App {
         // Skip capturing the split-pinned task: its window has been joined as a
         // pane and is no longer visible to `has_window`, which would falsely
         // trigger WindowGone → Crashed.
-        let split_pinned = self.board.split.pinned_task_id.filter(|_| self.board.split.active);
+        let split_pinned = self
+            .board
+            .split
+            .pinned_task_id
+            .filter(|_| self.board.split.active);
 
         let mut cmds: Vec<Command> = self
             .board
@@ -2331,10 +2335,7 @@ impl App {
                 pane_id,
                 restore_window,
             }]
-        } else if let Some(window) = self
-            .selected_task()
-            .and_then(|t| t.tmux_window.clone())
-        {
+        } else if let Some(window) = self.selected_task().and_then(|t| t.tmux_window.clone()) {
             let task_id = self.selected_task().unwrap().id;
             vec![Command::EnterSplitModeWithTask { task_id, window }]
         } else {

@@ -2357,7 +2357,10 @@ mod security_tests {
         let mut map = HashMap::new();
         let pr = PrRef::new("org/repo".to_string(), 42);
         map.insert(pr.clone(), "value");
-        assert_eq!(map.get(&PrRef::new("org/repo".to_string(), 42)), Some(&"value"));
+        assert_eq!(
+            map.get(&PrRef::new("org/repo".to_string(), 42)),
+            Some(&"value")
+        );
     }
 
     #[test]

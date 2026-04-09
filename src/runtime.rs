@@ -30,10 +30,10 @@ use crate::editor::{
 };
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
+use crate::service::FieldUpdate;
 use crate::tui::{
     self, App, Command, Message, PrListKind, RepoFilterMode, ReviewAgentRequest, ReviewBoardMode,
 };
-use crate::service::FieldUpdate;
 use crate::{db, dispatch, mcp, models, tmux};
 
 /// Convert `Option<String>` to `FieldUpdate`: `Some(v)` → `Set(v)`, `None` → `Clear`.
@@ -1361,7 +1361,11 @@ impl TuiRuntime {
             tracing::info!(kind = kind.label(), "fetching PRs via gh");
             match crate::github::fetch_prs(&*runner, &queries) {
                 Ok(prs) => {
-                    tracing::info!(kind = kind.label(), count = prs.len(), "PRs fetched successfully");
+                    tracing::info!(
+                        kind = kind.label(),
+                        count = prs.len(),
+                        "PRs fetched successfully"
+                    );
                     let _ = tx.send(Message::PrsLoaded(kind, prs));
                 }
                 Err(e) => {
@@ -1372,12 +1376,7 @@ impl TuiRuntime {
         });
     }
 
-    fn exec_persist_prs(
-        &self,
-        app: &mut App,
-        kind: PrListKind,
-        prs: Vec<crate::models::ReviewPr>,
-    ) {
+    fn exec_persist_prs(&self, app: &mut App, kind: PrListKind, prs: Vec<crate::models::ReviewPr>) {
         let result = self.database.save_prs(kind.to_pr_kind(), &prs);
         if let Err(e) = result {
             app.update(Message::Error(Self::db_error(
@@ -2140,9 +2139,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            "Test Task", "desc", repo, None, models::TaskStatus::Backlog)
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Test Task",
+            "desc",
+            repo,
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .unwrap();
         rt.exec_dispatch_agent(task, models::DispatchMode::Dispatch);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -2164,15 +2169,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            
-                "Fail Task",
-                "desc",
-                "/nonexistent",
-                None,
-                models::TaskStatus::Backlog,
-            )
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Fail Task",
+            "desc",
+            "/nonexistent",
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .unwrap();
         rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Dispatch);
 
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -2339,9 +2344,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            "Test", "desc", "/repo", None, models::TaskStatus::Done)
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Test",
+            "desc",
+            "/repo",
+            None,
+            models::TaskStatus::Done,
+        )
+        .unwrap();
         let id = task.id;
 
         rt.exec_finish(
@@ -2382,9 +2393,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            "Test", "desc", "/repo", None, models::TaskStatus::Done)
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Test",
+            "desc",
+            "/repo",
+            None,
+            models::TaskStatus::Done,
+        )
+        .unwrap();
         let id = task.id;
 
         rt.exec_finish(
@@ -2451,9 +2468,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            "Test", "desc", "/repo", None, models::TaskStatus::Done)
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Test",
+            "desc",
+            "/repo",
+            None,
+            models::TaskStatus::Done,
+        )
+        .unwrap();
         let id = task.id;
 
         rt.exec_finish(
@@ -2667,7 +2690,9 @@ mod tests {
             worktree: None,
             agent_status: None,
         };
-        rt.database.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
+        rt.database
+            .save_prs(crate::db::PrKind::Review, &[pr])
+            .unwrap();
 
         // Simulate what run_tui does: load cached reviews
         let cached = rt.database.load_prs(crate::db::PrKind::Review).unwrap();
@@ -2818,15 +2843,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let mut task = create_task_returning(&*db,
-            
-                "Resume Me",
-                "desc",
-                "/repo",
-                None,
-                models::TaskStatus::Running,
-            )
-            .unwrap();
+        let mut task = create_task_returning(
+            &*db,
+            "Resume Me",
+            "desc",
+            "/repo",
+            None,
+            models::TaskStatus::Running,
+        )
+        .unwrap();
         task.worktree = Some("/repo/.worktrees/1-resume-me".into());
         let id = task.id;
 
@@ -2856,15 +2881,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            
-                "Fail Resume",
-                "desc",
-                "/repo",
-                None,
-                models::TaskStatus::Running,
-            )
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Fail Resume",
+            "desc",
+            "/repo",
+            None,
+            models::TaskStatus::Running,
+        )
+        .unwrap();
         rt.exec_resume(task);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -2996,8 +3021,16 @@ mod tests {
     #[test]
     fn parse_raw_presets_multiple_presets() {
         let raw = vec![
-            ("a".to_string(), vec!["/x".to_string()], "include".to_string()),
-            ("b".to_string(), vec!["/y".to_string()], "exclude".to_string()),
+            (
+                "a".to_string(),
+                vec!["/x".to_string()],
+                "include".to_string(),
+            ),
+            (
+                "b".to_string(),
+                vec!["/y".to_string()],
+                "exclude".to_string(),
+            ),
         ];
         let result = parse_raw_presets(raw, None);
         assert_eq!(result.len(), 2);
@@ -3118,7 +3151,13 @@ mod tests {
             agent_status: None,
         };
         rt.exec_persist_prs(&mut app, PrListKind::Review, vec![pr]);
-        assert_eq!(rt.database.load_prs(crate::db::PrKind::Review).unwrap().len(), 1);
+        assert_eq!(
+            rt.database
+                .load_prs(crate::db::PrKind::Review)
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(app.error_popup().is_none());
     }
 
@@ -3150,7 +3189,10 @@ mod tests {
             agent_status: None,
         };
         rt.exec_persist_prs(&mut app, PrListKind::Authored, vec![pr]);
-        assert_eq!(rt.database.load_prs(crate::db::PrKind::My).unwrap().len(), 1);
+        assert_eq!(
+            rt.database.load_prs(crate::db::PrKind::My).unwrap().len(),
+            1
+        );
         assert!(app.error_popup().is_none());
     }
 
@@ -3182,7 +3224,10 @@ mod tests {
             agent_status: None,
         };
         rt.exec_persist_prs(&mut app, PrListKind::Bot, vec![pr]);
-        assert_eq!(rt.database.load_prs(crate::db::PrKind::Bot).unwrap().len(), 1);
+        assert_eq!(
+            rt.database.load_prs(crate::db::PrKind::Bot).unwrap().len(),
+            1
+        );
         assert!(app.error_popup().is_none());
     }
 
@@ -3256,7 +3301,7 @@ mod tests {
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
             MockProcessRunner::ok_with_stdout(b"%3\n"), // join_pane: display-message for source pane ID
-            MockProcessRunner::ok(),                     // join_pane: join-pane command
+            MockProcessRunner::ok(),                    // join_pane: join-pane command
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3342,8 +3387,8 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
-            MockProcessRunner::ok(),                     // swap-pane
-            MockProcessRunner::ok(),                     // kill-window (old pane had no task)
+            MockProcessRunner::ok(),                    // swap-pane
+            MockProcessRunner::ok(),                    // kill-window (old pane had no task)
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3368,8 +3413,8 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
-            MockProcessRunner::ok(),                     // swap-pane
-            MockProcessRunner::ok(),                     // rename-window (old task had a window)
+            MockProcessRunner::ok(),                    // swap-pane
+            MockProcessRunner::ok(),                    // rename-window (old task had a window)
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3807,15 +3852,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            
-                "Brainstorm Task",
-                "desc",
-                repo,
-                None,
-                models::TaskStatus::Backlog,
-            )
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Brainstorm Task",
+            "desc",
+            repo,
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .unwrap();
         rt.exec_dispatch_agent(task, models::DispatchMode::Brainstorm);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -3837,15 +3882,15 @@ mod tests {
         )]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            
-                "Fail",
-                "desc",
-                "/nonexistent",
-                None,
-                models::TaskStatus::Backlog,
-            )
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Fail",
+            "desc",
+            "/nonexistent",
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .unwrap();
         rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Brainstorm);
 
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -3876,9 +3921,15 @@ mod tests {
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            "Plan Task", "desc", repo, None, models::TaskStatus::Backlog)
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Plan Task",
+            "desc",
+            repo,
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .unwrap();
         rt.exec_dispatch_agent(task, models::DispatchMode::Plan);
 
         let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -3900,15 +3951,15 @@ mod tests {
         )]));
         let rt = make_runtime(db.clone(), tx, mock);
 
-        let task = create_task_returning(&*db,
-            
-                "Fail",
-                "desc",
-                "/nonexistent",
-                None,
-                models::TaskStatus::Backlog,
-            )
-            .unwrap();
+        let task = create_task_returning(
+            &*db,
+            "Fail",
+            "desc",
+            "/nonexistent",
+            None,
+            models::TaskStatus::Backlog,
+        )
+        .unwrap();
         rt.exec_dispatch_agent(task.clone(), models::DispatchMode::Plan);
 
         let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())

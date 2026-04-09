@@ -519,9 +519,8 @@ fn list_repo_paths_empty_by_default() {
 #[test]
 fn create_task_returning_returns_full_task() {
     let db = in_memory_db();
-    let task = create_task_returning(&db,
-        "Title", "Desc", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let task =
+        create_task_returning(&db, "Title", "Desc", "/repo", None, TaskStatus::Backlog).unwrap();
     assert_eq!(task.title, "Title");
     assert_eq!(task.description, "Desc");
     assert_eq!(task.repo_path, "/repo");
@@ -534,9 +533,8 @@ fn create_task_returning_returns_full_task() {
 #[test]
 fn create_task_returning_with_plan() {
     let db = in_memory_db();
-    let task = create_task_returning(&db,
-        "T", "D", "/r", Some("plan.md"), TaskStatus::Backlog)
-        .unwrap();
+    let task =
+        create_task_returning(&db, "T", "D", "/r", Some("plan.md"), TaskStatus::Backlog).unwrap();
     assert_eq!(task.plan_path.as_deref(), Some("plan.md"));
     assert_eq!(task.status, TaskStatus::Backlog);
 }
@@ -1461,12 +1459,16 @@ fn save_review_prs_removes_stale_prs() {
     };
 
     // Save two PRs
-    db.save_prs(super::PrKind::Review, &[make_pr(1, "acme/app"), make_pr(2, "acme/other")])
-        .unwrap();
+    db.save_prs(
+        super::PrKind::Review,
+        &[make_pr(1, "acme/app"), make_pr(2, "acme/other")],
+    )
+    .unwrap();
     assert_eq!(db.load_prs(super::PrKind::Review).unwrap().len(), 2);
 
     // Refresh with only one — the other should be removed
-    db.save_prs(super::PrKind::Review, &[make_pr(1, "acme/app")]).unwrap();
+    db.save_prs(super::PrKind::Review, &[make_pr(1, "acme/app")])
+        .unwrap();
     let loaded = db.load_prs(super::PrKind::Review).unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].number, 1);
@@ -1832,9 +1834,7 @@ fn recalculate_epic_status_advances_to_running() {
     let epic = db.create_epic("E", "", "/repo").unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 
-    let task = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
     db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Running))
         .unwrap();
@@ -1851,9 +1851,7 @@ fn recalculate_epic_status_moves_backward_from_review_to_running() {
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .unwrap();
 
-    let task = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
     db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Running))
         .unwrap();
@@ -1870,9 +1868,7 @@ fn recalculate_epic_status_moves_backward_from_review_to_backlog() {
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .unwrap();
 
-    let task = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
 
     db.recalculate_epic_status(epic.id).unwrap();
@@ -1885,16 +1881,12 @@ fn recalculate_epic_status_moves_backward_when_review_subtask_completes() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo").unwrap();
 
-    let t1 = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
     db.patch_task(t1.id, &TaskPatch::new().status(TaskStatus::Running))
         .unwrap();
 
-    let t2 = create_task_returning(&db,
-        "T2", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
     db.patch_task(t2.id, &TaskPatch::new().status(TaskStatus::Done))
         .unwrap();
@@ -1914,12 +1906,8 @@ fn recalculate_epic_status_all_done() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo").unwrap();
 
-    let t1 = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
-    let t2 = create_task_returning(&db,
-        "T2", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
+    let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
     db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
     db.patch_task(t1.id, &TaskPatch::new().status(TaskStatus::Done))
@@ -1937,12 +1925,8 @@ fn recalculate_epic_status_all_review_or_done() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo").unwrap();
 
-    let t1 = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
-    let t2 = create_task_returning(&db,
-        "T2", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
+    let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
     db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
     db.patch_task(t1.id, &TaskPatch::new().status(TaskStatus::Review))
@@ -1960,15 +1944,9 @@ fn recalculate_epic_status_review_beats_running() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo").unwrap();
 
-    let t1 = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
-    let t2 = create_task_returning(&db,
-        "T2", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
-    let t3 = create_task_returning(&db,
-        "T3", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
+    let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
+    let t3 = create_task_returning(&db, "T3", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
     db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
     db.set_task_epic_id(t3.id, Some(epic.id)).unwrap();
@@ -1990,9 +1968,7 @@ fn cli_update_conditional_sets_epic_to_review() {
 
     let db = std::sync::Arc::new(in_memory_db());
     let epic = db.create_epic("E", "", "/repo").unwrap();
-    let task = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Running)
-        .unwrap();
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
     db.recalculate_epic_status(epic.id).unwrap();
 
@@ -2013,9 +1989,7 @@ fn cli_update_unconditional_sets_epic_to_running() {
 
     let db = std::sync::Arc::new(in_memory_db());
     let epic = db.create_epic("E", "", "/repo").unwrap();
-    let task = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
 
     // Simulate: dispatch update <id> running (no --only-if)
@@ -2036,12 +2010,8 @@ fn cli_update_epic_drops_back_when_review_task_done() {
     let db = std::sync::Arc::new(in_memory_db());
     let epic = db.create_epic("E", "", "/repo").unwrap();
 
-    let t1 = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Running)
-        .unwrap();
-    let t2 = create_task_returning(&db,
-        "T2", "", "/repo", None, TaskStatus::Review)
-        .unwrap();
+    let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running).unwrap();
+    let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Review).unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
     db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
     db.recalculate_epic_status(epic.id).unwrap();
@@ -2065,9 +2035,7 @@ fn cli_update_with_substatus_keeps_running_and_recalculates_epic() {
 
     let db = std::sync::Arc::new(in_memory_db());
     let epic = db.create_epic("E", "", "/repo").unwrap();
-    let task = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Running)
-        .unwrap();
+    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running).unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).unwrap();
     db.recalculate_epic_status(epic.id).unwrap();
 
@@ -3030,8 +2998,14 @@ fn update_agent_status_finds_bot_pr() {
         agent_status: None,
     };
     db.save_prs(super::PrKind::Bot, &[pr]).unwrap();
-    db.set_pr_agent(super::PrKind::Bot, "acme/app", 10, "dispatch:review-10", "/tmp/wt")
-        .unwrap();
+    db.set_pr_agent(
+        super::PrKind::Bot,
+        "acme/app",
+        10,
+        "dispatch:review-10",
+        "/tmp/wt",
+    )
+    .unwrap();
 
     let table = db
         .update_agent_status("acme/app", 10, Some("idle"))
@@ -3378,9 +3352,12 @@ fn my_prs_and_review_prs_are_independent() {
         agent_status: None,
     };
 
-    db.save_prs(super::PrKind::My, &[make_pr(1, "My PR")]).unwrap();
-    db.save_prs(super::PrKind::Review, &[make_pr(2, "Review PR")]).unwrap();
-    db.save_prs(super::PrKind::Bot, &[make_pr(3, "Bot PR")]).unwrap();
+    db.save_prs(super::PrKind::My, &[make_pr(1, "My PR")])
+        .unwrap();
+    db.save_prs(super::PrKind::Review, &[make_pr(2, "Review PR")])
+        .unwrap();
+    db.save_prs(super::PrKind::Bot, &[make_pr(3, "Bot PR")])
+        .unwrap();
 
     assert_eq!(db.load_prs(super::PrKind::My).unwrap().len(), 1);
     assert_eq!(db.load_prs(super::PrKind::Review).unwrap().len(), 1);
@@ -3444,12 +3421,8 @@ fn recalculate_epic_status_ignores_archived_subtasks() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo").unwrap();
 
-    let t1 = create_task_returning(&db,
-        "T1", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
-    let t2 = create_task_returning(&db,
-        "T2", "", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog).unwrap();
+    let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog).unwrap();
     db.set_task_epic_id(t1.id, Some(epic.id)).unwrap();
     db.set_task_epic_id(t2.id, Some(epic.id)).unwrap();
 
@@ -3769,11 +3742,8 @@ fn migration_31_re_expands_tilde_paths() {
         [],
     )
     .unwrap();
-    conn.execute(
-        "INSERT INTO repo_paths (path) VALUES ('~/code/saved')",
-        [],
-    )
-    .unwrap();
+    conn.execute("INSERT INTO repo_paths (path) VALUES ('~/code/saved')", [])
+        .unwrap();
     // filter_presets are now JSON arrays (post v29)
     conn.execute(
         r#"INSERT INTO filter_presets (name, repo_paths) VALUES ('my_preset', '["~/code/a","~/code/b","/abs/c"]')"#,

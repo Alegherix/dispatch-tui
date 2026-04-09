@@ -306,9 +306,7 @@ pub fn pane_id_for_window(window: &str, runner: &dyn ProcessRunner) -> Result<St
     if !output.status.success() {
         bail!("tmux display-message failed for window '{}'", window);
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Atomically swap the contents of two panes without changing the layout.
@@ -720,7 +718,7 @@ mod tests {
     fn join_pane_issues_correct_tmux_args() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"%5\n"), // display-message to get source pane ID
-            MockProcessRunner::ok(),                     // join-pane (no -P/-F)
+            MockProcessRunner::ok(),                    // join-pane (no -P/-F)
         ]);
         let pane_id = join_pane("task-42", "%1", &mock).unwrap();
         assert_eq!(pane_id, "%5");
@@ -734,7 +732,17 @@ mod tests {
         // Second call: join-pane without -P or -F
         assert_eq!(
             calls[1].1,
-            vec!["join-pane", "-h", "-d", "-s", "task-42", "-t", "%1", "-l", "40%"]
+            vec![
+                "join-pane",
+                "-h",
+                "-d",
+                "-s",
+                "task-42",
+                "-t",
+                "%1",
+                "-l",
+                "40%"
+            ]
         );
     }
 

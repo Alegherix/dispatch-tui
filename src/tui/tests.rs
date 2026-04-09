@@ -239,7 +239,9 @@ fn tick_fetches_my_prs_when_stale() {
     let mut app = make_app();
     assert!(app.review.authored.last_fetch.is_none());
     let cmds = app.update(Message::Tick);
-    assert!(cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
 }
 
 #[test]
@@ -6330,7 +6332,7 @@ fn switch_to_review_board_preserves_task_selection() {
 fn review_prs_loaded_updates_state() {
     let mut app = make_app();
     let prs = vec![make_review_pr(42, "alice", ReviewDecision::ReviewRequired)];
-    app.update(Message::PrsLoaded(PrListKind::Review,prs));
+    app.update(Message::PrsLoaded(PrListKind::Review, prs));
     assert_eq!(app.review_prs().len(), 1);
     assert_eq!(app.review_prs()[0].number, 42);
     assert!(!app.review_board_loading());
@@ -6339,7 +6341,10 @@ fn review_prs_loaded_updates_state() {
 #[test]
 fn review_prs_fetch_failed_sets_error() {
     let mut app = make_app();
-    app.update(Message::PrsFetchFailed(PrListKind::Review,"auth error".to_string()));
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Review,
+        "auth error".to_string(),
+    ));
     assert!(!app.review_board_loading());
     assert!(app
         .status
@@ -6355,7 +6360,9 @@ fn switch_to_review_board_sets_loading() {
     let mut app = make_app();
     let cmds = app.update(Message::SwitchToReviewBoard);
     assert!(app.review_board_loading());
-    assert!(cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
 }
 
 #[test]
@@ -6363,7 +6370,9 @@ fn tab_switches_to_review_board() {
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Tab));
     assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
-    assert!(cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
 }
 
 #[test]
@@ -6391,11 +6400,14 @@ fn esc_in_review_board_switches_back() {
 fn review_board_navigation() {
     let mut app = make_app();
     // Load some PRs
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![
-        make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
-        make_review_pr(2, "bob", ReviewDecision::ReviewRequired),
-        make_review_pr(3, "carol", ReviewDecision::ChangesRequested),
-    ]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
+            make_review_pr(2, "bob", ReviewDecision::ReviewRequired),
+            make_review_pr(3, "carol", ReviewDecision::ChangesRequested),
+        ],
+    ));
     app.handle_key(make_key(KeyCode::Tab)); // to review board
     assert_eq!(app.review_selection().unwrap().column(), 0);
 
@@ -6449,10 +6461,13 @@ fn review_board_p_opens_browser() {
 #[test]
 fn review_board_renders_pr_titles() {
     let mut app = make_app();
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![
-        make_review_pr(42, "alice", ReviewDecision::ReviewRequired),
-        make_review_pr(50, "bob", ReviewDecision::Approved),
-    ]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr(42, "alice", ReviewDecision::ReviewRequired),
+            make_review_pr(50, "bob", ReviewDecision::Approved),
+        ],
+    ));
     app.update(Message::SwitchToReviewBoard);
 
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -6486,11 +6501,10 @@ fn review_tab_shows_loading_indicator_during_refresh() {
     let mut app = make_app();
     // Load some PRs first
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
+    ));
     assert!(!app.review_board_loading());
 
     // Trigger a refresh — loading indicator should appear in the tab bar
@@ -6509,11 +6523,10 @@ fn review_tab_shows_loading_indicator_during_refresh() {
 fn review_tab_hides_loading_indicator_after_fetch() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
+    ));
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -6526,7 +6539,7 @@ fn review_tab_hides_loading_indicator_after_fetch() {
 fn review_board_renders_empty_state_after_fetch() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     assert!(!app.review_board_loading());
 
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -6544,7 +6557,8 @@ fn review_board_renders_empty_state_after_fetch() {
 fn review_board_renders_persistent_error() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsFetchFailed(PrListKind::Review,
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Review,
         "not authenticated".to_string(),
     ));
     assert_eq!(app.last_review_error(), Some("not authenticated"));
@@ -6559,10 +6573,13 @@ fn review_board_renders_persistent_error() {
 #[test]
 fn review_prs_loaded_clears_last_error() {
     let mut app = make_app();
-    app.update(Message::PrsFetchFailed(PrListKind::Review,"auth error".to_string()));
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Review,
+        "auth error".to_string(),
+    ));
     assert!(app.last_review_error().is_some());
 
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     assert!(
         app.last_review_error().is_none(),
         "Successful fetch should clear last error"
@@ -8722,7 +8739,7 @@ fn clamp_review_selection_clamps_approved_column() {
 
     // Now remove all PRs and trigger a clamp via ReviewPrsLoaded with an
     // empty list (which calls clamp_review_selection internally).
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
 
     // The Approved column selection must have been clamped to 0.
     let row = app.review_selection().unwrap().selected_row[3];
@@ -8916,7 +8933,7 @@ fn review_board_default_mode_is_reviewer() {
 fn my_prs_loaded_updates_state() {
     let mut app = make_app();
     let prs = vec![make_review_pr(101, "me", ReviewDecision::ReviewRequired)];
-    app.update(Message::PrsLoaded(PrListKind::Authored,prs));
+    app.update(Message::PrsLoaded(PrListKind::Authored, prs));
     assert_eq!(app.my_prs().len(), 1);
     assert_eq!(app.my_prs()[0].number, 101);
     assert!(!app.my_prs_loading());
@@ -8955,7 +8972,9 @@ fn toggle_to_author_fetches_my_prs() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     let cmds = app.update(Message::ToggleReviewBoardMode);
-    assert!(cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
 }
 
 #[test]
@@ -10101,11 +10120,10 @@ fn render_repo_filter_confirm_delete_preset() {
 fn render_review_repo_filter_overlay_shows_title() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
+    ));
     app.input.mode = InputMode::ReviewRepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
@@ -10118,11 +10136,10 @@ fn render_review_repo_filter_overlay_shows_title() {
 fn render_review_repo_filter_overlay_shows_repos() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
+    ));
     app.input.mode = InputMode::ReviewRepoFilter;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
@@ -10185,7 +10202,7 @@ fn render_tab_bar_board_mode_shows_tasks_label() {
 fn render_tab_bar_review_board_shows_reviews_active() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Reviews"),
@@ -10197,10 +10214,13 @@ fn render_tab_bar_review_board_shows_reviews_active() {
 fn render_tab_bar_review_board_shows_pr_count() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![
-        make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
-        make_review_pr(2, "bob", ReviewDecision::ReviewRequired),
-    ]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
+            make_review_pr(2, "bob", ReviewDecision::ReviewRequired),
+        ],
+    ));
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Reviews (2)"),
@@ -10212,12 +10232,11 @@ fn render_tab_bar_review_board_shows_pr_count() {
 fn render_tab_bar_review_board_my_prs_tab() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Authored,vec![make_review_pr(
-        1,
-        "me",
-        ReviewDecision::Approved,
-    )]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Authored,
+        vec![make_review_pr(1, "me", ReviewDecision::Approved)],
+    ));
     // Toggle to Author mode so My PRs tab is active
     app.update(Message::ToggleReviewBoardMode);
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -10231,11 +10250,14 @@ fn render_tab_bar_review_board_my_prs_tab() {
 fn render_tab_bar_review_board_dependabot_tab() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![
-        make_review_pr(1, "dependabot", ReviewDecision::ReviewRequired),
-        make_review_pr(2, "dependabot", ReviewDecision::ReviewRequired),
-    ]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Bot,
+        vec![
+            make_review_pr(1, "dependabot", ReviewDecision::ReviewRequired),
+            make_review_pr(2, "dependabot", ReviewDecision::ReviewRequired),
+        ],
+    ));
     // Toggle to Dependabot mode (Reviewer → Author → Dependabot)
     app.update(Message::ToggleReviewBoardMode);
     app.update(Message::ToggleReviewBoardMode);
@@ -10290,7 +10312,7 @@ fn tab_bar_board_mode_highlights_tab_key() {
 fn tab_bar_review_board_highlights_keys() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     let buf = render_to_buffer(&mut app, 120, 30);
 
     let tab_style = find_style_of(&buf, "[Tab]").expect("[Tab] not found");
@@ -10341,12 +10363,11 @@ fn tab_bar_security_board_highlights_keys() {
 fn render_review_board_author_shows_my_pr_titles() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Authored,vec![make_review_pr(
-        42,
-        "me",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Authored,
+        vec![make_review_pr(42, "me", ReviewDecision::ReviewRequired)],
+    ));
     app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -10359,12 +10380,11 @@ fn render_review_board_author_shows_my_pr_titles() {
 fn render_review_board_author_shows_column_headers() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Authored,vec![make_review_pr(
-        42,
-        "me",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Authored,
+        vec![make_review_pr(42, "me", ReviewDecision::ReviewRequired)],
+    ));
     app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -10377,12 +10397,15 @@ fn render_review_board_author_shows_column_headers() {
 fn render_review_board_dependabot_shows_bot_prs() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![make_review_pr(
-        100,
-        "dependabot",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Bot,
+        vec![make_review_pr(
+            100,
+            "dependabot",
+            ReviewDecision::ReviewRequired,
+        )],
+    ));
     app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
     app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -10396,12 +10419,15 @@ fn render_review_board_dependabot_shows_bot_prs() {
 fn render_review_board_dependabot_shows_ci_columns() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![make_review_pr(
-        100,
-        "dependabot",
-        ReviewDecision::ReviewRequired,
-    )]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Bot,
+        vec![make_review_pr(
+            100,
+            "dependabot",
+            ReviewDecision::ReviewRequired,
+        )],
+    ));
     app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
     app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -10418,8 +10444,8 @@ fn render_review_board_dependabot_shows_ci_columns() {
 fn render_review_board_author_empty_shows_no_prs() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Authored,vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Authored, vec![]));
     app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -10432,8 +10458,8 @@ fn render_review_board_author_empty_shows_no_prs() {
 fn render_review_board_dependabot_empty_shows_no_prs() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![]));
     app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
     app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -10655,11 +10681,14 @@ fn epic_card_title_truncated_in_narrow_terminal() {
 #[test]
 fn active_prs_for_column_sorts_by_repo() {
     let mut app = make_app();
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![
-        make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
-        make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
-        make_review_pr_for_repo(3, "carol", ReviewDecision::ReviewRequired, "org/middle"),
-    ]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
+            make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
+            make_review_pr_for_repo(3, "carol", ReviewDecision::ReviewRequired, "org/middle"),
+        ],
+    ));
     app.update(Message::SwitchToReviewBoard);
 
     let col = ReviewDecision::ReviewRequired.column_index();
@@ -10673,10 +10702,13 @@ fn active_prs_for_column_sorts_by_repo() {
 #[test]
 fn selected_review_pr_agrees_with_sorted_order() {
     let mut app = make_app();
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![
-        make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
-        make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
-    ]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
+            make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
+        ],
+    ));
     app.update(Message::SwitchToReviewBoard);
 
     // Row 0 should be "org/alpha" (sorted first), row 1 should be "org/zebra"
@@ -10697,11 +10729,14 @@ fn selected_review_pr_agrees_with_sorted_order() {
 #[test]
 fn active_prs_for_column_preserves_order_within_same_repo() {
     let mut app = make_app();
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![
-        make_review_pr_for_repo(10, "alice", ReviewDecision::ReviewRequired, "org/alpha"),
-        make_review_pr_for_repo(5, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
-        make_review_pr_for_repo(20, "carol", ReviewDecision::ReviewRequired, "org/alpha"),
-    ]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr_for_repo(10, "alice", ReviewDecision::ReviewRequired, "org/alpha"),
+            make_review_pr_for_repo(5, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
+            make_review_pr_for_repo(20, "carol", ReviewDecision::ReviewRequired, "org/alpha"),
+        ],
+    ));
     app.update(Message::SwitchToReviewBoard);
 
     let col = ReviewDecision::ReviewRequired.column_index();
@@ -11126,11 +11161,14 @@ fn security_repo_filter_digit_toggles_repo() {
 fn make_review_board_app() -> App {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![
-        make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
-        make_review_pr(2, "bob", ReviewDecision::Approved),
-        make_review_pr(3, "carol", ReviewDecision::ReviewRequired),
-    ]));
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
+            make_review_pr(2, "bob", ReviewDecision::Approved),
+            make_review_pr(3, "carol", ReviewDecision::ReviewRequired),
+        ],
+    ));
     app
 }
 
@@ -11333,7 +11371,9 @@ fn review_board_e_edits_github_queries() {
 fn refresh_review_prs_returns_fetch_command() {
     let mut app = make_review_board_app();
     let cmds = app.update(Message::RefreshReviewPrs);
-    assert!(cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
 }
 
 #[test]
@@ -11341,14 +11381,18 @@ fn refresh_review_prs_in_author_mode_returns_fetch_my_prs() {
     let mut app = make_review_board_app();
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
     let cmds = app.update(Message::RefreshReviewPrs);
-    assert!(cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))));
 }
 
 #[test]
 fn refresh_bot_prs_returns_fetch_bot_prs() {
     let mut app = make_review_board_app();
     let cmds = app.update(Message::RefreshBotPrs);
-    assert!(cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
 }
 
 #[test]
@@ -11391,7 +11435,7 @@ fn review_board_esc_clears_bot_pr_selection_first() {
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)); // Dependabot
     let mut pr = make_review_pr(10, "dependabot", ReviewDecision::ReviewRequired);
     pr.ci_status = CiStatus::Success; // Column 0 (CI Passing)
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
     // Select a bot PR (cursor is at column 0 where the PR is)
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(app.has_bot_pr_selection());
@@ -11418,7 +11462,7 @@ fn make_dependabot_board_app() -> App {
     pr1.ci_status = CiStatus::Success;
     let mut pr2 = make_review_pr(11, "dependabot[bot]", ReviewDecision::ReviewRequired);
     pr2.ci_status = CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![pr1, pr2]));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr1, pr2]));
     app
 }
 
@@ -11477,7 +11521,7 @@ fn dependabot_m_starts_batch_merge() {
                                                 // Merge requires CI-passing + approved
     let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
     pr.ci_status = CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
     // Select the PR — it's in Approved column (3)
     if let Some(sel) = app.review_selection_mut() {
         sel.set_column(3);
@@ -11566,7 +11610,7 @@ fn confirm_batch_merge_y_confirms() {
     app.update(Message::ToggleReviewBoardMode); // Dependabot
     let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
     pr.ci_status = CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
     if let Some(sel) = app.review_selection_mut() {
         sel.set_column(3); // Approved column
     }
@@ -11716,7 +11760,7 @@ fn g_on_review_board_jumps_to_agent() {
 
     let mut pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
     pr.tmux_window = Some("dispatch:review-42".to_string());
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
     assert!(cmds
@@ -11730,7 +11774,7 @@ fn g_on_review_board_without_agent_shows_status() {
     app.update(Message::SwitchToReviewBoard);
 
     let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
     assert!(cmds.is_empty()); // StatusInfo is handled inline via self.update(), returns empty
@@ -11777,7 +11821,7 @@ fn review_status_updated_sets_agent_status_on_pr() {
         crate::models::ReviewDecision::ReviewRequired,
         "acme/app",
     );
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     app.update(Message::ReviewStatusUpdated {
         repo: "acme/app".to_string(),
@@ -11828,7 +11872,7 @@ fn detach_review_agent_clears_fields_and_returns_commands() {
     pr.tmux_window = Some("dispatch:review-42".to_string());
     pr.worktree = Some("/tmp/wt".to_string());
     pr.agent_status = Some(crate::models::ReviewAgentStatus::FindingsReady);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.update(Message::DetachReviewAgent {
         repo: "acme/app".to_string(),
@@ -11860,7 +11904,7 @@ fn review_agent_dispatched_sets_agent_status_reviewing() {
         crate::models::ReviewDecision::ReviewRequired,
         "org/my-repo",
     );
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     app.update(Message::ReviewAgentDispatched {
         github_repo: "org/my-repo".to_string(),
@@ -11893,7 +11937,7 @@ fn review_board_r_on_idle_agent_emits_re_review() {
     );
     pr.tmux_window = Some("dispatch:review-42".to_string());
     pr.agent_status = Some(crate::models::ReviewAgentStatus::Idle);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
     assert!(cmds.iter().any(|c| matches!(c, Command::ReReview { .. })));
@@ -11909,7 +11953,7 @@ fn review_board_r_without_agent_does_nothing() {
         crate::models::ReviewDecision::ReviewRequired,
         "acme/app",
     );
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
     assert!(cmds.is_empty());
@@ -11927,7 +11971,7 @@ fn review_board_r_on_reviewing_agent_does_nothing() {
     );
     pr.tmux_window = Some("dispatch:review-42".to_string());
     pr.agent_status = Some(crate::models::ReviewAgentStatus::Reviewing);
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('r')));
     assert!(cmds.is_empty());
@@ -11944,7 +11988,7 @@ fn review_board_t_on_agent_emits_detach() {
         "acme/app",
     );
     pr.tmux_window = Some("dispatch:review-42".to_string());
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
     // DetachReviewAgent is a Message, not a Command — so it's handled inline
@@ -11964,7 +12008,7 @@ fn review_board_t_without_agent_does_nothing() {
         crate::models::ReviewDecision::ReviewRequired,
         "acme/app",
     );
-    app.update(Message::PrsLoaded(PrListKind::Review,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
     assert!(cmds.is_empty());
@@ -12728,7 +12772,9 @@ fn handle_key_normal_enter_on_select_all_row() {
     app.handle_key(make_key(KeyCode::Enter));
     // Should have toggled select all — tasks should be selected
     assert!(
-        !app.select.tasks.is_empty() || !app.select.epics.is_empty() || app.selection().on_select_all
+        !app.select.tasks.is_empty()
+            || !app.select.epics.is_empty()
+            || app.selection().on_select_all
     );
 }
 
@@ -13438,7 +13484,7 @@ fn make_dependabot_app() -> App {
     pr1.ci_status = crate::models::CiStatus::Success;
     let mut pr2 = make_review_pr(11, "dependabot[bot]", ReviewDecision::ReviewRequired);
     pr2.ci_status = crate::models::CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![pr1, pr2]));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr1, pr2]));
     app
 }
 
@@ -13493,7 +13539,7 @@ fn review_board_m_starts_batch_merge_in_dependabot() {
                                                 // Need Approved + CI Success PRs for merge eligibility
     let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
     pr.ci_status = crate::models::CiStatus::Success;
-    app.update(Message::PrsLoaded(PrListKind::Bot,vec![pr]));
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
     // Select the PR (navigate to Approved column = 3)
     if let Some(sel) = app.review_selection_mut() {
         sel.selected_column = 3;
@@ -13783,7 +13829,10 @@ fn handle_key_normal_review_board_routes_correctly() {
     };
     // Tab should switch to security board (may emit refresh commands)
     app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(app.board.view_mode, ViewMode::SecurityBoard { .. }));
+    assert!(matches!(
+        app.board.view_mode,
+        ViewMode::SecurityBoard { .. }
+    ));
 }
 
 /// In Normal mode on the SecurityBoard view, keys route to the security board handler.
@@ -14146,7 +14195,10 @@ fn handle_key_normal_epic_view_routes_correctly() {
 fn terminal_resized_returns_no_commands() {
     let mut app = make_app();
     let cmds = app.update(Message::TerminalResized);
-    assert!(cmds.is_empty(), "resize should produce no commands, just trigger a re-draw");
+    assert!(
+        cmds.is_empty(),
+        "resize should produce no commands, just trigger a re-draw"
+    );
 }
 
 #[test]

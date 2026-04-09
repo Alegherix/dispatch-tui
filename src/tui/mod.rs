@@ -1782,6 +1782,7 @@ impl App {
 
         if let Some(task) = self.find_task_mut(id) {
             task.sub_status = SubStatus::Crashed;
+            task.tmux_window = None;
         }
         if let Some(task) = self.find_task(id) {
             cmds.push(Command::PersistTask(task.clone()));

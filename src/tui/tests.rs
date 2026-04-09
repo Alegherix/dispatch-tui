@@ -1152,12 +1152,12 @@ fn window_gone_on_running_task_marks_crashed() {
 
     let cmds = app.update(Message::WindowGone(TaskId(4)));
     assert!(app.is_crashed(TaskId(4)));
-    // tmux_window should NOT be cleared for crashed Running tasks
-    assert!(app.board.tasks[0].tmux_window.is_some());
-    // Should emit PersistTask to persist the Crashed sub_status
+    // tmux_window should be cleared — the window is gone by definition
+    assert!(app.board.tasks[0].tmux_window.is_none());
+    // Should emit PersistTask with cleared tmux_window
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(4))));
+        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(4) && t.tmux_window.is_none())));
 }
 
 #[test]

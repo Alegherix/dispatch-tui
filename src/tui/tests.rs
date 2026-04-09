@@ -1700,23 +1700,21 @@ fn action_hints_backlog_shows_enter_detail() {
 }
 
 #[test]
-fn action_hints_shows_tab_filter_help() {
+fn action_hints_shows_filter_help() {
     let task = make_task(1, TaskStatus::Backlog);
     let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
-    assert!(keys.contains(&"[Tab]"), "should show Tab hint");
     assert!(keys.contains(&"[f]"), "should show filter hint");
     assert!(keys.contains(&"[?]"), "should show help hint");
 }
 
 #[test]
-fn action_hints_shows_copy_split_notifications() {
+fn action_hints_shows_copy_and_split() {
     let task = make_task(1, TaskStatus::Backlog);
     let hints = ui::action_hints(Some(&task), Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(keys.contains(&"[c]"), "should show copy hint");
     assert!(keys.contains(&"[S]"), "should show split hint");
-    assert!(keys.contains(&"[N]"), "should show notifications hint");
 }
 
 #[test]
@@ -1733,11 +1731,10 @@ fn action_hints_no_ctrl_g_outside_epic() {
 // --- epic_action_hints: missing hints ---
 
 #[test]
-fn epic_action_hints_shows_tab_filter_help() {
+fn epic_action_hints_shows_filter_help() {
     let epic = make_epic(1);
     let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
-    assert!(keys.contains(&"[Tab]"), "epic should show Tab hint");
     assert!(keys.contains(&"[f]"), "epic should show filter hint");
     assert!(keys.contains(&"[?]"), "epic should show help hint");
 }

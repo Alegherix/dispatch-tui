@@ -2440,10 +2440,8 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     push_hint("E", "epic");
     push_hint("D", "quick");
     push_hint("S", "split");
-    push_hint("N", "notifications");
     push_hint("f", "filter");
     push_hint("H", "history");
-    push_hint("Tab", "reviews");
     push_hint("?", "help");
     push_hint("q", "quit");
 
@@ -2480,7 +2478,6 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("D", "quick");
     push_hint("f", "filter");
     push_hint("H", "history");
-    push_hint("Tab", "reviews");
     push_hint("?", "help");
     push_hint("q", "quit");
 

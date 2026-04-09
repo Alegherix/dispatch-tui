@@ -1824,6 +1824,7 @@ impl App {
             let task_clone = task.clone();
             self.agents.last_output_change.insert(id, Instant::now());
             self.clamp_selection();
+            self.set_status(format!("Task {id} resumed"));
             vec![Command::PersistTask(task_clone)]
         } else {
             vec![]

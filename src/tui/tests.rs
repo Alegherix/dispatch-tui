@@ -1353,6 +1353,23 @@ fn resumed_sets_status_to_running() {
 }
 
 #[test]
+fn resumed_sets_success_status_message() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.worktree = Some("/wt".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    app.update(Message::Resumed {
+        id: TaskId(4),
+        tmux_window: "win-4".to_string(),
+    });
+
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Task 4 resumed"),
+    );
+}
+
+#[test]
 fn tmux_output_stores_in_map() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Running)], TEST_TIMEOUT);
     let cmds = app.update(Message::TmuxOutput {

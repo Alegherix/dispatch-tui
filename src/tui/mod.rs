@@ -2331,6 +2331,12 @@ impl App {
                 pane_id,
                 restore_window,
             }]
+        } else if let Some(window) = self
+            .selected_task()
+            .and_then(|t| t.tmux_window.clone())
+        {
+            let task_id = self.selected_task().unwrap().id;
+            vec![Command::EnterSplitModeWithTask { task_id, window }]
         } else {
             vec![Command::EnterSplitMode]
         }

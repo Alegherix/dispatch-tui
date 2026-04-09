@@ -297,6 +297,31 @@ pub fn kill_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Get the pane ID for a window's first pane.
+pub fn pane_id_for_window(window: &str, runner: &dyn ProcessRunner) -> Result<String> {
+    let output = runner.run(
+        "tmux",
+        &["display-message", "-p", "-t", window, "#{pane_id}"],
+    )?;
+    if !output.status.success() {
+        bail!("tmux display-message failed for window '{}'", window);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_string())
+}
+
+/// Atomically swap the contents of two panes without changing the layout.
+/// `source` can be a pane ID or `<window>.0` to reference a window's first pane.
+/// `-d` keeps focus on the current pane.
+pub fn swap_pane(source: &str, target: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner.run("tmux", &["swap-pane", "-d", "-s", source, "-t", target])?;
+    if !output.status.success() {
+        bail!("tmux swap-pane failed with status {}", output.status);
+    }
+    Ok(())
+}
+
 /// Check whether a tmux pane with the given ID still exists.
 pub fn pane_exists(pane_id: &str, runner: &dyn ProcessRunner) -> bool {
     runner

@@ -12500,6 +12500,40 @@ fn window_gone_ignored_for_split_pinned_task() {
     );
 }
 
+#[test]
+fn toggle_split_with_selected_tmux_task_emits_enter_with_task() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some("task-3".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.selection_mut().set_column(1); // Running column
+    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(
+        &cmds[0],
+        Command::EnterSplitModeWithTask { task_id, window }
+            if *task_id == TaskId(3) && window == "task-3"
+    ));
+}
+
+#[test]
+fn toggle_split_without_tmux_task_emits_plain_enter() {
+    let task = make_task(3, TaskStatus::Running);
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.selection_mut().set_column(1); // Running column, task has no tmux_window
+    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::EnterSplitMode));
+}
+
+#[test]
+fn toggle_split_no_selection_emits_plain_enter() {
+    // make_app has tasks but default selection is on Backlog column — task 1 has no tmux_window
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert_eq!(cmds.len(), 1);
+    assert!(matches!(&cmds[0], Command::EnterSplitMode));
+}
+
 // =====================================================================
 // Input handler coverage: normal mode keys
 // =====================================================================

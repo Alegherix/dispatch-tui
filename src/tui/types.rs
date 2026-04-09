@@ -482,6 +482,10 @@ pub enum Command {
     },
     // Split mode commands
     EnterSplitMode,
+    EnterSplitModeWithTask {
+        task_id: TaskId,
+        window: String,
+    },
     ExitSplitMode {
         pane_id: String,
         restore_window: Option<String>,

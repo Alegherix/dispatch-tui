@@ -1115,6 +1115,27 @@ impl TuiRuntime {
         }
     }
 
+    fn exec_enter_split_mode_with_task(&self, app: &mut App, task_id: TaskId, window: &str) {
+        let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
+            Ok(id) => id,
+            Err(_) => {
+                app.update(Message::StatusInfo("Split mode requires tmux".to_string()));
+                return;
+            }
+        };
+        match tmux::join_pane(window, &dispatch_pane, &*self.runner) {
+            Ok(pane_id) => {
+                app.update(Message::SplitPaneOpened {
+                    pane_id,
+                    task_id: Some(task_id),
+                });
+            }
+            Err(e) => {
+                app.update(Message::Error(format!("Split with task failed: {e:#}")));
+            }
+        }
+    }
+
     fn exec_exit_split_mode(&self, app: &mut App, pane_id: &str, restore_window: Option<&str>) {
         if let Some(window_name) = restore_window {
             if let Err(e) = tmux::break_pane_to_window(pane_id, window_name, &*self.runner) {
@@ -1136,22 +1157,13 @@ impl TuiRuntime {
         old_pane_id: Option<&str>,
         old_window: Option<&str>,
     ) {
-        // Break out the old pane first (restore it as its own window)
-        if let (Some(pane_id), Some(window_name)) = (old_pane_id, old_window) {
-            if let Err(e) = tmux::break_pane_to_window(pane_id, window_name, &*self.runner) {
-                app.update(Message::Error(format!("Break pane failed: {e:#}")));
-                return;
-            }
-        } else if let Some(pane_id) = old_pane_id {
-            // Old pane exists but has no task window name — kill it
-            if let Err(e) = tmux::kill_pane(pane_id, &*self.runner) {
-                app.update(Message::Error(format!("Kill pane failed: {e:#}")));
-                return;
-            }
-        }
+        let Some(right_pane) = old_pane_id else {
+            // No right pane to swap into — shouldn't happen, but handle gracefully
+            return;
+        };
 
-        // Get the dispatch pane to use as target for join
-        let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
+        // 1. Get the new task's pane ID before swapping (pane IDs follow content)
+        let new_pane_id = match tmux::pane_id_for_window(new_window, &*self.runner) {
             Ok(id) => id,
             Err(e) => {
                 app.update(Message::Error(format!("Cannot get pane ID: {e:#}")));
@@ -1159,17 +1171,33 @@ impl TuiRuntime {
             }
         };
 
-        match tmux::join_pane(new_window, &dispatch_pane, &*self.runner) {
-            Ok(pane_id) => {
-                app.update(Message::SplitPaneOpened {
-                    pane_id,
-                    task_id: Some(task_id),
-                });
+        // 2. Atomically swap pane contents — no layout change, no resize, no flicker
+        let source = format!("{new_window}.0");
+        if let Err(e) = tmux::swap_pane(&source, right_pane, &*self.runner) {
+            app.update(Message::Error(format!("Swap pane failed: {e:#}")));
+            return;
+        }
+
+        // 3. The standalone window now holds the old pane's content.
+        //    Rename it back to the old task's window name, or kill it if there was no task.
+        if let Some(old_name) = old_window {
+            // The window kept its name (new_window). Rename it to the old task's name.
+            if let Err(e) = tmux::rename_window(new_window, old_name, &*self.runner) {
+                app.update(Message::Error(format!("Rename window failed: {e:#}")));
+                return;
             }
-            Err(e) => {
-                app.update(Message::Error(format!("Join pane failed: {e:#}")));
+        } else {
+            // Old pane was empty (no task) — kill the standalone window holding it
+            if let Err(e) = tmux::kill_window(new_window, &*self.runner) {
+                app.update(Message::Error(format!("Kill window failed: {e:#}")));
+                return;
             }
         }
+
+        app.update(Message::SplitPaneOpened {
+            pane_id: new_pane_id,
+            task_id: Some(task_id),
+        });
     }
 
     fn exec_check_split_pane(&self, app: &mut App, pane_id: &str) {
@@ -1760,6 +1788,9 @@ async fn execute_commands(
             }
             // Split mode
             Command::EnterSplitMode => rt.exec_enter_split_mode(app),
+            Command::EnterSplitModeWithTask { task_id, window } => {
+                rt.exec_enter_split_mode_with_task(app, task_id, &window)
+            }
             Command::ExitSplitMode {
                 pane_id,
                 restore_window,
@@ -3219,6 +3250,27 @@ mod tests {
     }
 
     #[test]
+    fn exec_enter_split_mode_with_task_joins_pane() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
+            MockProcessRunner::ok_with_stdout(b"%3\n"), // join_pane: display-message for source pane ID
+            MockProcessRunner::ok(),                     // join_pane: join-pane command
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock.clone());
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_enter_split_mode_with_task(&mut app, TaskId(1), "task-1");
+        let calls = mock.recorded_calls();
+        assert!(calls[2].1.contains(&"join-pane".to_string()));
+        assert!(app.error_popup().is_none());
+        assert!(app.split_active());
+        assert_eq!(app.split_pinned_task_id(), Some(TaskId(1)));
+    }
+
+    #[test]
     fn exec_exit_split_mode_with_restore_breaks_pane() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -3285,14 +3337,13 @@ mod tests {
     }
 
     #[test]
-    fn exec_swap_split_pane_joins_new_window() {
+    fn exec_swap_split_pane_uses_swap_pane() {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),                     // kill_pane (old pane, no window name)
-            MockProcessRunner::ok_with_stdout(b"%1\n"),  // current_pane_id
-            MockProcessRunner::ok_with_stdout(b"%3\n"),  // join_pane: display-message for source pane ID
-            MockProcessRunner::ok(),                     // join_pane: join-pane command
+            MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
+            MockProcessRunner::ok(),                     // swap-pane
+            MockProcessRunner::ok(),                     // kill-window (old pane had no task)
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3300,7 +3351,43 @@ mod tests {
 
         rt.exec_swap_split_pane(&mut app, TaskId(1), "task-1", Some("%2"), None);
         let calls = mock.recorded_calls();
-        assert!(calls[0].1.contains(&"kill-pane".to_string()));
+        // 1st call: display-message to get new pane ID
+        assert!(calls[0].1.contains(&"display-message".to_string()));
+        // 2nd call: swap-pane
+        assert!(calls[1].1.contains(&"swap-pane".to_string()));
+        // 3rd call: kill-window (no old task to rename)
+        assert!(calls[2].1.contains(&"kill-window".to_string()));
+        assert!(app.error_popup().is_none());
+        assert!(app.split_active());
+        assert_eq!(app.split_pinned_task_id(), Some(TaskId(1)));
+    }
+
+    #[test]
+    fn exec_swap_split_pane_renames_old_task_window() {
+        let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
+            MockProcessRunner::ok(),                     // swap-pane
+            MockProcessRunner::ok(),                     // rename-window (old task had a window)
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock.clone());
+        let tasks = db.list_all().unwrap();
+        let mut app = App::new(tasks, Duration::from_secs(300));
+
+        rt.exec_swap_split_pane(
+            &mut app,
+            TaskId(1),
+            "task-new",
+            Some("%2"),
+            Some("task-old"),
+        );
+        let calls = mock.recorded_calls();
+        // 3rd call should be rename-window, not kill-window
+        assert!(calls[2].1.contains(&"rename-window".to_string()));
+        // Verify the rename target and new name
+        assert!(calls[2].1.contains(&"task-new".to_string()));
+        assert!(calls[2].1.contains(&"task-old".to_string()));
         assert!(app.error_popup().is_none());
     }
 

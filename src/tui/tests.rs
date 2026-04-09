@@ -1155,9 +1155,9 @@ fn window_gone_on_running_task_marks_crashed() {
     // tmux_window should be cleared — the window is gone by definition
     assert!(app.board.tasks[0].tmux_window.is_none());
     // Should emit PersistTask with cleared tmux_window
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistTask(t) if t.id == TaskId(4) && t.tmux_window.is_none())));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::PersistTask(t) if t.id == TaskId(4) && t.tmux_window.is_none())
+    ));
 }
 
 #[test]
@@ -1363,10 +1363,7 @@ fn resumed_sets_success_status_message() {
         tmux_window: "win-4".to_string(),
     });
 
-    assert_eq!(
-        app.status.message.as_deref(),
-        Some("Task 4 resumed"),
-    );
+    assert_eq!(app.status.message.as_deref(), Some("Task 4 resumed"),);
 }
 
 #[test]
@@ -14193,9 +14190,10 @@ fn handle_key_error_popup_dismisses_first() {
 fn agent_crashed_stores_last_error_from_tmux_output() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
     app.board.tasks[0].tmux_window = Some("task-4".to_string());
-    app.agents
-        .tmux_outputs
-        .insert(TaskId(4), "Error: connection refused\npanicked at main.rs:42".to_string());
+    app.agents.tmux_outputs.insert(
+        TaskId(4),
+        "Error: connection refused\npanicked at main.rs:42".to_string(),
+    );
 
     app.update(Message::AgentCrashed(TaskId(4)));
 
@@ -14306,4 +14304,67 @@ fn render_adapts_to_smaller_terminal_after_resize() {
         buffer_contains(&buf_small, "Task 1"),
         "task should render at smaller width"
     );
+}
+
+#[test]
+fn confirm_quit_with_active_split_emits_exit_split_mode() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some("task-3".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+
+    // Set up active split with a pinned task
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(3));
+
+    // Enter confirm quit, then confirm with 'y'
+    app.input.mode = InputMode::ConfirmQuit;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+
+    assert!(app.should_quit);
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::ExitSplitMode {
+                pane_id,
+                restore_window: Some(w),
+            } if pane_id == "%42" && w == "task-3"
+        )),
+        "should emit ExitSplitMode to restore task window before quitting"
+    );
+}
+
+#[test]
+fn confirm_quit_with_split_no_pinned_task_kills_pane() {
+    let mut app = make_app();
+
+    // Split active but no pinned task (empty split)
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%99".to_string());
+    app.board.split.pinned_task_id = None;
+
+    app.input.mode = InputMode::ConfirmQuit;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+
+    assert!(app.should_quit);
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::ExitSplitMode {
+                pane_id,
+                restore_window: None,
+            } if pane_id == "%99"
+        )),
+        "should emit ExitSplitMode with no restore_window for empty split"
+    );
+}
+
+#[test]
+fn confirm_quit_without_split_emits_no_extra_commands() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmQuit;
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+
+    assert!(app.should_quit);
+    assert!(cmds.is_empty(), "no commands when split is not active");
 }

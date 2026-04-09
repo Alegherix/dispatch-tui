@@ -528,7 +528,7 @@ impl App {
     fn handle_key_confirm_quit(&mut self, key: KeyEvent) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             s.should_quit = true;
-            vec![]
+            s.exit_split_if_active()
         })
     }
 

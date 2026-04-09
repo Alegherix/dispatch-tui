@@ -2332,22 +2332,29 @@ impl App {
         vec![]
     }
 
+    fn exit_split_if_active(&mut self) -> Vec<Command> {
+        if !self.board.split.active {
+            return vec![];
+        }
+        let pane_id = match self.board.split.right_pane_id.take() {
+            Some(id) => id,
+            None => return vec![],
+        };
+        let restore_window = self
+            .board
+            .split
+            .pinned_task_id
+            .and_then(|id| self.find_task(id))
+            .and_then(|t| t.tmux_window.clone());
+        vec![Command::ExitSplitMode {
+            pane_id,
+            restore_window,
+        }]
+    }
+
     fn handle_toggle_split_mode(&mut self) -> Vec<Command> {
         if self.board.split.active {
-            let pane_id = match self.board.split.right_pane_id.take() {
-                Some(id) => id,
-                None => return vec![],
-            };
-            let restore_window = self
-                .board
-                .split
-                .pinned_task_id
-                .and_then(|id| self.find_task(id))
-                .and_then(|t| t.tmux_window.clone());
-            vec![Command::ExitSplitMode {
-                pane_id,
-                restore_window,
-            }]
+            self.exit_split_if_active()
         } else if let Some(window) = self.selected_task().and_then(|t| t.tmux_window.clone()) {
             let task_id = self.selected_task().unwrap().id;
             vec![Command::EnterSplitModeWithTask { task_id, window }]

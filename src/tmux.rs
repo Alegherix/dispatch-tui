@@ -332,6 +332,15 @@ pub fn swap_pane(source: &str, target: &str, runner: &dyn ProcessRunner) -> Resu
     Ok(())
 }
 
+/// Move tmux focus to the specified pane.
+pub fn select_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner.run("tmux", &["select-pane", "-t", pane_id])?;
+    if !output.status.success() {
+        bail!("tmux select-pane failed with status {}", output.status);
+    }
+    Ok(())
+}
+
 /// Check whether a tmux pane with the given ID still exists.
 pub fn pane_exists(pane_id: &str, runner: &dyn ProcessRunner) -> bool {
     runner
@@ -343,6 +352,15 @@ pub fn pane_exists(pane_id: &str, runner: &dyn ProcessRunner) -> bool {
 // ---------------------------------------------------------------------------
 // Internal helpers (kept for arg-shape unit tests)
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+fn select_pane_args(pane_id: &str) -> Vec<String> {
+    vec![
+        "select-pane".to_string(),
+        "-t".to_string(),
+        pane_id.to_string(),
+    ]
+}
 
 #[cfg(test)]
 fn select_window_args(window: &str) -> Vec<String> {
@@ -766,5 +784,21 @@ mod tests {
         ]);
         let result = join_pane("my-window", "%0", &mock).unwrap();
         assert_eq!(result, "%99");
+    }
+
+    #[test]
+    fn select_pane_args_correct() {
+        let args = select_pane_args("%42");
+        assert_eq!(args, vec!["select-pane", "-t", "%42"]);
+    }
+
+    #[test]
+    fn select_pane_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        select_pane("%42", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1, vec!["select-pane", "-t", "%42"]);
     }
 }

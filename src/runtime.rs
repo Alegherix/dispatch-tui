@@ -1195,9 +1195,14 @@ impl TuiRuntime {
         }
 
         app.update(Message::SplitPaneOpened {
-            pane_id: new_pane_id,
+            pane_id: new_pane_id.clone(),
             task_id: Some(task_id),
         });
+
+        // Focus the right pane so the user can interact with the agent
+        if let Err(e) = tmux::select_pane(&new_pane_id, &*self.runner) {
+            tracing::warn!("select-pane failed: {e:#}");
+        }
     }
 
     fn exec_check_split_pane(&self, app: &mut App, pane_id: &str) {
@@ -3418,6 +3423,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
             MockProcessRunner::ok(),                    // swap-pane
             MockProcessRunner::ok(),                    // kill-window (old pane had no task)
+            MockProcessRunner::ok(),                    // select-pane (focus right pane)
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3431,6 +3437,9 @@ mod tests {
         assert!(calls[1].1.contains(&"swap-pane".to_string()));
         // 3rd call: kill-window (no old task to rename)
         assert!(calls[2].1.contains(&"kill-window".to_string()));
+        // 4th call: select-pane to focus the right pane
+        assert!(calls[3].1.contains(&"select-pane".to_string()));
+        assert!(calls[3].1.contains(&"%5".to_string()));
         assert!(app.error_popup().is_none());
         assert!(app.split_active());
         assert_eq!(app.split_pinned_task_id(), Some(TaskId(1)));
@@ -3444,6 +3453,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
             MockProcessRunner::ok(),                    // swap-pane
             MockProcessRunner::ok(),                    // rename-window (old task had a window)
+            MockProcessRunner::ok(),                    // select-pane (focus right pane)
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone());
         let tasks = db.list_all().unwrap();
@@ -3462,6 +3472,9 @@ mod tests {
         // Verify the rename target and new name
         assert!(calls[2].1.contains(&"task-new".to_string()));
         assert!(calls[2].1.contains(&"task-old".to_string()));
+        // 4th call: select-pane to focus the right pane
+        assert!(calls[3].1.contains(&"select-pane".to_string()));
+        assert!(calls[3].1.contains(&"%5".to_string()));
         assert!(app.error_popup().is_none());
     }
 

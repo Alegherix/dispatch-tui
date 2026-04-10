@@ -85,6 +85,13 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let usage = database.get_all_usage().unwrap_or_default();
     app.update(Message::RefreshUsage(usage));
 
+    // Warn if tmux focus-events is off (needed for split-view focus indicator)
+    if !crate::tmux::focus_events_enabled(&*runner) {
+        app.update(Message::StatusInfo(
+            "tmux focus-events is off \u{2014} split-view focus indicator won't work. Run: tmux set -g focus-events on".to_string(),
+        ));
+    }
+
     // Seed default GitHub query strings (no-op if already set)
     if let Err(e) = database.seed_github_query_defaults() {
         app.update(Message::StatusInfo(format!(

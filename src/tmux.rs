@@ -153,6 +153,37 @@ pub fn ensure_split_hook(runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// Check whether tmux has `focus-events` enabled globally.
+///
+/// Returns `false` if the option is off or if the query fails (e.g. not
+/// running inside tmux).
+pub fn focus_events_enabled(runner: &dyn ProcessRunner) -> bool {
+    let Ok(output) = runner.run("tmux", &["show-options", "-gv", "focus-events"]) else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.trim() == "on"
+}
+
+/// Enable tmux `focus-events` globally.
+///
+/// This is idempotent — calling it when already enabled is a no-op.
+pub fn set_focus_events(runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner.run("tmux", &["set-option", "-g", "focus-events", "on"])?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "tmux set-option focus-events failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
+    }
+    Ok(())
+}
+
 /// Return the name of the currently active tmux window.
 pub fn current_window_name(runner: &dyn ProcessRunner) -> Result<String> {
     let output = runner.run("tmux", &["display-message", "-p", "#W"])?;
@@ -800,5 +831,27 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "tmux");
         assert_eq!(calls[0].1, vec!["select-pane", "-t", "%42"]);
+    }
+
+    #[test]
+    fn focus_events_enabled_returns_true_when_on() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
+        assert!(focus_events_enabled(&mock));
+    }
+
+    #[test]
+    fn focus_events_enabled_returns_false_when_off() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
+        assert!(!focus_events_enabled(&mock));
+    }
+
+    #[test]
+    fn set_focus_events_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        set_focus_events(&mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1, vec!["set-option", "-g", "focus-events", "on"]);
     }
 }

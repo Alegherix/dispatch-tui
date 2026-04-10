@@ -6,6 +6,9 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
+use crate::process::RealProcessRunner;
+use crate::tmux;
+
 // Plugin files — embedded in the binary and installed to ~/.claude/plugins/local/dispatch/
 // When adding/removing files here, also update the list in build.rs.
 const PLUGIN_JSON: &str = include_str!("../plugin/.claude-plugin/plugin.json");
@@ -402,6 +405,20 @@ pub fn run_setup(port: u16, yes: bool) -> Result<()> {
         }
     } else {
         println!("Plugin: dispatch plugin already up to date");
+    }
+
+    // 4. Tmux focus-events
+    let runner = RealProcessRunner;
+    if !tmux::focus_events_enabled(&runner) {
+        if yes || confirm("Enable tmux focus-events? (needed for split-view focus indicator)")? {
+            tmux::set_focus_events(&runner)?;
+            println!("Tmux: enabled focus-events globally");
+            any_changes = true;
+        } else {
+            println!("Tmux: focus-events skipped");
+        }
+    } else {
+        println!("Tmux: focus-events already enabled");
     }
 
     if any_changes {

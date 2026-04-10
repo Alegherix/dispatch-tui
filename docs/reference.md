@@ -24,7 +24,9 @@
 | `D` | Quick dispatch — pick repo and dispatch immediately |
 | `m` / `M` | Move task forward / backward |
 | `W` | Wrap up — commit, rebase, open PR |
-| `g` | Jump to the agent's tmux window |
+| `g` | Jump to the agent's tmux window (swap pane in split view) |
+| `G` | Jump to the agent's tmux window (always, ignoring split view) |
+| `S` | Toggle split view — side-by-side TUI + agent pane |
 | `x` | Archive task (with confirmation) |
 | `H` | Toggle archive panel |
 | `Space` | Toggle select |
@@ -129,6 +131,7 @@ dispatch create --from-plan plan.md
 1. **MCP server** — registers the dispatch server in `~/.claude/.mcp.json`
 2. **Plugin** — installs hooks, skills, and commands to `~/.claude/plugins/local/dispatch/`
 3. **Permissions** — adds MCP tool permissions to `~/.claude/settings.json`
+4. **Tmux** — enables `focus-events` globally (needed for split-view focus indicator)
 
 The setup is idempotent — safe to run on every install or upgrade.
 
@@ -153,14 +156,13 @@ dispatch setup
 
 ## Tmux Configuration
 
-For the best experience with split-view mode, enable focus events in tmux:
+`dispatch setup` enables `focus-events` for the running tmux server. To persist this across tmux server restarts, add to `~/.tmux.conf`:
 
-```bash
-# ~/.tmux.conf
+```
 set -g focus-events on
 ```
 
-This allows the TUI to show a colored border indicating which pane has focus: cyan when the TUI is focused, dim when the agent pane is focused. Without this setting, the focus border will not respond to pane switches.
+This allows the split-view focus indicator to work: a colored border shows which pane has focus (cyan = TUI, dim = agent pane). Without this setting, the border will not respond to pane switches.
 
 ## Troubleshooting
 

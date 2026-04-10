@@ -28,7 +28,7 @@ cargo install --path .
 dispatch setup
 ```
 
-This registers the dispatch MCP server, installs the dispatch plugin (hooks, skills, commands), and adds MCP tool permissions.
+This registers the dispatch MCP server, installs the dispatch plugin (hooks, skills, commands), adds MCP tool permissions, and enables tmux `focus-events` (needed for the split-view focus indicator).
 
 **3. Open a tmux session** (dispatch must run inside tmux):
 
@@ -36,10 +36,9 @@ This registers the dispatch MCP server, installs the dispatch plugin (hooks, ski
 tmux new-session -s dev
 ```
 
-**Recommended tmux setting** — enable focus events so the split-view focus indicator works:
+To persist `focus-events` across tmux server restarts, add to `~/.tmux.conf`:
 
-```bash
-# Add to ~/.tmux.conf
+```
 set -g focus-events on
 ```
 
@@ -58,7 +57,8 @@ cargo run tui
 | Create task | `n` | Enter title, description, tag, and repo path |
 | Dispatch | `d` | Agent explores your codebase, writes a plan, and implements it |
 | Agent needs input *(optional)* | `g` | Desktop notification — jump to agent and interact |
-| Review the work | `g` | Task is in Review — check the result in the tmux window |
+| Split view *(optional)* | `S` | Side-by-side TUI + agent pane — see both at once |
+| Review the work | `g` | Jump to the agent's tmux window (or swap split pane) |
 | Wrap up | `W` | Commit, rebase, and open a PR. Or use `/wrap-up` from the agent's session |
 
 ### Quick dispatch (`D`)
@@ -115,6 +115,8 @@ There are two ways to wrap up completed work:
 - **Done** — merged and wrapped up
 
 **Worktrees** — each dispatched agent gets its own git worktree at `<repo>/.worktrees/<id>-<slug>`, isolating agent work from your main branch. Closing the tmux window does **not** delete the worktree — press `d` again to resume.
+
+**Split view** — press `S` to enter side-by-side mode: the TUI on the left, the selected agent's tmux pane on the right. Press `g` to swap the right pane to a different task, or `G` to jump directly to an agent window (leaving split view). A colored border shows which pane has focus (cyan = TUI, dim = agent). Requires tmux `focus-events` — enabled automatically by `dispatch setup`.
 
 **Epics** — a group of related tasks. Press `g` on an epic to see its subtasks. Press `d` on the epic to dispatch the next Backlog subtask automatically.
 

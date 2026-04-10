@@ -2,7 +2,7 @@
 set -e
 
 echo "fmt..."
-cargo fmt
+cargo fmt --check
 
 echo "clippy..."
 cargo clippy -- -D warnings

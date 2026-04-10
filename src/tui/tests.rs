@@ -14061,6 +14061,56 @@ fn handle_key_normal_uppercase_m_on_epic_moves_backward() {
 use crate::models::ReviewDecision;
 
 #[test]
+fn backlog_column_color_is_blue() {
+    let backlog = ui::column_color(TaskStatus::Backlog);
+    // Backlog should use a distinct blue, not the generic MUTED grey.
+    assert_ne!(
+        backlog,
+        Color::Rgb(86, 95, 137),
+        "Backlog column color should not be MUTED grey"
+    );
+    assert_eq!(
+        backlog,
+        Color::Rgb(122, 162, 247),
+        "Backlog column color should be Tokyo Night blue"
+    );
+}
+
+#[test]
+fn focused_backlog_header_renders_in_blue() {
+    let mut app = make_app();
+    assert_eq!(app.selected_column(), 0);
+
+    let buf = render_to_buffer(&mut app, 100, 20);
+    let area = buf.area();
+    let blue = Color::Rgb(122, 162, 247);
+    let target = "backlog";
+    let mut found = false;
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right().saturating_sub(target.len() as u16 - 1) {
+            let matches = target
+                .bytes()
+                .enumerate()
+                .all(|(i, ch)| buf[(x + i as u16, y)].symbol().as_bytes().first() == Some(&ch));
+            if matches {
+                let fg = buf[(x, y)].fg;
+                if fg == blue {
+                    found = true;
+                }
+                break;
+            }
+        }
+        if found {
+            break;
+        }
+    }
+    assert!(
+        found,
+        "Focused Backlog header should render with blue foreground color"
+    );
+}
+
+#[test]
 fn needs_review_column_color_matches_backlog() {
     let backlog = ui::column_color(TaskStatus::Backlog);
     let needs_review = ui::review_column_color(ReviewDecision::ReviewRequired);

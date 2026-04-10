@@ -27,12 +27,13 @@ const PURPLE: Color = Color::Rgb(187, 154, 247);
 const GREEN: Color = Color::Rgb(158, 206, 106);
 const CYAN: Color = Color::Rgb(86, 182, 194);
 const RED_DIM: Color = Color::Rgb(224, 130, 130);
+const BLUE: Color = Color::Rgb(122, 162, 247);
 const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 
 /// Column color per status
 pub(in crate::tui) fn column_color(status: TaskStatus) -> Color {
     match status {
-        TaskStatus::Backlog => MUTED,
+        TaskStatus::Backlog => BLUE,
         TaskStatus::Running => YELLOW,
         TaskStatus::Review => PURPLE,
         TaskStatus::Done => GREEN,
@@ -2616,7 +2617,7 @@ pub(in crate::tui) fn bot_action_hints(
 
 pub(in crate::tui) fn review_column_color(decision: ReviewDecision) -> Color {
     match decision {
-        ReviewDecision::ReviewRequired => MUTED,
+        ReviewDecision::ReviewRequired => BLUE,
         ReviewDecision::WaitingForResponse => YELLOW,
         ReviewDecision::ChangesRequested => RED_DIM,
         ReviewDecision::Approved => GREEN,

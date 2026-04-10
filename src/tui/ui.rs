@@ -2718,8 +2718,11 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let agent_status = app.selected_review_pr().and_then(|pr| pr.agent_status);
         if is_bot_mode {
             let has_selection = app.has_bot_pr_selection();
-            let hints =
-                Paragraph::new(Line::from(bot_action_hints(has_pr, agent_status, has_selection)));
+            let hints = Paragraph::new(Line::from(bot_action_hints(
+                has_pr,
+                agent_status,
+                has_selection,
+            )));
             frame.render_widget(hints, chunks[4]);
         } else {
             let hints = Paragraph::new(Line::from(review_action_hints(

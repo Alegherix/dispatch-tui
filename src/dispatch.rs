@@ -498,6 +498,52 @@ fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
     (id_line, section)
 }
 
+/// Standard task identification block shared by all task agent prompts.
+fn task_block(task_id: TaskId, title: &str, description: &str, epic: Option<&EpicContext>) -> String {
+    let (epic_id_line, epic_section) = epic_preamble(epic);
+    format!(
+        "Task:\n  ID: {task_id}\n  Title: {title}\n  Description: {description}\
+         {epic_id_line}{epic_section}"
+    )
+}
+
+/// TDD instruction line, shared across all agents.
+fn tdd_instruction() -> &'static str {
+    "Always use TDD: express intended behaviour as tests first, then implement the minimum code to make them pass."
+}
+
+/// MCP tools availability notice, shared across all task agents.
+fn mcp_tools_instruction() -> &'static str {
+    "The dispatch MCP tools are available — use them to query and update this task (get_task, update_task)."
+}
+
+/// Instructions for writing a plan and attaching it to the task via MCP.
+fn plan_and_attach_instruction(_task_id: TaskId) -> String {
+    "Your goal is to explore the codebase and write a focused implementation plan. \
+Use /plan mode for a structured planning session. When done, save the plan and attach it to the task:\n\
+\n\
+1. Write the plan to docs/plans/\n\
+2. Call update_task via the dispatch MCP tools to set the plan field to the plan file path\n\
+\n\
+After planning, ask whether to continue implementing or stop.\n\
+\n\
+Use the dispatch MCP tools to attach the plan (update_task — set the plan field)."
+        .to_string()
+}
+
+/// Wrap-up instruction for when implementation is complete.
+fn wrap_up_instruction() -> &'static str {
+    "When implementation is complete, use the /wrap-up skill to commit remaining \
+changes and ask the user whether to rebase onto main or create a PR."
+}
+
+/// Allium spec instruction — shared across all agents that may touch domain behaviour.
+fn allium_instruction() -> &'static str {
+    "The Allium spec at `docs/specs/dispatch.allium` is the source of truth for domain logic. \
+Consult it before changing core behaviour. If your implementation changes domain behaviour, \
+update the spec using the `allium:tend` skill and verify alignment with `allium:weed`."
+}
+
 fn build_prompt(
     task_id: TaskId,
     title: &str,
@@ -1176,6 +1222,65 @@ mod tests {
     use crate::process::{exit_fail, MockProcessRunner};
     use chrono::Utc;
     use std::process::Output;
+
+    // -----------------------------------------------------------------------
+    // Shared helper tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn task_block_contains_id_title_description() {
+        let block = task_block(TaskId(5), "My title", "My description", None);
+        assert!(block.contains("5"));
+        assert!(block.contains("My title"));
+        assert!(block.contains("My description"));
+    }
+
+    #[test]
+    fn task_block_includes_epic_section_when_present() {
+        let ctx = EpicContext {
+            epic_id: EpicId(3),
+            epic_title: "Big Epic".to_string(),
+            sibling_summaries: vec![],
+        };
+        let block = task_block(TaskId(1), "T", "D", Some(&ctx));
+        assert!(block.contains("EpicId: 3"));
+        assert!(block.contains("Big Epic"));
+    }
+
+    #[test]
+    fn tdd_instruction_mentions_tests_first() {
+        let instr = tdd_instruction();
+        assert!(instr.contains("tests first") || instr.contains("behaviour as tests"));
+    }
+
+    #[test]
+    fn mcp_tools_instruction_mentions_get_and_update() {
+        let instr = mcp_tools_instruction();
+        assert!(instr.contains("get_task"));
+        assert!(instr.contains("update_task"));
+    }
+
+    #[test]
+    fn plan_and_attach_instruction_mentions_docs_plans_and_update_task() {
+        let instr = plan_and_attach_instruction(TaskId(9));
+        assert!(instr.contains("docs/plans/"));
+        assert!(instr.contains("update_task"));
+        assert!(instr.contains("plan field") || instr.contains("plan="));
+    }
+
+    #[test]
+    fn wrap_up_instruction_mentions_wrap_up_skill() {
+        let instr = wrap_up_instruction();
+        assert!(instr.contains("/wrap-up"));
+    }
+
+    #[test]
+    fn allium_instruction_mentions_spec_and_skills() {
+        let instr = allium_instruction();
+        assert!(instr.contains("dispatch.allium"));
+        assert!(instr.contains("allium:tend"));
+        assert!(instr.contains("allium:weed"));
+    }
 
     fn make_task(repo_path: &str) -> Task {
         Task {

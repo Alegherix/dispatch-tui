@@ -16,10 +16,15 @@ git rebase origin/main
 
 ### 2. Run allium weed
 
-Use the Agent tool with `subagent_type: "allium:weed"` to compare `docs/specs/dispatch.allium` against the implementation code. Ask it to run in **check** mode and report all divergences, focusing on **undocumented behavior** — code that does things not captured in the spec.
+Use the Agent tool with `subagent_type: "allium:weed"` to compare the specs in `docs/specs/` against the implementation code. Ask it to run in **check** mode and report all divergences, focusing on **undocumented behavior** — code that does things not captured in the spec.
+
+The specs are split across three files:
+- `docs/specs/core.allium` — domain model (entities, enums, config)
+- `docs/specs/tasks.allium` — task lifecycle, agent health, hooks, notifications, MCP task tools
+- `docs/specs/epics.allium` — epic lifecycle and MCP epic tools
 
 Prompt the weed agent with:
-> Weed the dispatch spec at docs/specs/dispatch.allium against the implementation in src/. Run in check mode. Focus on finding undocumented behavior — code paths, state transitions, validation rules, or edge cases that exist in the implementation but are missing from the spec. Classify each finding as: spec bug (spec wrong, code correct), code bug (code wrong, spec correct), or undocumented behavior (code does something useful not in spec). Report all findings with file locations.
+> Weed the dispatch specs in docs/specs/ (core.allium, tasks.allium, epics.allium) against the implementation in src/. Run in check mode. Focus on finding undocumented behavior — code paths, state transitions, validation rules, or edge cases that exist in the implementation but are missing from the spec. Classify each finding as: spec bug (spec wrong, code correct), code bug (code wrong, spec correct), or undocumented behavior (code does something useful not in spec). Report all findings with file locations.
 
 ### 3. Process findings
 
@@ -40,7 +45,7 @@ Stage only the changed files (spec files and any user-approved code fixes). Comm
 ```
 docs: align allium spec with implementation
 
-- Added [specific behaviors] to dispatch.allium
+- Added [specific behaviors] to tasks.allium / epics.allium / core.allium
 - [Any code fixes if user-approved]
 ```
 

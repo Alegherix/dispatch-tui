@@ -1,0 +1,319 @@
+-- allium: 3
+-- epics.allium
+--
+-- Scope: Epic lifecycle and MCP epic tools
+-- Excludes: Task lifecycle (see tasks.allium), domain model (see core.allium)
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Editor ==
+
+rule EditEpic {
+    when: EditEpic(epic)
+
+    -- Opens $EDITOR with a structured file containing the epic's
+    -- title, description, and repo_path.
+    -- The user edits the file; on save, fields are parsed back.
+    -- Empty fields retain their previous values.
+    -- Status is not editable via the epic editor.
+
+    ensures:
+        let edited = EditorSession(epic)
+        if edited.title != "": epic.title = edited.title
+    ensures:
+        if edited.description != "": epic.description = edited.description
+    ensures:
+        if edited.repo_path != "": epic.repo_path = edited.repo_path
+    ensures: epic.updated_at = now
+
+    @guidance
+        -- Unlike EditTask, the epic editor does not expose status.
+        -- Epic status is derived from subtask states via the
+        -- EpicStatusRecalculation invariant and is not directly
+        -- editable by the user.
+        -- The TUI is suspended while the editor is open and resumes
+        -- on editor exit. If the editor exits with a non-zero status,
+        -- no changes are applied.
+}
+
+-- == Epic Lifecycle ==
+
+rule CreateEpic {
+    when: CreateEpic(title, description?, repo_path, sort_order?)
+
+    ensures: core/Epic.created(
+        title: title,
+        description: description,
+        repo_path: repo_path,
+        status: backlog,
+        sort_order: sort_order,
+        created_at: now,
+        updated_at: now
+    )
+}
+
+rule DispatchEpicPlanning {
+    when: DispatchEpic(epic)
+
+    requires: epic.status = backlog
+    requires: !epic.has_plan
+    requires: epic.active_subtasks.count = 0
+
+    -- Creates a planning subtask and dispatches a planning agent.
+    -- The planning agent brainstorms and writes an implementation plan
+    -- for this epic.
+    ensures:
+        let planning_task = core/Task.created(
+            title: "Plan: " + epic.title,
+            description: "Planning subtask for epic: " + epic.title + "\n\n" + epic.description,
+            repo_path: epic.repo_path,
+            status: backlog,
+            sub_status: core/SubStatus.default_for(backlog),
+            epic: epic,
+            created_at: now,
+            updated_at: now
+        )
+        AgentLaunched(task: planning_task, mode: epic_planning)
+
+    @guidance
+        -- The planning task is dispatched directly via epic_planning
+        -- mode, bypassing the standard DispatchTask flow. This is
+        -- because the planning task has no plan — the agent's job is
+        -- to create one. The dispatch provisions a worktree and tmux
+        -- window and transitions the task to Running.
+        -- When an epic has no plan but already has active subtasks,
+        -- neither this rule nor DispatchEpicSubtask applies. The TUI
+        -- handles this gracefully by showing "Epic has subtasks but
+        -- no plan" without taking any action.
+}
+
+rule DispatchEpicSubtask {
+    when: DispatchEpic(epic)
+
+    requires: epic.status = backlog
+    requires: epic.has_plan
+
+    -- Dispatches the next backlog subtask of this epic, ordered by
+    -- sort_order ascending (nulls treated as task ID, tie-broken by id ascending).
+    -- If the subtask has a plan, it is dispatched for implementation.
+    -- If not, it is dispatched for brainstorming.
+    ensures:
+        let candidates = epic.active_subtasks where status = backlog
+        let next = sort_by_order(candidates).first
+        if next != null:
+            if next.has_plan:
+                AgentLaunched(task: next, mode: implementation)
+            else if next.tag = epic:
+                AgentLaunched(task: next, mode: brainstorm)
+            else if next.tag = feature:
+                AgentLaunched(task: next, mode: plan)
+            else:
+                AgentLaunched(task: next, mode: standard)
+
+    @guidance
+        -- The TUI requires epic.status = backlog so that all subtasks
+        -- are dispatched in a batch before any start running. Once the
+        -- first subtask is dispatched and the epic auto-advances to
+        -- running (via RecalculateEpicStatus), no further TUI dispatches
+        -- are possible until the epic returns to backlog. This is
+        -- stricter than DispatchNextViaMcp, which omits the backlog
+        -- guard so that running agents can chain-dispatch siblings.
+        --
+        -- Routing is based on the subtask's plan and tag:
+        --   has_plan        → implementation mode
+        --   tag = epic    → brainstorm mode
+        --   tag = feature → plan mode
+        --   other           → standard mode (dispatch without plan)
+        -- When no backlog subtasks remain, the TUI shows a status
+        -- message instead of dispatching. This rule only fires when
+        -- there is at least one backlog subtask.
+}
+
+rule EpicBatchWrapUp {
+    when: EpicBatchWrapUp(epic, action)
+
+    -- action: rebase | pr
+
+    let review_tasks = epic.subtasks where status = review and worktree != null
+
+    requires: review_tasks.count > 0
+
+    ensures:
+        for task in sort_by_order(review_tasks):
+            if action = rebase:
+                WrapUpRebase(task)
+            else:
+                WrapUpPr(task)
+
+    @guidance
+        -- Sequences rebase or PR creation across all review tasks in an
+        -- epic that have a worktree. Tasks are processed one at a time in
+        -- sort_order. On success, the next task is processed automatically.
+        -- On conflict or failure, the queue pauses and reports the failing
+        -- task — the user can resolve the conflict and resume or cancel.
+        -- The MergeQueue tracks progress (completed count, current task,
+        -- failed task) and can be cancelled at any time (Esc).
+}
+
+rule MoveEpicForward {
+    when: MoveEpicStatus(epic, forward)
+
+    requires: epic.status != done
+    requires: epic.status != archived
+
+    let next = next_status(epic.status)
+
+    ensures: epic.status = next
+    ensures: epic.updated_at = now
+    ensures:
+        if next = done:
+            for task in epic.subtasks where tmux_window != null:
+                task.tmux_window = null
+
+    @guidance
+        -- Uses the same next() progression as tasks:
+        --   backlog -> running -> review -> done.
+        -- Done and archived are terminal for forward movement.
+        -- When moving to done, all subtask tmux windows are killed
+        -- to clean up active agent sessions.
+}
+
+rule MoveEpicBackward {
+    when: MoveEpicStatus(epic, backward)
+
+    requires: epic.status != backlog
+    requires: epic.status != archived
+
+    let prev = prev_status(epic.status)
+
+    ensures: epic.status = prev
+    ensures: epic.updated_at = now
+
+    @guidance
+        -- Uses the same prev() progression as tasks:
+        --   done -> review -> running -> backlog.
+        -- Backlog and archived are terminal for backward movement.
+}
+
+rule ConfirmArchiveEpic {
+    when: ConfirmArchiveEpic(epic)
+
+    requires:
+        epic.active_subtasks.count = 0
+        or epic.active_subtasks.all(t => t.status = done)
+
+    ensures: ConfirmationShown(epic, "Archive epic and all subtasks?")
+}
+
+rule ArchiveEpic {
+    when: ArchiveEpic(epic)
+
+    ensures:
+        for task in epic.active_subtasks:
+            ArchiveTask(task)
+    ensures: not exists epic
+}
+
+rule DeleteEpic {
+    when: DeleteEpic(epic)
+
+    -- Deletes epic and all linked subtasks
+    ensures:
+        for task in epic.subtasks:
+            not exists task
+    ensures: not exists epic
+
+    @guidance
+        -- Worktrees and tmux windows are cleaned up best-effort for
+        -- subtasks that have them before deletion.
+}
+
+-- == MCP Epic Tools ==
+
+rule UpdateEpicViaMcp {
+    when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?, repo_path?)
+
+    requires: title != null or description != null or status != null
+              or plan != null or sort_order != null or repo_path != null
+
+    -- Cannot set status to archived via MCP
+    requires: status != archived
+
+    ensures:
+        if title != null: epic.title = title
+    ensures:
+        if description != null: epic.description = description
+    ensures:
+        if status != null: epic.status = status
+    ensures:
+        if plan != null: epic.plan = plan
+    ensures:
+        if sort_order != null: epic.sort_order = sort_order
+    ensures:
+        if repo_path != null: epic.repo_path = repo_path
+    ensures: epic.updated_at = now
+}
+
+rule DispatchNextViaMcp {
+    when: McpDispatchNext(epic)
+
+    -- Intentionally looser than the TUI DispatchEpicSubtask rule:
+    -- does not require epic.status = backlog. The TUI dispatches
+    -- subtasks in batch while the epic is still in backlog; MCP
+    -- dispatches sequentially as agents complete work, so the epic
+    -- will already be running.
+
+    ensures:
+        let candidates = epic.subtasks where status = backlog
+        let next = sort_by_order(candidates).first
+        if next != null:
+            if next.has_plan:
+                AgentLaunched(task: next, mode: implementation)
+            else if next.tag = epic:
+                AgentLaunched(task: next, mode: brainstorm)
+            else if next.tag = feature:
+                AgentLaunched(task: next, mode: plan)
+            else:
+                AgentLaunched(task: next, mode: standard)
+
+    @guidance
+        -- MCP tool for agents to dispatch the next backlog subtask of
+        -- their epic. Uses the same dispatch mode routing as the TUI's
+        -- DispatchEpicSubtask (plan/tag based). The task is transitioned
+        -- to running with a provisioned worktree and tmux window.
+        -- When no backlog subtasks remain, returns an informational
+        -- message without error.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+@invariant EpicStatusRecalculation
+    -- Epic status is persisted and recalculated via recalculate_epic_status.
+    -- It moves both forward and backward to always reflect subtask reality.
+    -- Derivation logic (checked in priority order):
+    --   no active subtasks            => backlog
+    --   all active subtasks done      => done
+    --   any active subtask in review  => review
+    --   any active subtask running    => running
+    --   otherwise                     => backlog
+    -- The derived status is compared to the current epic.status; it is
+    -- applied whenever the derived status differs from the current status.
+    --
+    -- Epic substatus (display label for epic cards):
+    --   backlog + no plan             => unplanned
+    --   backlog + has plan            => planned
+    --   running + any subtask blocked => "N blocked" (N = count of running
+    --     subtasks with sub_status in {needs_input, stale, crashed, conflict})
+    --   running + no blocked          => active
+    --   review + active merge         => wrapping up
+    --   review + no active merge      => in review
+    --   done/archived                 => done
+    --
+    -- Epic cards show colored status indicators (●N) for each non-zero
+    -- subtask count by parent status, using the column palette colors.

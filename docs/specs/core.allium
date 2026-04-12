@@ -1,0 +1,232 @@
+-- allium: 3
+-- core.allium
+--
+-- Scope: Shared domain model for the dispatch system
+-- Includes: External entities, enumerations, core entities, config, VisualColumn concept
+-- Excludes: Rules, invariants (see tasks.allium, epics.allium)
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- The git worktree and tmux window are provisioned externally.
+-- The spec treats them as opaque handles.
+
+external entity Worktree {
+    path: String
+    branch: String
+}
+
+external entity TmuxWindow {
+    name: String
+}
+
+external entity TmuxPane {
+    id: String       -- tmux pane identifier (e.g., "%42")
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum TaskTag { bug | feature | chore | epic }
+
+-- Legacy alias: "ready" maps to backlog
+enum TaskStatus { backlog | running | review | done | archived }
+
+-- SubStatus refines the parent status into a more precise state.
+-- Valid combinations are constrained by SubStatus.is_valid_for(status).
+-- When status changes, sub_status resets to SubStatus.default_for(new_status).
+enum SubStatus {
+    -- backlog / done / archived
+    none
+
+    -- running (and review where noted)
+    active          -- agent is running normally
+    needs_input     -- agent is blocked waiting for human interaction (Blocked visual column)
+    stale           -- no output change detected beyond inactivity_timeout
+    crashed         -- tmux window disappeared unexpectedly
+    conflict        -- rebase/merge encountered a conflict (valid for both running and review)
+
+    -- review
+    awaiting_review   -- PR created, no review decision yet
+                      -- UI splits this into two visual sections based on runtime state:
+                      --   "awaiting review" — tmux window alive (agent still active)
+                      --   "awaiting merge"  — tmux window gone (detached, just waiting for merge)
+    changes_requested -- reviewer requested changes
+    approved          -- PR approved, ready to merge
+}
+
+-- Valid SubStatus values per parent status (enforced by MCP; bypassed by CLI hooks):
+--   backlog   : none
+--   running   : active | needs_input | stale | crashed | conflict
+--   review    : awaiting_review | changes_requested | approved | conflict
+--   done      : none
+--   archived  : none
+--
+-- Note: HookNotification sets status=review with sub_status=needs_input via the CLI
+-- update path, which bypasses is_valid_for() validation. The UI renders
+-- (review, needs_input) as the "Blocked" state. The Blocked visual column is
+-- defined as (running, needs_input) in models.rs, but tasks produced by
+-- HookNotification appear as (review, needs_input) in practice.
+
+-- Default sub_status when transitioning to a new status:
+--   backlog   -> none
+--   running   -> active
+--   review    -> awaiting_review
+--   done      -> none
+--   archived  -> none
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity Task {
+    title: String
+    description: String
+    repo_path: String
+    status: TaskStatus
+    sub_status: SubStatus
+    worktree: Worktree?
+    tmux_window: TmuxWindow?
+    plan: String?
+    epic: Epic?
+    pr_url: String?
+    tag: TaskTag?
+    sort_order: Integer?
+    created_at: Timestamp
+    updated_at: Timestamp
+
+    transitions status {
+        backlog -> running
+        running -> review
+        running -> backlog
+        review -> done
+        review -> running
+        done -> review
+        done -> archived
+        -- Archive is accepted from any non-archived status
+        backlog -> archived
+        running -> archived
+        review -> archived
+        terminal: archived
+    }
+
+    -- Derived
+    has_plan: plan != null
+    is_stale: sub_status == stale
+    is_crashed: sub_status == crashed
+    is_epic: tag = epic
+    is_detached: worktree != null and tmux_window == null
+                 and (status == running or status == review)
+                 and sub_status != conflict
+    pr_number: derived from pr_url  -- extracted at runtime, not persisted
+}
+
+entity Epic {
+    title: String
+    description: String
+    repo_path: String
+    status: TaskStatus
+    plan: String?
+    sort_order: Integer?
+    created_at: Timestamp
+    updated_at: Timestamp
+
+    has_plan: plan != null
+
+    subtasks: Task with epic = this
+    active_subtasks: subtasks where status != archived
+    subtask_statuses: active_subtasks -> status
+}
+
+entity TaskUsage {
+    task: Task
+    cost_usd: Float
+    input_tokens: Integer
+    output_tokens: Integer
+    cache_read_tokens: Integer
+    cache_write_tokens: Integer
+    updated_at: Timestamp
+
+    @guidance
+        -- Uses accumulation semantics: one row per task, upserted on each
+        -- report. Numeric fields (cost_usd, input_tokens, output_tokens,
+        -- cache_read_tokens, cache_write_tokens) are summed with the
+        -- existing values rather than replaced. updated_at reflects the
+        -- time of the most recent report.
+}
+
+-- SplitPane is a runtime-only UI concept (not persisted) that tracks
+-- whether the TUI is displaying a task's tmux window as a side pane.
+-- It is modelled here because task lifecycle events (finish, PR creation)
+-- must coordinate with split pane state.
+
+entity SplitPane {
+    active: Boolean = false
+    focused: Boolean = true
+    pane: TmuxPane?
+    pinned_task: Task?
+
+    @guidance
+        -- At most one task can be pinned at a time.
+        -- When active is true, pane must be non-null.
+        -- pinned_task may be null (empty shell in the pane).
+        -- focused tracks whether the TUI pane has tmux focus.
+        -- Driven by crossterm FocusGained/FocusLost events
+        -- (requires tmux `focus-events on`). Defaults to true.
+        -- Reset to true on split entry and exit.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    tick_interval: Duration = 2.seconds
+    inactivity_timeout: Duration = 3.minutes
+    status_message_expiry: Duration = 5.seconds
+    notifications_enabled: Boolean = true
+    pr_poll_interval: Duration = 30.seconds
+    default_branch: String = detect_from_remote("main")
+}
+
+------------------------------------------------------------
+-- VisualColumn
+------------------------------------------------------------
+
+-- The kanban board renders 8 visual columns, grouped under the 4 parent
+-- statuses. Each visual column corresponds to a (parent_status, sub_status)
+-- pair or set. Columns within the same parent group share a header.
+--
+-- Column layout (left to right):
+--
+--   # | Label            | parent_status | sub_statuses
+--   --+------------------+---------------+------------------------------
+--   0 | Backlog          | backlog       | none
+--   1 | Active           | running       | active
+--   2 | Blocked          | running       | needs_input
+--   3 | Stale            | running       | stale, crashed, conflict
+--   4 | PR Created       | review        | awaiting_review, conflict  (split into "awaiting review" / "awaiting merge" sections by detach state)
+--   5 | Revise           | review        | changes_requested
+--   6 | Approved         | review        | approved
+--   7 | Done             | done          | none
+--
+-- Navigation (h/l) moves between visual columns.
+-- Parent group boundaries are annotated in the column header.
+-- A task's visual column is determined by (task.status, task.sub_status).
+--
+-- Note: HookNotification produces (review, needs_input) in practice,
+-- which the UI renders as the Blocked state. The VisualColumn model
+-- defines Blocked as (running, needs_input), which is the target model
+-- for future alignment.
+
+concept VisualColumn {
+    label: String
+    parent_status: TaskStatus
+    sub_statuses: SubStatus[]
+
+    -- A task belongs to this column when:
+    --   task.status = parent_status and task.sub_status in sub_statuses
+    contains(task): task.status = parent_status and task.sub_status in sub_statuses
+}

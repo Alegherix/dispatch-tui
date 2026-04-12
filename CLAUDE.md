@@ -24,7 +24,12 @@ Always use TDD when working in this repo. Start by expressing the intended behav
 
 ## Allium Specification
 
-`docs/specs/dispatch.allium` is the **source of truth** for domain logic: task lifecycle, status transitions, sub-status invariants, dispatch rules, and epic behavior. Consult it before changing core behavior. Use `allium:tend` and `allium:weed` skills to keep spec and code aligned.
+The Allium specs in `docs/specs/` are the **source of truth** for domain logic:
+- `core.allium` — domain model (entities, enums, config, VisualColumn)
+- `tasks.allium` — task lifecycle, agent health, hooks, notifications, split pane, MCP task tools
+- `epics.allium` — epic lifecycle and MCP epic tools
+
+Consult the relevant spec before changing core behavior. Use `allium:tend` and `allium:weed` skills to keep spec and code aligned.
 
 ## Agent Working Directory
 

@@ -537,8 +537,10 @@ changes and ask the user whether to rebase onto main or create a PR."
 
 /// Allium spec instruction — shared across all agents that may touch domain behaviour.
 fn allium_instruction() -> &'static str {
-    "The Allium spec at `docs/specs/dispatch.allium` is the source of truth for domain logic. \
-Consult it before changing core behaviour. If your implementation changes domain behaviour, \
+    "The Allium specs in `docs/specs/` are the source of truth for domain logic \
+(`core.allium` for the domain model, `tasks.allium` for task lifecycle, \
+`epics.allium` for epic lifecycle). \
+Consult them before changing core behaviour. If your implementation changes domain behaviour, \
 update the spec using the `allium:tend` skill and verify alignment with `allium:weed`."
 }
 
@@ -1306,7 +1308,7 @@ mod tests {
     #[test]
     fn allium_instruction_mentions_spec_and_skills() {
         let instr = allium_instruction();
-        assert!(instr.contains("dispatch.allium"));
+        assert!(instr.contains("docs/specs/"));
         assert!(instr.contains("allium:tend"));
         assert!(instr.contains("allium:weed"));
     }

@@ -551,6 +551,7 @@ fn build_prompt(
     plan: Option<&str>,
     epic: Option<&EpicContext>,
 ) -> String {
+    let block = task_block(task_id, title, description, epic);
     let plan_section = match plan {
         Some(path) => format!(
             "\n\nPlan: {path}\nRead this file for the full implementation plan. Follow it step by step."
@@ -558,25 +559,24 @@ fn build_prompt(
         None => String::new(),
     };
 
-    let (epic_id_line, epic_section) = epic_preamble(epic);
-
     format!(
-        "You are an autonomous coding agent. \
-Your task is:\n\
-  ID: {task_id}\n\
-  Title: {title}\n\
-  Description: {description}\
-{epic_id_line}\
-{plan_section}\
-{epic_section}\n\
+        "Your task is:\n\
+{block}\
+{plan_section}\n\
 \n\
-Always use TDD: express intended behaviour as tests first, then implement the minimum code to make them pass.\n\
+{tdd}\n\
 \n\
-The dispatch MCP tools are available — use them to query and update this task \
-(get_task, update_task).\n\
+{allium}\n\
 \n\
-When implementation is complete, use the /wrap-up skill to commit remaining \
-changes and ask the user whether to rebase onto main or create a PR."
+{mcp}\n\
+\n\
+{wrap_up}",
+        block = block,
+        plan_section = plan_section,
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
+        mcp = mcp_tools_instruction(),
+        wrap_up = wrap_up_instruction(),
     )
 }
 
@@ -586,26 +586,26 @@ fn build_quick_dispatch_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
-    let (epic_id_line, epic_section) = epic_preamble(epic);
+    let block = task_block(task_id, title, description, epic);
 
     format!(
-        "You are an autonomous coding agent working interactively with the user.\n\
+        "You are working interactively with the user.\n\
 \n\
-Task:\n\
-  ID: {task_id}\n\
-  Title: {title}\n\
-  Description: {description}\
-{epic_id_line}\
-{epic_section}\n\
+{block}\n\
 \n\
-This is a quick-dispatched task with a placeholder title. After you understand what \
-the user wants, call `update_task` with a descriptive `title` (and optionally \
-`description`) to rename the task on the kanban board.\n\
+This is a quick-dispatched task with a placeholder title. Start by asking the user \
+what they want to achieve. Once you understand the goal, call `update_task` with a \
+descriptive `title` (and optionally `description`) to rename the task on the kanban board.\n\
 \n\
-Always use TDD: express intended behaviour as tests first, then implement the minimum code to make them pass.\n\
+{tdd}\n\
 \n\
-The dispatch MCP tools are available — use them to query and update tasks. \
-Use update_task to rename this task with a descriptive title, and get_task to check current state."
+{allium}\n\
+\n\
+{mcp}",
+        block = block,
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
+        mcp = mcp_tools_instruction(),
     )
 }
 
@@ -615,30 +615,28 @@ fn build_brainstorm_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
-    let (epic_id_line, epic_section) = epic_preamble(epic);
+    let block = task_block(task_id, title, description, epic);
 
     format!(
-        "You are an autonomous coding agent starting a brainstorming session.\n\
+        "You are starting a brainstorming session.\n\
 \n\
-Task:\n\
-  ID: {task_id}\n\
-  Title: {title}\n\
-  Description: {description}\
-{epic_id_line}\
-{epic_section}\n\
+{block}\n\
 \n\
 Before diving in, ask the user any clarifying questions needed to ensure you \
 fully understand the requirements and intended behaviour.\n\
 \n\
-Your goal is to explore the codebase, brainstorm approaches, and write an \
-implementation plan. When done, save the plan and attach it to the task:\n\
+{attach}\n\
 \n\
-1. Write the plan to docs/plans/ (or docs/superpowers/specs/ if using the brainstorming skill)\n\
-2. Call update_task via the dispatch MCP tools to set the plan field to the plan file path\n\
+{tdd}\n\
 \n\
-After planning, ask whether to continue implementing or stop.\n\
+{allium}\n\
 \n\
-Use the dispatch MCP tools to attach the plan (update_task — set the plan field)."
+{mcp}",
+        block = block,
+        attach = plan_and_attach_instruction(task_id),
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
+        mcp = mcp_tools_instruction(),
     )
 }
 
@@ -648,34 +646,31 @@ fn build_plan_prompt(
     description: &str,
     epic: Option<&EpicContext>,
 ) -> String {
-    let (epic_id_line, epic_section) = epic_preamble(epic);
+    let block = task_block(task_id, title, description, epic);
 
     format!(
-        "You are an autonomous coding agent starting a planning session.\n\
+        "You are starting a planning session.\n\
 \n\
-Task:\n\
-  ID: {task_id}\n\
-  Title: {title}\n\
-  Description: {description}\
-{epic_id_line}\
-{epic_section}\n\
+{block}\n\
 \n\
-Your goal is to explore the codebase and write a focused implementation plan. \
-Use /plan mode for a structured planning session. When done, save the plan \
-and attach it to the task:\n\
+{attach}\n\
 \n\
-1. Write the plan to docs/plans/\n\
-2. Call update_task via the dispatch MCP tools to set the plan field to the plan file path\n\
+{tdd}\n\
 \n\
-After planning, ask whether to continue implementing or stop.\n\
+{allium}\n\
 \n\
-Use the dispatch MCP tools to attach the plan (update_task — set the plan field)."
+{mcp}",
+        block = block,
+        attach = plan_and_attach_instruction(task_id),
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
+        mcp = mcp_tools_instruction(),
     )
 }
 
 fn build_epic_planning_prompt(epic_id: EpicId, title: &str, description: &str) -> String {
     format!(
-        "You are an autonomous coding agent starting a planning session.\n\
+        "You are starting a planning session.\n\
 \n\
 Epic:\n\
   ID: {epic_id}\n\
@@ -699,12 +694,18 @@ tasks — do not confuse them with subtasks inside the plan document itself:\n\
 \n\
 After creating the work packages, confirm with the user before doing anything further.\n\
 \n\
+{tdd}\n\
+\n\
+{allium}\n\
+\n\
 Use the dispatch MCP tools to query tasks and epics. Relevant tools: create_task, update_epic, list_tasks.\n\
 \n\
 IMPORTANT: Do NOT start implementing. Your job ends after creating the work packages.",
         epic_id = epic_id,
         title = title,
         description = description,
+        tdd = tdd_instruction(),
+        allium = allium_instruction(),
     )
 }
 

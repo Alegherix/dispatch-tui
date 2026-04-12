@@ -18,6 +18,7 @@ fn full_epic_lifecycle() {
             "/repo",
             None,
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
     let sub2 = db
@@ -27,6 +28,7 @@ fn full_epic_lifecycle() {
             "/repo",
             None,
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
     db.set_task_epic_id(sub1, Some(epic.id)).unwrap();

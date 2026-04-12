@@ -33,6 +33,7 @@ pub struct TaskPatch<'a> {
     pub pr_url: Option<Option<&'a str>>,
     pub tag: Option<Option<TaskTag>>,
     pub sort_order: Option<Option<i64>>,
+    pub base_branch: Option<&'a str>,
 }
 
 impl<'a> TaskPatch<'a> {
@@ -95,6 +96,11 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
+    pub fn base_branch(mut self, base_branch: &'a str) -> Self {
+        self.base_branch = Some(base_branch);
+        self
+    }
+
     pub fn has_changes(&self) -> bool {
         self.status.is_some()
             || self.plan_path.is_some()
@@ -107,6 +113,7 @@ impl<'a> TaskPatch<'a> {
             || self.pr_url.is_some()
             || self.tag.is_some()
             || self.sort_order.is_some()
+            || self.base_branch.is_some()
     }
 }
 
@@ -207,6 +214,7 @@ pub trait TaskCrud: Send + Sync {
         repo_path: &str,
         plan: Option<&str>,
         status: TaskStatus,
+        base_branch: &str,
     ) -> Result<TaskId>;
     fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
     fn list_all(&self) -> Result<Vec<Task>>;

@@ -35,6 +35,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (29, migrate_v29_json_filter_presets),
     (30, migrate_v30_allow_conflict_for_review),
     (31, migrate_v31_re_expand_tilde_paths),
+    (32, migrate_v32_add_base_branch),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -675,6 +676,11 @@ fn migrate_v31_re_expand_tilde_paths(conn: &Connection) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn migrate_v32_add_base_branch(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE tasks ADD COLUMN base_branch TEXT NOT NULL DEFAULT 'main';")
+        .context("Failed to add base_branch column to tasks")
 }
 
 fn migrate_v29_json_filter_presets(conn: &Connection) -> Result<()> {

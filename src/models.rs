@@ -753,6 +753,7 @@ pub struct Task {
     pub pr_url: Option<String>,
     pub tag: Option<TaskTag>,
     pub sort_order: Option<i64>,
+    pub base_branch: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1761,6 +1762,7 @@ mod tests {
             pr_url: None,
             tag: None,
             sort_order: None,
+            base_branch: "main".to_string(),
             created_at: now,
             updated_at: now,
         };
@@ -1784,6 +1786,7 @@ mod tests {
             pr_url: None,
             tag: None,
             sort_order: None,
+            base_branch: "main".to_string(),
             created_at: now,
             updated_at: now,
         };
@@ -1988,6 +1991,7 @@ mod tests {
             pr_url: None,
             tag: None,
             sort_order: None,
+            base_branch: "main".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -2184,6 +2188,7 @@ mod tests {
             pr_url: None,
             tag,
             sort_order: None,
+            base_branch: "main".to_string(),
             created_at: now,
             updated_at: now,
         }

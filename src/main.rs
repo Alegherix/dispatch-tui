@@ -243,6 +243,7 @@ async fn main() -> Result<()> {
                 &repo_path_str,
                 Some(&plan_str),
                 models::TaskStatus::Backlog,
+                "main",
             )?;
             if let Some(ref t) = tag {
                 let tag = models::TaskTag::parse(t).ok_or_else(|| {

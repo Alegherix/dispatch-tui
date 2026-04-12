@@ -1333,6 +1333,7 @@ mod tests {
             pr_url: None,
             tag: None,
             sort_order: None,
+            base_branch: "main".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

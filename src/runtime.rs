@@ -1976,7 +1976,7 @@ mod tests {
         plan: Option<&str>,
         status: models::TaskStatus,
     ) -> anyhow::Result<models::Task> {
-        let id = db.create_task(title, description, repo_path, plan, status)?;
+        let id = db.create_task(title, description, repo_path, plan, status, "main")?;
         db.get_task(id)?
             .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
     }
@@ -2103,6 +2103,7 @@ mod tests {
                 "/repo",
                 None,
                 models::TaskStatus::Backlog,
+                "main",
             )
             .unwrap();
         assert!(app.tasks().is_empty());
@@ -2116,7 +2117,14 @@ mod tests {
         let (rt, mut app) = test_runtime();
         // Insert a task directly into DB as Running
         rt.database
-            .create_task("Test", "Desc", "/repo", None, models::TaskStatus::Running)
+            .create_task(
+                "Test",
+                "Desc",
+                "/repo",
+                None,
+                models::TaskStatus::Running,
+                "main",
+            )
             .unwrap();
         // Load it into app
         let cmds = rt.exec_refresh_from_db(&mut app);

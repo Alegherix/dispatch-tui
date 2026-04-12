@@ -45,6 +45,7 @@ fn full_lifecycle() {
             "/repo",
             Some("plan.md"),
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
     let now = chrono::Utc::now();
@@ -63,6 +64,7 @@ fn full_lifecycle() {
             pr_url: None,
             tag: None,
             sort_order: None,
+            base_branch: "main".to_string(),
             created_at: now,
             updated_at: now,
         },

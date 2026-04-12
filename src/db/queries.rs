@@ -11,7 +11,7 @@ use super::{Database, EpicPatch, TaskPatch};
 
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 const TASK_COLUMNS: &str = "id, title, description, repo_path, status, worktree, tmux_window, \
-     plan_path, epic_id, sub_status, pr_url, tag, sort_order, created_at, updated_at";
+     plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, created_at, updated_at";
 
 impl super::TaskCrud for Database {
     fn create_task(
@@ -21,12 +21,13 @@ impl super::TaskCrud for Database {
         repo_path: &str,
         plan: Option<&str>,
         status: TaskStatus,
+        base_branch: &str,
     ) -> Result<TaskId> {
         let conn = self.conn()?;
         let sub_status = SubStatus::default_for(status);
         conn.execute(
-            "INSERT INTO tasks (title, description, repo_path, plan_path, status, sub_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![title, description, repo_path, plan, status.as_str(), sub_status.as_str()],
+            "INSERT INTO tasks (title, description, repo_path, plan_path, status, sub_status, base_branch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![title, description, repo_path, plan, status.as_str(), sub_status.as_str(), base_branch],
         )
         .context("Failed to insert task")?;
         Ok(TaskId(conn.last_insert_rowid()))
@@ -173,6 +174,10 @@ impl super::TaskCrud for Database {
         if let Some(so) = patch.sort_order {
             sets.push("sort_order = ?");
             values.push(Box::new(so));
+        }
+        if let Some(bb) = patch.base_branch {
+            sets.push("base_branch = ?");
+            values.push(Box::new(bb.to_string()));
         }
 
         sets.push("updated_at = datetime('now')");
@@ -1108,6 +1113,10 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .as_deref()
             .and_then(TaskTag::parse),
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
+        base_branch: row
+            .get::<_, Option<String>>("base_branch")
+            .unwrap_or(None)
+            .unwrap_or_else(|| "main".to_string()),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })

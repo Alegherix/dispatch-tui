@@ -332,6 +332,7 @@ impl TaskService {
                 &repo_path,
                 plan.as_deref(),
                 TaskStatus::Backlog,
+                "main",
             )
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 

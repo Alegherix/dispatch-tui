@@ -57,6 +57,7 @@ fn make_task(id: i64, status: TaskStatus) -> Task {
         pr_url: None,
         tag: None,
         sort_order: None,
+        base_branch: "main".to_string(),
         created_at: now,
         updated_at: now,
     }
@@ -261,6 +262,7 @@ fn task_created_adds_to_list() {
         pr_url: None,
         tag: None,
         sort_order: None,
+        base_branch: "main".to_string(),
         created_at: now,
         updated_at: now,
     };
@@ -3191,6 +3193,7 @@ fn stress_db_with_many_tasks() {
             "/repo",
             None,
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
     }
@@ -9998,6 +10001,7 @@ fn render_input_form_confirm_retry_shows_options() {
         pr_url: None,
         tag: None,
         sort_order: None,
+        base_branch: "main".to_string(),
         created_at: now,
         updated_at: now,
     };

@@ -13,7 +13,7 @@ fn create_task_returning(
     plan: Option<&str>,
     status: TaskStatus,
 ) -> anyhow::Result<Task> {
-    let id = db.create_task(title, description, repo_path, plan, status)?;
+    let id = db.create_task(title, description, repo_path, plan, status, "main")?;
     db.get_task(id)?
         .ok_or_else(|| anyhow::anyhow!("Task {id} vanished after insert"))
 }
@@ -28,6 +28,7 @@ fn create_and_get() {
             "/repo/path",
             None,
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
     let task = db.get_task(id).unwrap().expect("task should exist");
@@ -43,11 +44,11 @@ fn create_and_get() {
 #[test]
 fn list_all() {
     let db = in_memory_db();
-    db.create_task("Task A", "desc", "/a", None, TaskStatus::Backlog)
+    db.create_task("Task A", "desc", "/a", None, TaskStatus::Backlog, "main")
         .unwrap();
-    db.create_task("Task B", "desc", "/b", None, TaskStatus::Backlog)
+    db.create_task("Task B", "desc", "/b", None, TaskStatus::Backlog, "main")
         .unwrap();
-    db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog)
+    db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog, "main")
         .unwrap();
     let tasks = db.list_all().unwrap();
     assert_eq!(tasks.len(), 3);
@@ -60,12 +61,12 @@ fn list_all() {
 fn list_by_status() {
     let db = in_memory_db();
     let id1 = db
-        .create_task("Task A", "desc", "/a", None, TaskStatus::Backlog)
+        .create_task("Task A", "desc", "/a", None, TaskStatus::Backlog, "main")
         .unwrap();
     let id2 = db
-        .create_task("Task B", "desc", "/b", None, TaskStatus::Backlog)
+        .create_task("Task B", "desc", "/b", None, TaskStatus::Backlog, "main")
         .unwrap();
-    db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog)
+    db.create_task("Task C", "desc", "/c", None, TaskStatus::Backlog, "main")
         .unwrap();
 
     db.patch_task(id1, &TaskPatch::new().status(TaskStatus::Running))
@@ -98,6 +99,7 @@ fn create_task_with_plan() {
             "/repo",
             Some("docs/plan.md"),
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
@@ -108,7 +110,14 @@ fn create_task_with_plan() {
 fn create_task_without_plan() {
     let db = in_memory_db();
     let id = db
-        .create_task("Simple Task", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task(
+            "Simple Task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+        )
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert!(task.plan_path.is_none());
@@ -124,6 +133,7 @@ fn find_task_by_plan_returns_match() {
             "/repo",
             Some("/plans/my-plan.md"),
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
 
@@ -141,6 +151,7 @@ fn find_task_by_plan_returns_none_when_no_match() {
         "/repo",
         Some("/plans/other.md"),
         TaskStatus::Backlog,
+        "main",
     )
     .unwrap();
 
@@ -151,8 +162,15 @@ fn find_task_by_plan_returns_none_when_no_match() {
 #[test]
 fn find_task_by_plan_ignores_tasks_without_plan() {
     let db = in_memory_db();
-    db.create_task("No Plan", "desc", "/repo", None, TaskStatus::Backlog)
-        .unwrap();
+    db.create_task(
+        "No Plan",
+        "desc",
+        "/repo",
+        None,
+        TaskStatus::Backlog,
+        "main",
+    )
+    .unwrap();
 
     let found = db.find_task_by_plan("/plans/any.md").unwrap();
     assert!(found.is_none());
@@ -215,7 +233,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 }
 
 #[test]
@@ -287,7 +305,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 }
 
 #[test]
@@ -376,7 +394,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 }
 
 #[test]
@@ -487,7 +505,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 }
 
 #[test]
@@ -543,7 +561,7 @@ fn create_task_returning_with_plan() {
 fn patch_task_applies_all_fields() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let patch = TaskPatch::new()
         .status(TaskStatus::Running)
@@ -567,6 +585,7 @@ fn patch_task_none_fields_unchanged() {
             "/repo",
             Some("plan.md"),
             TaskStatus::Running,
+            "main",
         )
         .unwrap();
     let patch = TaskPatch::new();
@@ -581,7 +600,7 @@ fn patch_task_none_fields_unchanged() {
 fn patch_task_sets_tag() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Bug)))
         .unwrap();
@@ -593,7 +612,7 @@ fn patch_task_sets_tag() {
 fn patch_task_clears_tag() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::new().tag(Some(TaskTag::Feature)))
         .unwrap();
@@ -606,7 +625,7 @@ fn patch_task_clears_tag() {
 fn has_other_tasks_with_worktree_returns_false_when_no_others() {
     let db = in_memory_db();
     let id = db
-        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.patch_task(
         id,
@@ -626,10 +645,10 @@ fn has_other_tasks_with_worktree_returns_false_when_no_others() {
 fn has_other_tasks_with_worktree_returns_true_when_shared() {
     let db = in_memory_db();
     let id1 = db
-        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let id2 = db
-        .create_task("Task B", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Task B", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.patch_task(
         id1,
@@ -660,10 +679,10 @@ fn has_other_tasks_with_worktree_returns_true_when_shared() {
 fn has_other_tasks_with_worktree_ignores_done_tasks() {
     let db = in_memory_db();
     let id1 = db
-        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Task A", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let id2 = db
-        .create_task("Task B", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Task B", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.patch_task(
         id1,
@@ -697,6 +716,7 @@ fn patch_task_clears_plan() {
             "/repo",
             Some("plan.md"),
             TaskStatus::Backlog,
+            "main",
         )
         .unwrap();
     let patch = TaskPatch::new().plan_path(None);
@@ -709,7 +729,7 @@ fn patch_task_clears_plan() {
 fn patch_task_sets_dispatch_fields() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let patch = TaskPatch::new()
         .worktree(Some("/repo/.worktrees/1-my-task"))
@@ -724,7 +744,7 @@ fn patch_task_sets_dispatch_fields() {
 fn patch_task_clears_dispatch_fields() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Running)
+        .create_task("title", "desc", "/repo", None, TaskStatus::Running, "main")
         .unwrap();
     // Set dispatch fields first
     let patch = TaskPatch::new()
@@ -747,7 +767,7 @@ fn patch_task_clears_dispatch_fields() {
 fn patch_task_status_and_dispatch_together() {
     let db = in_memory_db();
     let id = db
-        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("title", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let patch = TaskPatch::new()
         .status(TaskStatus::Running)
@@ -788,7 +808,7 @@ fn patch_task_status_change_resets_sub_status_in_db() {
     // End-to-end: after a status-only patch, sub_status in DB reflects the new default
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running)
+        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
         .unwrap();
@@ -805,7 +825,7 @@ fn patch_task_status_change_resets_sub_status_in_db() {
 fn update_status_if_matching() {
     let db = in_memory_db();
     let id = db
-        .create_task("Task", "desc", "/repo", None, TaskStatus::Running)
+        .create_task("Task", "desc", "/repo", None, TaskStatus::Running, "main")
         .unwrap();
 
     let updated = db
@@ -821,7 +841,7 @@ fn update_status_if_matching() {
 fn update_status_if_not_matching() {
     let db = in_memory_db();
     let id = db
-        .create_task("Task", "desc", "/repo", None, TaskStatus::Done)
+        .create_task("Task", "desc", "/repo", None, TaskStatus::Done, "main")
         .unwrap();
 
     let updated = db
@@ -882,10 +902,10 @@ fn get_epic_nonexistent() {
 fn delete_epic_cascades_subtasks() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
-    db.create_task("Sub 1", "desc", "/repo", None, TaskStatus::Backlog)
+    db.create_task("Sub 1", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let sub_id = db
-        .create_task("Sub 2", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Sub 2", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
 
     // Link sub 2 to epic
@@ -935,7 +955,7 @@ fn task_epic_id_roundtrip() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
     let task_id = db
-        .create_task("Task", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Task", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
 
     db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
@@ -952,10 +972,17 @@ fn list_tasks_for_epic() {
     let db = in_memory_db();
     let epic = db.create_epic("Epic", "desc", "/repo").unwrap();
     let id1 = db
-        .create_task("Sub A", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Sub A", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let _id2 = db
-        .create_task("Standalone", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task(
+            "Standalone",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+        )
         .unwrap();
 
     db.set_task_epic_id(id1, Some(epic.id)).unwrap();
@@ -969,7 +996,14 @@ fn list_tasks_for_epic() {
 fn task_roundtrip_with_pr_fields() {
     let db = in_memory_db();
     let id = db
-        .create_task("PR task", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task(
+            "PR task",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Backlog,
+            "main",
+        )
         .unwrap();
 
     db.patch_task(
@@ -989,7 +1023,7 @@ fn task_roundtrip_with_pr_fields() {
 fn task_pr_fields_default_to_none() {
     let db = in_memory_db();
     let id = db
-        .create_task("No PR", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("No PR", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert!(task.pr_url.is_none());
@@ -999,7 +1033,7 @@ fn task_pr_fields_default_to_none() {
 fn patch_task_sets_pr_url() {
     let db = in_memory_db();
     let id = db
-        .create_task("t", "d", "/r", None, TaskStatus::Backlog)
+        .create_task("t", "d", "/r", None, TaskStatus::Backlog, "main")
         .unwrap();
 
     db.patch_task(
@@ -1052,7 +1086,7 @@ fn patch_epic_repo_path() {
 fn patch_task_sets_sort_order() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Backlog)
+        .create_task("T", "d", "/r", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(500)))
         .unwrap();
@@ -1064,7 +1098,7 @@ fn patch_task_sets_sort_order() {
 fn patch_task_clears_sort_order() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Backlog)
+        .create_task("T", "d", "/r", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::new().sort_order(Some(100)))
         .unwrap();
@@ -1078,7 +1112,7 @@ fn patch_task_clears_sort_order() {
 fn report_usage_first_insert() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "D", "/r", None, TaskStatus::Backlog)
+        .create_task("T", "D", "/r", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.report_usage(
         id,
@@ -1105,7 +1139,7 @@ fn report_usage_first_insert() {
 fn report_usage_accumulates() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("T", "D", "/r", None, TaskStatus::Backlog)
+        .create_task("T", "D", "/r", None, TaskStatus::Backlog, "main")
         .unwrap();
     db.report_usage(
         id,
@@ -1478,7 +1512,7 @@ fn save_review_prs_removes_stale_prs() {
 fn task_sub_status_persists() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("Test", "desc", "/repo", None, TaskStatus::Running)
+        .create_task("Test", "desc", "/repo", None, TaskStatus::Running, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
         .unwrap();
@@ -1490,7 +1524,7 @@ fn task_sub_status_persists() {
 fn task_sub_status_defaults_to_none() {
     let db = Database::open_in_memory().unwrap();
     let id = db
-        .create_task("Test", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Test", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
@@ -1575,7 +1609,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1616,7 +1650,7 @@ fn create_task_sets_default_sub_status_for_running() {
     // create_task with status=Running must produce sub_status=active, not 'none'
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running)
+        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::Active);
@@ -1626,7 +1660,7 @@ fn create_task_sets_default_sub_status_for_running() {
 fn create_task_sets_default_sub_status_for_backlog() {
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Backlog)
+        .create_task("T", "d", "/r", None, TaskStatus::Backlog, "main")
         .unwrap();
     let task = db.get_task(id).unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::None);
@@ -1636,7 +1670,7 @@ fn create_task_sets_default_sub_status_for_backlog() {
 fn update_status_if_resets_sub_status_to_default() {
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running)
+        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Stale))
         .unwrap();
@@ -1655,7 +1689,7 @@ fn update_status_if_resets_sub_status_to_default() {
 fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
     let db = in_memory_db();
     let id = db
-        .create_task("T", "d", "/r", None, TaskStatus::Running)
+        .create_task("T", "d", "/r", None, TaskStatus::Running, "main")
         .unwrap();
     db.patch_task(id, &TaskPatch::default().sub_status(SubStatus::Active))
         .unwrap();
@@ -1676,7 +1710,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 }
 
 #[test]
@@ -1802,7 +1836,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -3223,7 +3257,7 @@ fn migration_v17_adds_conflict_sub_status() {
 fn delete_task_removes_task() {
     let db = in_memory_db();
     let id = db
-        .create_task("Doomed", "desc", "/repo", None, TaskStatus::Backlog)
+        .create_task("Doomed", "desc", "/repo", None, TaskStatus::Backlog, "main")
         .unwrap();
     assert!(db.get_task(id).unwrap().is_some());
 
@@ -3823,5 +3857,70 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 31);
+    assert_eq!(version, 32);
+}
+
+#[test]
+fn migrate_v32_adds_base_branch_column() {
+    let conn = Connection::open_in_memory().unwrap();
+    // Build a v31 schema (tasks table with CHECK constraint from v30, plus repo_paths).
+    // Setting user_version = 31 ensures only v32 runs when init_schema is called.
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         CREATE TABLE tasks (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             worktree    TEXT,
+             tmux_window TEXT,
+             plan_path   TEXT,
+             epic_id     INTEGER,
+             sub_status  TEXT NOT NULL DEFAULT 'none',
+             pr_url      TEXT,
+             tag         TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             CHECK (
+                 (status = 'backlog'  AND sub_status = 'none') OR
+                 (status = 'running'  AND sub_status IN ('active','needs_input','stale','crashed','conflict')) OR
+                 (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved','conflict')) OR
+                 (status = 'done'     AND sub_status = 'none') OR
+                 (status = 'archived' AND sub_status = 'none')
+             )
+         );
+         CREATE TABLE repo_paths (
+             id        INTEGER PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE,
+             last_used TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         PRAGMA user_version = 31;",
+    )
+    .unwrap();
+
+    // Insert a task using the v31 schema (no base_branch column yet)
+    conn.execute(
+        "INSERT INTO tasks (title, description, repo_path) VALUES ('Old Task', 'pre-migration desc', '/repo')",
+        [],
+    )
+    .unwrap();
+
+    // Run init_schema: only v32 should run (user_version = 31)
+    Database::init_schema(&conn).unwrap();
+
+    // Existing task should have base_branch defaulted to 'main'
+    let base_branch: String = conn
+        .query_row("SELECT base_branch FROM tasks WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(base_branch, "main");
+
+    // Schema version bumped to 32
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 32);
 }

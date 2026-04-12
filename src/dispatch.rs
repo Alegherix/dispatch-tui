@@ -206,7 +206,7 @@ pub fn dispatch_agent(
         task.plan_path.as_deref(),
         epic,
     );
-    dispatch_with_prompt(task, &prompt, ClaudeMode::AcceptEdits, runner, None)
+    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
 }
 
 pub fn brainstorm_agent(
@@ -552,17 +552,40 @@ fn build_prompt(
     epic: Option<&EpicContext>,
 ) -> String {
     let block = task_block(task_id, title, description, epic);
-    let plan_section = match plan {
-        Some(path) => format!(
-            "\n\nPlan: {path}\nRead this file for the full implementation plan. Follow it step by step."
-        ),
-        None => String::new(),
-    };
 
-    format!(
-        "Your task is:\n\
-{block}\
-{plan_section}\n\
+    match plan {
+        None => {
+            // No plan yet — agent must create one and ask permission before implementing.
+            format!(
+                "Your task is:\n\
+{block}\n\
+\n\
+{attach}\n\
+\n\
+{tdd}\n\
+\n\
+{allium}\n\
+\n\
+{mcp}",
+                block = block,
+                attach = plan_and_attach_instruction(task_id),
+                tdd = tdd_instruction(),
+                allium = allium_instruction(),
+                mcp = mcp_tools_instruction(),
+            )
+        }
+        Some(path) => {
+            // Plan exists — review it and ask for permission before implementing.
+            format!(
+                "Your task is:\n\
+{block}\n\
+\n\
+Plan: {path}\n\
+Read this file for the full implementation plan.\n\
+\n\
+Review the plan carefully. Summarise your intended approach in 3–5 bullet points, \
+then ask: 'Shall I proceed with implementation?' Wait for confirmation before \
+making any changes.\n\
 \n\
 {tdd}\n\
 \n\
@@ -571,13 +594,15 @@ fn build_prompt(
 {mcp}\n\
 \n\
 {wrap_up}",
-        block = block,
-        plan_section = plan_section,
-        tdd = tdd_instruction(),
-        allium = allium_instruction(),
-        mcp = mcp_tools_instruction(),
-        wrap_up = wrap_up_instruction(),
-    )
+                block = block,
+                path = path,
+                tdd = tdd_instruction(),
+                allium = allium_instruction(),
+                mcp = mcp_tools_instruction(),
+                wrap_up = wrap_up_instruction(),
+            )
+        }
+    }
 }
 
 fn build_quick_dispatch_prompt(
@@ -1344,14 +1369,55 @@ mod tests {
 
     #[test]
     fn build_prompt_mentions_wrap_up_skill() {
-        let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None);
+        // wrap-up instruction only appears when a plan exists (agent is implementing)
+        let prompt = build_prompt(TaskId(7), "Title", "Desc", Some("docs/plans/p.md"), None);
         assert!(
             prompt.contains("/wrap-up"),
-            "prompt should tell agent to use /wrap-up skill"
+            "with-plan prompt should tell agent to use /wrap-up skill"
         );
         assert!(
             prompt.contains("rebase") || prompt.contains("PR"),
-            "prompt should mention rebase/PR choice"
+            "with-plan prompt should mention rebase/PR choice"
+        );
+    }
+
+    #[test]
+    fn build_prompt_without_plan_omits_wrap_up() {
+        let prompt = build_prompt(TaskId(7), "Title", "Desc", None, None);
+        assert!(
+            !prompt.contains("/wrap-up"),
+            "no-plan prompt should not mention /wrap-up (agent isn't implementing yet)"
+        );
+    }
+
+    #[test]
+    fn build_prompt_without_plan_includes_planning_instruction() {
+        let prompt = build_prompt(TaskId(1), "Task", "Desc", None, None);
+        assert!(
+            prompt.contains("docs/plans/"),
+            "no-plan prompt should instruct agent to write a plan"
+        );
+        assert!(
+            prompt.contains("update_task"),
+            "no-plan prompt should instruct agent to attach plan via MCP"
+        );
+        assert!(
+            prompt.contains("ask") || prompt.contains("permission") || prompt.contains("proceed"),
+            "no-plan prompt should ask for permission before implementing"
+        );
+    }
+
+    #[test]
+    fn build_prompt_with_plan_asks_permission_before_implementing() {
+        let prompt = build_prompt(TaskId(1), "Task", "Desc", Some("docs/plans/plan.md"), None);
+        assert!(prompt.contains("docs/plans/plan.md"));
+        assert!(
+            prompt.contains("Shall I proceed") || prompt.contains("permission") || prompt.contains("proceed"),
+            "with-plan prompt should ask for permission before implementing"
+        );
+        assert!(
+            !prompt.contains("step by step"),
+            "with-plan prompt should not say 'Follow it step by step' — agent reviews first"
         );
     }
 
@@ -1626,13 +1692,13 @@ mod tests {
             calls[4]
                 .1
                 .iter()
-                .any(|a| a.contains("--permission-mode acceptEdits")),
-            "dispatch_agent send-keys should use acceptEdits mode"
+                .any(|a| a.contains("--permission-mode plan")),
+            "dispatch_agent send-keys should use plan mode"
         );
     }
 
     #[test]
-    fn dispatch_agent_uses_accept_edits_mode() {
+    fn dispatch_agent_uses_plan_mode() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo_path = dir.path().to_str().unwrap().to_string();
         let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
@@ -1653,8 +1719,8 @@ mod tests {
         let calls = mock.recorded_calls();
         let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
         assert!(
-            send_keys_arg.contains("--permission-mode acceptEdits"),
-            "dispatch_agent should use acceptEdits mode, got: {send_keys_arg}"
+            send_keys_arg.contains("--permission-mode plan"),
+            "dispatch_agent should use plan mode, got: {send_keys_arg}"
         );
     }
 

@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: Use when implementation is complete to wrap up a dispatch worktree. Commits remaining changes, asks the user to choose between rebasing onto main or creating a GitHub PR, then calls the wrap_up MCP tool. The task is moved to done automatically on success.
+description: Use when implementation is complete to wrap up a dispatch worktree. Commits remaining changes, asks the user to choose between rebasing onto the task's base_branch or creating a GitHub PR, then calls the wrap_up MCP tool. The task is moved to done automatically on success.
 ---
 
 # Wrap Up
@@ -8,8 +8,8 @@ description: Use when implementation is complete to wrap up a dispatch worktree.
 Wrap up a dispatch worktree: commit remaining changes, use the `AskUserQuestion` tool with a question like:
 
 > Wrap up task #{id} (`{title}`):
-> **(r)** rebase onto main — fast-forwards main with this branch, kills this tmux window
-> **(p)** create PR — pushes branch and opens a GitHub PR
+> **(r)** rebase onto `{base_branch}` — fast-forwards `{base_branch}` with this branch, kills this tmux window
+> **(p)** create PR — pushes branch and opens a GitHub PR targeting `{base_branch}`
 > **(Esc / n)** cancel
 
 Then call the `wrap_up` MCP tool. If the user cancels or says no, exit without calling any tool. 
@@ -30,13 +30,13 @@ Extract the leading integer from the `{id}-{slug}` pattern (e.g. `42-fix-login-b
 If the branch does not match the `{id}-{slug}` pattern, stop and tell the user:
 > "This branch doesn't follow the dispatch naming convention (`{id}-{slug}`). Cannot determine task ID."
 
-## Step 2: Dispatch next epic subtask
+## Step 2: Get task details and dispatch next epic subtask
 
-Call the `dispatch` MCP tool `get_task` with the task ID from Step 1.
+Call the `dispatch` MCP tool `get_task` with the task ID from Step 1. Read the `base_branch` field from the response — use it wherever the instructions below refer to `{base_branch}`. If `base_branch` is absent or empty, fall back to `main`.
 
 If the task has an `epic_id`, call the `dispatch` MCP tool `dispatch_next` with that `epic_id`. This fires the next agent immediately — before any user interaction.
 
-If the task does not have an `epic_id`, skip this step.
+If the task does not have an `epic_id`, skip the dispatch_next call.
 
 ## Step 3: Commit uncommitted changes
 
@@ -62,8 +62,8 @@ Do NOT spend time perfecting the commit message. The goal is to capture the chan
 Use the `AskUserQuestion` tool with a question like:
 
 > Wrap up task #{id} (`{title}`):
-> **(r)** rebase onto main — fast-forwards main with this branch, kills this tmux window
-> **(p)** create PR — pushes branch and opens a GitHub PR
+> **(r)** rebase onto `{base_branch}` — fast-forwards `{base_branch}` with this branch, kills this tmux window
+> **(p)** create PR — pushes branch and opens a GitHub PR targeting `{base_branch}`
 > **(Esc / n)** cancel
 
 If the user cancels or says no, exit without calling any tool.
@@ -80,7 +80,7 @@ Call the `dispatch` MCP tool `wrap_up` with:
 
 The tool blocks until the rebase completes. On success, the task is moved to "done" and the tmux window is killed, ending this session. Do not attempt any further actions after a successful rebase.
 
-If the tool returns an error (e.g. rebase conflict, repo not on main), show the user the exact error message from the response and suggest resolution steps. The task remains in its current status.
+If the tool returns an error (e.g. rebase conflict, repo not on `{base_branch}`), show the user the exact error message from the response and suggest resolution steps. The task remains in its current status.
 
 ### If PR:
 

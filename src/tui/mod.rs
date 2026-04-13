@@ -788,6 +788,7 @@ impl App {
             | Message::SubmitRepoPath(_)
             | Message::SubmitDispatchRepoPath(_)
             | Message::SubmitTag(_)
+            | Message::SubmitBaseBranch(_)
             | Message::InputChar(_)
             | Message::InputBackspace
             | Message::CancelRetry) => self.dispatch_input(msg),
@@ -999,6 +1000,7 @@ impl App {
             Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
             Message::SubmitDispatchRepoPath(value) => self.handle_submit_dispatch_repo_path(value),
             Message::SubmitTag(tag) => self.handle_submit_tag(tag),
+            Message::SubmitBaseBranch(value) => self.handle_submit_base_branch(value),
             Message::InputChar(c) => self.handle_input_char(c),
             Message::InputBackspace => self.handle_input_backspace(),
             Message::CancelRetry => self.handle_cancel_retry(),
@@ -1870,6 +1872,9 @@ impl App {
             t.status = edit.status;
             t.plan_path = edit.plan_path;
             t.tag = edit.tag;
+            if let Some(bb) = edit.base_branch {
+                t.base_branch = bb;
+            }
             t.updated_at = chrono::Utc::now();
         }
         self.clamp_selection();
@@ -1897,6 +1902,7 @@ impl App {
                 description: String::new(),
                 repo_path,
                 tag: None,
+                base_branch: "main".to_string(),
             },
             epic_id,
         }]
@@ -2238,6 +2244,7 @@ impl App {
                 description: String::new(),
                 repo_path: String::new(),
                 tag: None,
+                base_branch: "main".to_string(),
             });
             self.input.mode = InputMode::InputTag;
             self.set_status("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none".to_string());
@@ -2271,6 +2278,40 @@ impl App {
             self.set_status(msg);
             return vec![];
         }
+        if let Some(ref mut draft) = self.input.task_draft {
+            draft.repo_path = repo_path;
+        }
+        self.input.buffer = self
+            .input
+            .task_draft
+            .as_ref()
+            .map(|d| d.base_branch.clone())
+            .unwrap_or_else(|| "main".to_string());
+        self.input.mode = InputMode::InputBaseBranch;
+        self.set_status("Base branch: ".to_string());
+        vec![]
+    }
+
+    fn handle_submit_base_branch(&mut self, value: String) -> Vec<Command> {
+        let base_branch = if value.is_empty() {
+            self.input
+                .task_draft
+                .as_ref()
+                .map(|d| d.base_branch.clone())
+                .unwrap_or_else(|| "main".to_string())
+        } else {
+            value
+        };
+        if let Some(ref mut draft) = self.input.task_draft {
+            draft.base_branch = base_branch;
+        }
+        let repo_path = self
+            .input
+            .task_draft
+            .as_ref()
+            .map(|d| d.repo_path.clone())
+            .unwrap_or_default();
+        self.input.buffer.clear();
         self.finish_task_creation(repo_path)
     }
 
@@ -2298,7 +2339,7 @@ impl App {
                 if self.input.mode == InputMode::InputEpicRepoPath {
                     return self.finish_epic_creation(repo_path);
                 }
-                return self.finish_task_creation(repo_path);
+                return self.update(Message::SubmitRepoPath(repo_path));
             }
         }
         self.input.buffer.push(c);
@@ -2455,8 +2496,7 @@ impl App {
     }
 
     fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {
-        let mut draft = self.input.task_draft.take().unwrap_or_default();
-        draft.repo_path = repo_path.clone();
+        let draft = self.input.task_draft.take().unwrap_or_default();
         self.input.mode = InputMode::Normal;
         self.clear_status();
         let epic_id = match &self.board.view_mode {

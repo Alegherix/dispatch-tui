@@ -376,10 +376,17 @@ fn repo_path_empty_uses_saved_path() {
     app.input.buffer.clear();
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
+    // Now advances to InputBaseBranch with "main" pre-filled
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(app.input.buffer, "main");
+    assert!(cmds.is_empty());
+    // Submitting base branch completes creation
+    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")));
+    assert!(cmds2.iter().any(|c| matches!(
+        c,
+        Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp"
+    )));
 }
 
 #[test]
@@ -448,9 +455,15 @@ fn repo_path_nonempty_used_as_is() {
     });
     app.input.buffer = "/tmp".to_string();
 
+    // Submitting repo path now advances to InputBaseBranch
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(app.input.buffer, "main");
+    assert!(cmds.is_empty());
+    // Submitting base branch completes creation
+    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds
+    assert!(cmds2
         .iter()
         .any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp")));
     assert_eq!(app.board.tasks.len(), 0); // task not added until TaskCreated
@@ -467,6 +480,7 @@ fn task_edited_updates_fields() {
         status: TaskStatus::Running,
         plan_path: Some("docs/plan.md".into()),
         tag: None,
+        base_branch: None,
     }));
     assert_eq!(app.board.tasks[0].title, "New");
     assert_eq!(app.board.tasks[0].description, "Desc");
@@ -751,12 +765,18 @@ fn number_key_in_repo_path_selects_saved_path() {
         ..Default::default()
     });
     app.input.buffer.clear();
-    app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
+    // Use real directories so validate_repo_path passes
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
+    // Number key selects repo, advances to InputBaseBranch
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/repo2")
-    ));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(app.input.buffer, "main");
+    assert!(cmds.is_empty());
+    // Confirming base branch creates the task
+    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
+    assert!(cmds2
+        .iter()
+        .any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/var")));
 }
 
 #[test]
@@ -2109,7 +2129,7 @@ fn description_editor_result_for_epic() {
 }
 
 #[test]
-fn submit_repo_path_creates_task() {
+fn submit_repo_path_advances_to_base_branch() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.input.mode = InputMode::InputRepoPath;
     app.input.task_draft = Some(TaskDraft {
@@ -2119,8 +2139,52 @@ fn submit_repo_path_creates_task() {
         ..Default::default()
     });
     let cmds = app.update(Message::SubmitRepoPath("/tmp".to_string()));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(app.input.buffer, "main");
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn submit_base_branch_creates_task_with_branch() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: "D".to_string(),
+        repo_path: "/tmp".to_string(),
+        tag: Some(TaskTag::Bug),
+        base_branch: "main".to_string(),
+    });
+    app.input.buffer = "develop".to_string();
+    let cmds = app.update(Message::SubmitBaseBranch("develop".to_string()));
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { ref draft, .. } if draft.repo_path == "/tmp" && draft.tag == Some(TaskTag::Bug))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::InsertTask { ref draft, .. }
+            if draft.repo_path == "/tmp"
+                && draft.tag == Some(TaskTag::Bug)
+                && draft.base_branch == "develop"
+    )));
+}
+
+#[test]
+fn submit_base_branch_empty_uses_draft_default() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: "D".to_string(),
+        repo_path: "/tmp".to_string(),
+        base_branch: "main".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = String::new();
+    let cmds = app.update(Message::SubmitBaseBranch(String::new()));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::InsertTask { ref draft, .. } if draft.base_branch == "main"
+    )));
 }
 
 #[test]
@@ -9941,6 +10005,29 @@ fn render_input_form_description_shows_completed_title() {
 }
 
 #[test]
+fn render_input_form_base_branch_shows_prompt() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        title: "My task".to_string(),
+        description: "Desc".to_string(),
+        repo_path: "/tmp".to_string(),
+        base_branch: "main".to_string(),
+        ..Default::default()
+    });
+    app.input.buffer = "main".to_string();
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Base branch:"),
+        "'Base branch:' label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "main"),
+        "pre-filled branch 'main' should be visible"
+    );
+}
+
+#[test]
 fn render_input_form_repo_path_shows_repo_list() {
     let mut app = make_app();
     app.input.mode = InputMode::InputRepoPath;
@@ -13273,8 +13360,13 @@ fn handle_key_text_input_repo_enter_selects_cursor_repo() {
     app.input.repo_cursor = 1;
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    // Should submit the selected repo path and create a task
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
+    // Now advances to InputBaseBranch; task not created until base branch submitted
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert!(cmds.is_empty());
+    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
+    assert!(cmds2
+        .iter()
+        .any(|c| matches!(c, Command::InsertTask { .. })));
 }
 
 #[test]
@@ -13289,7 +13381,13 @@ fn handle_key_text_input_enter_submits_typed_text() {
     app.input.buffer = "/tmp".to_string();
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds.iter().any(|c| matches!(c, Command::InsertTask { .. })));
+    // Now advances to InputBaseBranch; task not created until base branch submitted
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert!(cmds.is_empty());
+    let cmds2 = app.update(Message::SubmitBaseBranch("main".to_string()));
+    assert!(cmds2
+        .iter()
+        .any(|c| matches!(c, Command::InsertTask { .. })));
 }
 
 #[test]

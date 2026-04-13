@@ -23,7 +23,8 @@ impl App {
             | InputMode::InputDispatchRepoPath
             | InputMode::InputEpicTitle
             | InputMode::InputEpicDescription
-            | InputMode::InputEpicRepoPath => self.handle_key_text_input(key),
+            | InputMode::InputEpicRepoPath
+            | InputMode::InputBaseBranch => self.handle_key_text_input(key),
             InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
             InputMode::InputTag => self.handle_key_tag(key),
             InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
@@ -483,6 +484,7 @@ impl App {
                         self.update(Message::SubmitEpicDescription(value))
                     }
                     InputMode::InputEpicRepoPath => self.update(Message::SubmitEpicRepoPath(value)),
+                    InputMode::InputBaseBranch => self.update(Message::SubmitBaseBranch(value)),
                     _ => vec![],
                 }
             }

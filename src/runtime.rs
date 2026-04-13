@@ -366,23 +366,9 @@ impl TuiRuntime {
     fn create_task(
         &self,
         app: &mut App,
-        title: &str,
-        description: &str,
-        repo_path: &str,
-        tag: Option<models::TaskTag>,
-        epic_id: Option<models::EpicId>,
+        params: crate::service::CreateTaskParams,
     ) -> Option<models::Task> {
-        use crate::service::CreateTaskParams;
-        match self.task_svc.create_task_returning(CreateTaskParams {
-            title: title.to_string(),
-            description: description.to_string(),
-            repo_path: repo_path.to_string(),
-            plan_path: None,
-            epic_id: epic_id.map(|e| e.0),
-            sort_order: None,
-            tag,
-            base_branch: None,
-        }) {
+        match self.task_svc.create_task_returning(params) {
             Ok(task) => Some(task),
             Err(e) => {
                 app.update(Message::Error(Self::db_error("creating task", e)));
@@ -394,13 +380,21 @@ impl TuiRuntime {
     fn exec_insert_task(
         &self,
         app: &mut App,
-        title: String,
-        description: String,
-        repo_path: String,
-        tag: Option<models::TaskTag>,
+        draft: tui::TaskDraft,
         epic_id: Option<models::EpicId>,
     ) {
-        if let Some(task) = self.create_task(app, &title, &description, &repo_path, tag, epic_id) {
+        use crate::service::CreateTaskParams;
+        let params = CreateTaskParams {
+            title: draft.title,
+            description: draft.description,
+            repo_path: draft.repo_path,
+            plan_path: None,
+            epic_id: epic_id.map(|e| e.0),
+            sort_order: None,
+            tag: draft.tag,
+            base_branch: Some(draft.base_branch),
+        };
+        if let Some(task) = self.create_task(app, params) {
             app.update(Message::TaskCreated { task });
         }
     }
@@ -413,8 +407,19 @@ impl TuiRuntime {
         repo_path: String,
         epic_id: Option<models::EpicId>,
     ) {
-        let Some(task) = self.create_task(app, &title, &description, &repo_path, None, epic_id)
-        else {
+        let Some(task) = self.create_task(
+            app,
+            crate::service::CreateTaskParams {
+                title: title.clone(),
+                description: description.clone(),
+                repo_path: repo_path.clone(),
+                plan_path: None,
+                epic_id: epic_id.map(|e| e.0),
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            },
+        ) else {
             return;
         };
         app.update(Message::TaskCreated { task: task.clone() });
@@ -653,6 +658,11 @@ impl TuiRuntime {
         } else {
             models::TaskTag::parse(&fields.tag)
         };
+        let base_branch = if fields.base_branch.is_empty() {
+            None
+        } else {
+            Some(fields.base_branch.clone())
+        };
 
         if let Err(e) = self.task_svc.update_task(crate::service::UpdateTaskParams {
             task_id: task_id.0,
@@ -668,7 +678,7 @@ impl TuiRuntime {
             epic_id: None,
             worktree: None,
             tmux_window: None,
-            base_branch: None,
+            base_branch: base_branch.clone(),
         }) {
             app.update(Message::Error(Self::db_error("updating task", e)));
         }
@@ -680,6 +690,7 @@ impl TuiRuntime {
             status: new_status,
             plan_path: plan,
             tag,
+            base_branch,
         }));
         Ok(())
     }
@@ -1700,14 +1711,7 @@ async fn execute_commands(
                     queue.extend(extra);
                 }
             }
-            Command::InsertTask { draft, epic_id } => rt.exec_insert_task(
-                app,
-                draft.title,
-                draft.description,
-                draft.repo_path,
-                draft.tag,
-                epic_id,
-            ),
+            Command::InsertTask { draft, epic_id } => rt.exec_insert_task(app, draft, epic_id),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::DispatchAgent { task, mode } => rt.exec_dispatch_agent(task, mode),
             Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
@@ -2005,10 +2009,12 @@ mod tests {
         let (rt, mut app) = test_runtime();
         rt.exec_insert_task(
             &mut app,
-            "Test".into(),
-            "Desc".into(),
-            "/repo".into(),
-            None,
+            tui::TaskDraft {
+                title: "Test".into(),
+                description: "Desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
             None,
         );
         assert_eq!(app.tasks().len(), 1);
@@ -2021,10 +2027,12 @@ mod tests {
         let (rt, mut app) = test_runtime();
         rt.exec_insert_task(
             &mut app,
-            "Test".into(),
-            "Desc".into(),
-            "/repo".into(),
-            None,
+            tui::TaskDraft {
+                title: "Test".into(),
+                description: "Desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
             None,
         );
         let id = app.tasks()[0].id;
@@ -2037,10 +2045,12 @@ mod tests {
         let (rt, mut app) = test_runtime();
         rt.exec_insert_task(
             &mut app,
-            "Test".into(),
-            "Desc".into(),
-            "/repo".into(),
-            None,
+            tui::TaskDraft {
+                title: "Test".into(),
+                description: "Desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
             None,
         );
         let mut task = app.tasks()[0].clone();
@@ -2058,10 +2068,12 @@ mod tests {
         let (rt, mut app) = test_runtime();
         rt.exec_insert_task(
             &mut app,
-            "PR Task".into(),
-            "Desc".into(),
-            "/repo".into(),
-            None,
+            tui::TaskDraft {
+                title: "PR Task".into(),
+                description: "Desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
             None,
         );
         let id = app.tasks()[0].id;
@@ -2350,18 +2362,22 @@ mod tests {
         // Create two tasks sharing the same worktree
         rt.exec_insert_task(
             &mut app,
-            "Task A".into(),
-            "desc".into(),
-            "/repo".into(),
-            None,
+            tui::TaskDraft {
+                title: "Task A".into(),
+                description: "desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
             None,
         );
         rt.exec_insert_task(
             &mut app,
-            "Task B".into(),
-            "desc".into(),
-            "/repo".into(),
-            None,
+            tui::TaskDraft {
+                title: "Task B".into(),
+                description: "desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
             None,
         );
 
@@ -2998,10 +3014,12 @@ mod tests {
         let (rt, mut app) = test_runtime();
         rt.exec_insert_task(
             &mut app,
-            "Test".into(),
-            "Desc".into(),
-            "/repo".into(),
-            None,
+            tui::TaskDraft {
+                title: "Test".into(),
+                description: "Desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
             None,
         );
         let id = app.tasks()[0].id;

@@ -246,6 +246,7 @@ pub enum Message {
     SubmitRepoPath(String),
     SubmitDispatchRepoPath(String),
     SubmitTag(Option<TaskTag>),
+    SubmitBaseBranch(String),
     InputChar(char),
     InputBackspace,
     StartQuickDispatchSelection,
@@ -638,18 +639,32 @@ pub enum InputMode {
     ConfirmQuit,
     // Dispatch repo path input (review/security tab fallback)
     InputDispatchRepoPath,
+    InputBaseBranch,
 }
 
 // ---------------------------------------------------------------------------
 // TaskDraft
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TaskDraft {
     pub title: String,
     pub description: String,
     pub repo_path: String,
     pub tag: Option<TaskTag>,
+    pub base_branch: String,
+}
+
+impl Default for TaskDraft {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            tag: None,
+            base_branch: "main".to_string(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,6 +1058,7 @@ pub struct TaskEdit {
     pub status: TaskStatus,
     pub plan_path: Option<String>,
     pub tag: Option<TaskTag>,
+    pub base_branch: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

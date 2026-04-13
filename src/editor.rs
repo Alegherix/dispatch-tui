@@ -12,6 +12,7 @@ pub struct EditorFields {
     pub status: String,
     pub plan: String,
     pub tag: String,
+    pub base_branch: String,
 }
 
 use crate::models::{Epic, Task};
@@ -81,8 +82,8 @@ pub fn format_editor_content(task: &Task) -> String {
     let plan = task.plan_path.as_deref().unwrap_or("");
     let tag = task.tag.map(|t| t.as_str()).unwrap_or("");
     format!(
-        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n",
-        task.title, task.description, task.repo_path, task.status.as_str(), plan, tag
+        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n--- BASE_BRANCH ---\n{}\n",
+        task.title, task.description, task.repo_path, task.status.as_str(), plan, tag, task.base_branch
     )
 }
 
@@ -95,6 +96,7 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         status: s.remove("STATUS").unwrap_or_default(),
         plan: s.remove("PLAN").unwrap_or_default(),
         tag: s.remove("TAG").unwrap_or_default(),
+        base_branch: s.remove("BASE_BRANCH").unwrap_or_default(),
     }
 }
 
@@ -204,6 +206,40 @@ mod tests {
         assert_eq!(fields.repo_path, "/repo");
         assert_eq!(fields.status, "backlog");
         assert_eq!(fields.plan, "docs/plan.md");
+    }
+
+    #[test]
+    fn editor_includes_base_branch() {
+        let task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+        let content = format_editor_content(&task);
+        assert!(
+            content.contains("--- BASE_BRANCH ---"),
+            "should have BASE_BRANCH section"
+        );
+        assert!(content.contains("main"), "should contain the branch value");
+    }
+
+    #[test]
+    fn editor_roundtrip_base_branch() {
+        let mut task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
+        task.base_branch = "develop".to_string();
+        let content = format_editor_content(&task);
+        let fields = parse_editor_content(&content);
+        assert_eq!(fields.base_branch, "develop");
+    }
+
+    #[test]
+    fn parse_base_branch_from_editor_output() {
+        let input = "--- TITLE ---\nT\n--- BASE_BRANCH ---\nstaging\n";
+        let fields = parse_editor_content(input);
+        assert_eq!(fields.base_branch, "staging");
+    }
+
+    #[test]
+    fn parse_base_branch_missing_returns_empty() {
+        let input = "--- TITLE ---\nT\n--- STATUS ---\nbacklog\n";
+        let fields = parse_editor_content(input);
+        assert_eq!(fields.base_branch, "");
     }
 
     #[test]

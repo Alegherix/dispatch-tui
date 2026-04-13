@@ -94,6 +94,7 @@ entity Task {
     pr_url: String?
     tag: TaskTag?
     sort_order: Integer?
+    base_branch: String          -- the branch this task rebases onto / targets for PRs
     created_at: Timestamp
     updated_at: Timestamp
 

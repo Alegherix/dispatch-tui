@@ -1297,6 +1297,60 @@ fn input_repo_path_lines<'a>(
     lines
 }
 
+fn input_base_branch_lines(
+    app: &App,
+    completed: Style,
+    active: Style,
+    hint: Style,
+) -> Vec<Line<'static>> {
+    let title = app
+        .input
+        .task_draft
+        .as_ref()
+        .map(|d| d.title.clone())
+        .unwrap_or_default();
+    let tag = app
+        .input
+        .task_draft
+        .as_ref()
+        .and_then(|d| d.tag.as_ref())
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let description = app
+        .input
+        .task_draft
+        .as_ref()
+        .map(|d| d.description.clone())
+        .unwrap_or_default();
+    let desc_first_line = description.lines().next().unwrap_or("").to_string();
+    let desc_display = if description.contains('\n') {
+        format!("{desc_first_line} ...")
+    } else {
+        desc_first_line
+    };
+    let repo_path = app
+        .input
+        .task_draft
+        .as_ref()
+        .map(|d| d.repo_path.clone())
+        .unwrap_or_default();
+    vec![
+        Line::from(Span::styled(format!("  Title: {title}"), completed)),
+        Line::from(Span::styled(format!("  Tag: {tag}"), completed)),
+        Line::from(Span::styled(
+            format!("  Description: {desc_display}"),
+            completed,
+        )),
+        Line::from(Span::styled(format!("  Repo path: {repo_path}"), completed)),
+        Line::from(Span::styled(
+            format!("  Base branch: {}_ ", app.input.buffer),
+            active,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", hint)),
+    ]
+}
+
 fn dispatch_repo_path_lines<'a>(
     app: &'a App,
     area: Rect,
@@ -1481,6 +1535,7 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::InputTag => input_tag_lines(app, completed, active, hint),
         InputMode::InputDescription => input_description_lines(app, completed, active, hint),
         InputMode::InputRepoPath => input_repo_path_lines(app, area, completed, active, hint),
+        InputMode::InputBaseBranch => input_base_branch_lines(app, completed, active, hint),
         InputMode::QuickDispatch => quick_dispatch_lines(app, area, active, hint),
         InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
         InputMode::InputEpicTitle => input_epic_title_lines(app, active, hint),
@@ -2345,6 +2400,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         InputMode::ConfirmQuit => {
             let bar =
                 Paragraph::new("Quit dispatch? [y/n]").style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::InputBaseBranch => {
+            let text = app.status.message.as_deref().unwrap_or("Base branch: ");
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
     }

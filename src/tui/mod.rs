@@ -2787,6 +2787,7 @@ impl App {
                 id,
                 repo_path: task.repo_path.clone(),
                 branch,
+                base_branch: task.base_branch.clone(),
                 worktree,
                 tmux_window: task.tmux_window.clone(),
             }]
@@ -2816,6 +2817,7 @@ impl App {
                 id,
                 repo_path: task.repo_path.clone(),
                 branch,
+                base_branch: task.base_branch.clone(),
                 title: task.title.clone(),
                 description: task.description.clone(),
             }]
@@ -2919,17 +2921,29 @@ impl App {
                         let worktree = worktree.clone();
                         let branch = dispatch::branch_from_worktree(&worktree);
                         let repo_path = t.repo_path.clone();
+                        let base_branch = t.base_branch.clone();
                         let title = t.title.clone();
                         let description = t.description.clone();
                         let tmux_window = t.tmux_window.clone();
-                        branch.map(|b| (worktree, b, repo_path, title, description, tmux_window))
+                        branch.map(|b| {
+                            (
+                                worktree,
+                                b,
+                                repo_path,
+                                base_branch,
+                                title,
+                                description,
+                                tmux_window,
+                            )
+                        })
                     }
                     None => None,
                 },
                 _ => None,
             };
 
-            let Some((worktree, branch, repo_path, title, description, tmux_window)) = task_data
+            let Some((worktree, branch, repo_path, base_branch, title, description, tmux_window)) =
+                task_data
             else {
                 // Skip this task — no longer eligible
                 if let Some(q) = &mut self.merge_queue {
@@ -2953,6 +2967,7 @@ impl App {
                         id: next_id,
                         repo_path,
                         branch,
+                        base_branch,
                         worktree,
                         tmux_window,
                     }]
@@ -2961,6 +2976,7 @@ impl App {
                     id: next_id,
                     repo_path,
                     branch,
+                    base_branch,
                     title,
                     description,
                 }],

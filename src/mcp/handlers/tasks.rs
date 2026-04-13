@@ -44,6 +44,8 @@ pub(super) struct UpdateTaskArgs {
     pub(super) sub_status: Option<SubStatus>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) epic_id: Option<i64>,
+    #[serde(default)]
+    pub(super) base_branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +96,8 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
     pub(super) tag: Option<TaskTag>,
+    #[serde(default)]
+    pub(super) base_branch: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,6 +272,7 @@ pub(super) fn handle_update_task(
         epic_id: parsed.epic_id,
         worktree: None,
         tmux_window: None,
+        base_branch: parsed.base_branch,
     };
     let field_names = params.updated_field_names();
 
@@ -304,6 +309,7 @@ pub(super) fn handle_create_task(
         epic_id: parsed.epic_id,
         sort_order: parsed.sort_order,
         tag: parsed.tag,
+        base_branch: parsed.base_branch,
     }) {
         Ok(task_id) => {
             state.notify();
@@ -467,6 +473,7 @@ pub(super) async fn handle_wrap_up(
     };
 
     let repo_path = task.repo_path.clone();
+    let base_branch = task.base_branch.clone();
     let tmux_window = task.tmux_window.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
@@ -483,9 +490,17 @@ pub(super) async fn handle_wrap_up(
                 let _ = db.patch_task(task_id, &clear_patch);
             }
             let rebase_runner = runner.clone();
+            let rebase_base = base_branch.clone();
             let rebase_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
-                dispatch::finish_task(&repo_path, &worktree, &branch, None, &*rebase_runner)
+                dispatch::finish_task(
+                    &repo_path,
+                    &worktree,
+                    &branch,
+                    &rebase_base,
+                    None,
+                    &*rebase_runner,
+                )
             })
             .await
             {
@@ -540,7 +555,14 @@ pub(super) async fn handle_wrap_up(
             let description = task.description.clone();
             let pr_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up pr starting");
-                dispatch::create_pr(&repo_path, &branch, &title, &description, &*pr_runner)
+                dispatch::create_pr(
+                    &repo_path,
+                    &branch,
+                    &title,
+                    &description,
+                    &base_branch,
+                    &*pr_runner,
+                )
             })
             .await
             {

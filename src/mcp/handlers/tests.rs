@@ -1144,6 +1144,7 @@ fn tool_schemas_match_arg_structs() {
                 "tag",
                 "sub_status",
                 "epic_id",
+                "base_branch",
             ]),
             BTreeSet::from(["task_id"]),
             json!({"task_id": 1, "status": "review", "plan_path": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug", "sub_status": "awaiting_review", "epic_id": 5}),
@@ -1164,6 +1165,7 @@ fn tool_schemas_match_arg_structs() {
                 "epic_id",
                 "sort_order",
                 "tag",
+                "base_branch",
             ]),
             BTreeSet::from(["title", "repo_path"]),
             json!({"title": "t", "repo_path": "/r", "description": "d", "plan_path": "/p.md", "sort_order": 10, "tag": "feature"}),
@@ -1956,11 +1958,11 @@ async fn wrap_up_rejects_backlog_task() {
 async fn wrap_up_accepts_running_blocked_task() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
+        // task.base_branch = "main" is passed explicitly to finish_task; no symbolic-ref call
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
-        MockProcessRunner::fail(""), // git remote get-url (no remote)
-        MockProcessRunner::ok(),     // git rebase main
-        MockProcessRunner::ok(),     // git merge --ff-only
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -2007,11 +2009,11 @@ async fn wrap_up_accepts_running_blocked_task() {
 async fn wrap_up_accepts_running_active_task() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
+        // task.base_branch = "main" is passed explicitly to finish_task; no symbolic-ref call
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
-        MockProcessRunner::fail(""), // git remote get-url (no remote)
-        MockProcessRunner::ok(),     // git rebase main
-        MockProcessRunner::ok(),     // git merge --ff-only
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -2095,11 +2097,11 @@ async fn wrap_up_invalid_action() {
 async fn wrap_up_rebase_returns_started() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
+        // task.base_branch = "main" is passed explicitly to finish_task; no symbolic-ref call
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
-        MockProcessRunner::fail(""), // git remote get-url (no remote)
-        MockProcessRunner::ok(),     // git rebase main
-        MockProcessRunner::ok(),     // git merge --ff-only
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -2137,8 +2139,8 @@ async fn wrap_up_rebase_returns_started() {
 async fn wrap_up_pr_returns_started() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),     // git push
+        // task.base_branch = "main" is passed explicitly to create_pr; no symbolic-ref call
+        MockProcessRunner::ok(), // git push
         MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
         MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/7\n"), // gh pr create
     ]));
@@ -2403,7 +2405,6 @@ async fn get_task_shows_sub_status() {
 async fn wrap_up_rebase_conflict_returns_error() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                  // detect_default_branch
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
         MockProcessRunner::fail("CONFLICT (content): Merge conflict in foo.rs"), // git rebase
@@ -3268,11 +3269,10 @@ async fn list_tasks_done_status_filter() {
 async fn wrap_up_rebase_sets_task_to_done() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
-        MockProcessRunner::fail(""), // git remote get-url (no remote)
-        MockProcessRunner::ok(),     // git rebase main
-        MockProcessRunner::ok(),     // git merge --ff-only
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3320,8 +3320,7 @@ async fn wrap_up_rebase_sets_task_to_done() {
 async fn wrap_up_pr_sets_review_and_pr_url() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),     // git push
+        MockProcessRunner::ok(), // git push
         MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
         MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
     ]));
@@ -3380,11 +3379,10 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
 async fn wrap_up_rebase_recalculates_epic_status() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
-        MockProcessRunner::fail(""), // git remote get-url (no remote)
-        MockProcessRunner::ok(),     // git rebase main
-        MockProcessRunner::ok(),     // git merge --ff-only
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3435,7 +3433,6 @@ async fn wrap_up_rebase_recalculates_epic_status() {
 async fn wrap_up_accepts_string_task_id() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                  // detect_default_branch
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse
         MockProcessRunner::fail(""),                  // git remote get-url
         MockProcessRunner::ok(),                      // git rebase main
@@ -3799,12 +3796,11 @@ async fn dispatch_next_picks_first_backlog_subtask() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),     // tmux new-window
-        MockProcessRunner::ok(),     // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(),     // tmux set-hook
-        MockProcessRunner::ok(),     // tmux send-keys -l (literal text)
-        MockProcessRunner::ok(),     // tmux send-keys Enter
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3882,12 +3878,11 @@ async fn dispatch_next_respects_sort_order() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),     // tmux new-window
-        MockProcessRunner::ok(),     // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(),     // tmux set-hook
-        MockProcessRunner::ok(),     // tmux send-keys -l (literal text)
-        MockProcessRunner::ok(),     // tmux send-keys Enter
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3960,12 +3955,11 @@ async fn dispatch_next_respects_tag_routing() {
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
-        MockProcessRunner::ok(),     // tmux new-window
-        MockProcessRunner::ok(),     // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(),     // tmux set-hook
-        MockProcessRunner::ok(),     // tmux send-keys -l (literal text)
-        MockProcessRunner::ok(),     // tmux send-keys Enter
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l (literal text)
+        MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -4119,12 +4113,11 @@ async fn update_review_status_invalid_status_errors() {
 async fn wrap_up_rebase_clears_tmux_window() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""), // detect_default_branch (symbolic-ref)
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse --abbrev-ref HEAD
-        MockProcessRunner::fail(""), // git remote get-url (no remote)
-        MockProcessRunner::ok(),     // git rebase main
-        MockProcessRunner::ok(),     // git merge --ff-only
-        MockProcessRunner::ok(),     // tmux kill-window
+        MockProcessRunner::fail(""),                  // git remote get-url (no remote)
+        MockProcessRunner::ok(),                      // git rebase main
+        MockProcessRunner::ok(),                      // git merge --ff-only
+        MockProcessRunner::ok(),                      // tmux kill-window
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -4174,7 +4167,6 @@ async fn wrap_up_rebase_clears_tmux_window() {
 async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail(""),                  // detect_default_branch
         MockProcessRunner::ok_with_stdout(b"main\n"), // git rev-parse HEAD
         MockProcessRunner::fail(""),                  // git remote get-url (no remote)
         MockProcessRunner::fail("CONFLICT (content): Merge conflict in foo.rs"), // git rebase
@@ -4283,4 +4275,85 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         SubStatus::Conflict,
         "Stale Conflict sub_status should be cleared even on non-conflict rebase error"
     );
+}
+
+// ---------------------------------------------------------------------------
+// base_branch: create_task and update_task MCP schema tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_with_base_branch_stores_it() {
+    let state = test_state();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "My Feature",
+                "repo_path": "/repo",
+                "base_branch": "develop"
+            }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+    let tasks = state.db.list_all().unwrap();
+    let task = tasks.iter().find(|t| t.title == "My Feature").unwrap();
+    assert_eq!(task.base_branch, "develop");
+}
+
+#[tokio::test]
+async fn create_task_without_base_branch_defaults_to_main() {
+    let state = test_state();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Default Branch Task",
+                "repo_path": "/repo"
+            }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+    let tasks = state.db.list_all().unwrap();
+    let task = tasks
+        .iter()
+        .find(|t| t.title == "Default Branch Task")
+        .unwrap();
+    assert_eq!(task.base_branch, "main");
+}
+
+#[tokio::test]
+async fn update_task_with_base_branch_updates_it() {
+    let state = test_state();
+
+    let task_id = state
+        .db
+        .create_task("T", "d", "/repo", None, TaskStatus::Backlog, "main")
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "base_branch": "release/2.0"
+            }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+    let task = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.base_branch, "release/2.0");
 }

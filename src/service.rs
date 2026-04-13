@@ -59,6 +59,7 @@ pub struct UpdateTaskParams {
     pub epic_id: Option<i64>,
     pub worktree: Option<FieldUpdate>,
     pub tmux_window: Option<FieldUpdate>,
+    pub base_branch: Option<String>,
 }
 
 impl UpdateTaskParams {
@@ -75,6 +76,7 @@ impl UpdateTaskParams {
             || self.epic_id.is_some()
             || self.worktree.is_some()
             || self.tmux_window.is_some()
+            || self.base_branch.is_some()
     }
 
     pub fn updated_field_names(&self) -> Vec<String> {
@@ -115,6 +117,9 @@ impl UpdateTaskParams {
         if self.tmux_window.is_some() {
             names.push("tmux_window".to_string());
         }
+        if self.base_branch.is_some() {
+            names.push("base_branch".to_string());
+        }
         names
     }
 }
@@ -131,6 +136,7 @@ pub struct CreateTaskParams {
     pub epic_id: Option<i64>,
     pub sort_order: Option<i64>,
     pub tag: Option<TaskTag>,
+    pub base_branch: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +219,9 @@ impl TaskService {
                 FieldUpdate::Set(tw) => patch = patch.tmux_window(Some(tw.as_str())),
                 FieldUpdate::Clear => patch = patch.tmux_window(None),
             }
+        }
+        if let Some(ref bb) = params.base_branch {
+            patch = patch.base_branch(bb.as_str());
         }
 
         if let Some(ss) = params.sub_status {
@@ -324,6 +333,7 @@ impl TaskService {
                 .unwrap_or_else(|_| p.to_string())
         });
 
+        let base_branch = params.base_branch.as_deref().unwrap_or("main");
         let task_id = self
             .db
             .create_task(
@@ -332,7 +342,7 @@ impl TaskService {
                 &repo_path,
                 plan.as_deref(),
                 TaskStatus::Backlog,
-                "main",
+                base_branch,
             )
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
@@ -749,6 +759,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -771,6 +782,7 @@ mod tests {
                 epic_id: None,
                 sort_order: Some(5),
                 tag: Some(TaskTag::Bug),
+                base_branch: None,
             })
             .unwrap();
 
@@ -793,6 +805,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -810,6 +823,7 @@ mod tests {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         })
         .unwrap();
 
@@ -834,6 +848,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -852,6 +867,7 @@ mod tests {
                 epic_id: None,
                 worktree: None,
                 tmux_window: None,
+                base_branch: None,
             })
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
@@ -871,6 +887,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -890,6 +907,7 @@ mod tests {
                 epic_id: None,
                 worktree: None,
                 tmux_window: None,
+                base_branch: None,
             })
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
@@ -909,6 +927,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -941,6 +960,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -968,6 +988,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -986,6 +1007,7 @@ mod tests {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         })
         .unwrap();
 
@@ -1012,6 +1034,7 @@ mod tests {
             epic_id: None,
             sort_order: None,
             tag: None,
+            base_branch: None,
         })
         .unwrap();
 
@@ -1083,6 +1106,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1101,6 +1125,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 worktree: None,
                 tmux_window: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1217,6 +1242,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1251,6 +1277,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1285,6 +1312,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 sort_order: Some(20),
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1297,6 +1325,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 sort_order: Some(10),
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1328,6 +1357,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 sort_order: Some(1),
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1347,6 +1377,7 @@ mod tests {
                 epic_id: None,
                 worktree: None,
                 tmux_window: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1378,6 +1409,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: Some(TaskTag::Feature),
+                base_branch: None,
             })
             .unwrap();
 
@@ -1411,6 +1443,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1433,6 +1466,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1466,6 +1500,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1483,6 +1518,7 @@ mod tests {
             epic_id: None,
             worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
             tmux_window: Some(FieldUpdate::Set("task-1".into())),
+            base_branch: None,
         })
         .unwrap();
 
@@ -1505,6 +1541,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1523,6 +1560,7 @@ mod tests {
             epic_id: None,
             worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
             tmux_window: Some(FieldUpdate::Set("task-1".into())),
+            base_branch: None,
         })
         .unwrap();
 
@@ -1541,6 +1579,7 @@ mod tests {
             epic_id: None,
             worktree: Some(FieldUpdate::Clear),
             tmux_window: Some(FieldUpdate::Clear),
+            base_branch: None,
         })
         .unwrap();
 
@@ -1565,6 +1604,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1582,6 +1622,7 @@ mod tests {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         })
         .unwrap();
 
@@ -1646,6 +1687,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
         svc.update_task(UpdateTaskParams {
@@ -1662,6 +1704,7 @@ mod tests {
             epic_id: None,
             worktree: Some(FieldUpdate::Set("/wt".to_string())),
             tmux_window: Some(FieldUpdate::Set("win".to_string())),
+            base_branch: None,
         })
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
@@ -1682,6 +1725,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
         // First set a value
@@ -1699,6 +1743,7 @@ mod tests {
             epic_id: None,
             worktree: Some(FieldUpdate::Set("/wt".to_string())),
             tmux_window: Some(FieldUpdate::Set("win".to_string())),
+            base_branch: None,
         })
         .unwrap();
         // Then clear it
@@ -1716,6 +1761,7 @@ mod tests {
             epic_id: None,
             worktree: Some(FieldUpdate::Clear),
             tmux_window: Some(FieldUpdate::Clear),
+            base_branch: None,
         })
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
@@ -1736,6 +1782,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
         // Set PR URL
@@ -1755,6 +1802,7 @@ mod tests {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         })
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
@@ -1777,6 +1825,7 @@ mod tests {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         })
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
@@ -1807,6 +1856,7 @@ mod tests {
                 epic_id: Some(epic.id.0),
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1819,6 +1869,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1846,6 +1897,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1863,6 +1915,7 @@ mod tests {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         })
         .unwrap();
 
@@ -1889,6 +1942,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1902,6 +1956,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1924,6 +1979,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1936,6 +1992,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 
@@ -1954,6 +2011,7 @@ mod tests {
             epic_id: None,
             worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
             tmux_window: None,
+            base_branch: None,
         })
         .unwrap();
 
@@ -1976,6 +2034,7 @@ mod tests {
                 epic_id: None,
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             })
             .unwrap();
 

@@ -204,7 +204,13 @@ pub fn dispatch_agent(
         task.plan_path.as_deref(),
         epic,
     );
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
+    dispatch_with_prompt(
+        task,
+        &prompt,
+        ClaudeMode::Plan,
+        runner,
+        Some(&task.base_branch),
+    )
 }
 
 pub fn brainstorm_agent(
@@ -213,7 +219,13 @@ pub fn brainstorm_agent(
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_brainstorm_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
+    dispatch_with_prompt(
+        task,
+        &prompt,
+        ClaudeMode::Plan,
+        runner,
+        Some(&task.base_branch),
+    )
 }
 
 pub fn plan_agent(
@@ -222,7 +234,13 @@ pub fn plan_agent(
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_plan_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
+    dispatch_with_prompt(
+        task,
+        &prompt,
+        ClaudeMode::Plan,
+        runner,
+        Some(&task.base_branch),
+    )
 }
 
 pub fn quick_dispatch_agent(
@@ -231,7 +249,13 @@ pub fn quick_dispatch_agent(
     epic: Option<&EpicContext>,
 ) -> Result<DispatchResult> {
     let prompt = build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
+    dispatch_with_prompt(
+        task,
+        &prompt,
+        ClaudeMode::Plan,
+        runner,
+        Some(&task.base_branch),
+    )
 }
 
 pub fn epic_planning_agent(
@@ -242,7 +266,13 @@ pub fn epic_planning_agent(
     runner: &dyn ProcessRunner,
 ) -> Result<DispatchResult> {
     let prompt = build_epic_planning_prompt(epic_id, epic_title, epic_description);
-    dispatch_with_prompt(task, &prompt, ClaudeMode::Plan, runner, None)
+    dispatch_with_prompt(
+        task,
+        &prompt,
+        ClaudeMode::Plan,
+        runner,
+        Some(&task.base_branch),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -352,20 +382,20 @@ impl std::fmt::Display for FinishError {
     }
 }
 
-/// Rebase the task branch onto main and fast-forward main, then kill the tmux window.
+/// Rebase the task branch onto `base_branch` and fast-forward it, then kill the tmux window.
 /// The worktree is preserved — it will be cleaned up when the task is archived.
 pub fn finish_task(
     repo_path: &str,
     worktree: &str,
     branch: &str,
+    base_branch: &str,
     tmux_window: Option<&str>,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<(), FinishError> {
     let repo_path = &expand_tilde(repo_path);
     let worktree = &expand_tilde(worktree);
-    let default_branch = detect_default_branch(repo_path, runner);
 
-    // 1. Verify we're on the default branch
+    // 1. Verify we're on the base branch
     let output = runner
         .run(
             "git",
@@ -373,14 +403,14 @@ pub fn finish_task(
         )
         .map_err(|e| FinishError::Other(format!("Failed to check current branch: {e}")))?;
     let current_branch = stdout_str(&output);
-    if current_branch != default_branch {
+    if current_branch != base_branch {
         return Err(FinishError::NotOnDefaultBranch {
             current: current_branch,
-            expected: default_branch,
+            expected: base_branch.to_string(),
         });
     }
 
-    // 2. Pull latest default branch (skip if no remote configured)
+    // 2. Pull latest base branch (skip if no remote configured)
     let has_remote = runner
         .run("git", &["-C", repo_path, "remote", "get-url", "origin"])
         .map(|o| o.status.success())
@@ -388,19 +418,19 @@ pub fn finish_task(
 
     if has_remote {
         let output = runner
-            .run("git", &["-C", repo_path, "pull", "origin", &default_branch])
+            .run("git", &["-C", repo_path, "pull", "origin", base_branch])
             .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
         if !output.status.success() {
             return Err(FinishError::Other(format!(
-                "Failed to pull {default_branch}: {}",
+                "Failed to pull {base_branch}: {}",
                 stderr_str(&output)
             )));
         }
     }
 
-    // 3. Rebase branch onto default branch (from worktree, where branch is checked out)
+    // 3. Rebase branch onto base branch (from worktree, where branch is checked out)
     let output = runner
-        .run("git", &["-C", worktree, "rebase", &default_branch])
+        .run("git", &["-C", worktree, "rebase", base_branch])
         .map_err(|e| FinishError::Other(format!("Failed to run git rebase: {e}")))?;
     if !output.status.success() {
         let stderr = stderr_str(&output);
@@ -418,10 +448,10 @@ pub fn finish_task(
         return Err(FinishError::Other(format!("Rebase failed: {}", stderr)));
     }
 
-    // 4. Fast-forward default branch to the rebased branch
+    // 4. Fast-forward base branch to the rebased branch
     let output = runner
         .run("git", &["-C", repo_path, "merge", "--ff-only", branch])
-        .map_err(|e| FinishError::Other(format!("Failed to fast-forward {default_branch}: {e}")))?;
+        .map_err(|e| FinishError::Other(format!("Failed to fast-forward {base_branch}: {e}")))?;
     if !output.status.success() {
         return Err(FinishError::Other(format!(
             "Fast-forward failed after rebase: {}",
@@ -808,10 +838,10 @@ pub fn create_pr(
     branch: &str,
     title: &str,
     description: &str,
+    base_branch: &str,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<PrResult, PrError> {
     let repo_path = &expand_tilde(repo_path);
-    let default_branch = detect_default_branch(repo_path, runner);
 
     // 1. Push the branch
     let output = runner
@@ -844,7 +874,7 @@ pub fn create_pr(
                 "--head",
                 branch,
                 "--base",
-                &default_branch,
+                base_branch,
                 "--repo",
                 &repo_slug,
             ],
@@ -1662,7 +1692,7 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
+            // No detect_default_branch call — task.base_branch is used directly
             // git worktree add is skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -1681,12 +1711,12 @@ mod tests {
                 .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
             "git worktree add should be skipped for existing worktree"
         );
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "new-window");
         assert_eq!(calls[1].0, "tmux");
-        assert_eq!(calls[1].1[0], "new-window");
+        assert_eq!(calls[1].1[0], "set-option");
         assert_eq!(calls[2].0, "tmux");
-        assert_eq!(calls[2].1[0], "set-option");
-        assert_eq!(calls[3].0, "tmux");
-        assert_eq!(calls[3].1[0], "set-hook");
+        assert_eq!(calls[2].1[0], "set-hook");
     }
 
     #[test]
@@ -1697,25 +1727,25 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook (after-split-window)
-            MockProcessRunner::ok(),                   // tmux send-keys -l (the claude command)
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(), // tmux send-keys -l (the claude command)
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
         dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        // The literal send-keys call (index 4) carries the claude invocation
+        // The literal send-keys call (index 3) carries the claude invocation
         assert!(
-            calls[4].1.iter().any(|a| a.contains("claude")),
+            calls[3].1.iter().any(|a| a.contains("claude")),
             "send-keys should include claude"
         );
         assert!(
-            calls[4]
+            calls[3]
                 .1
                 .iter()
                 .any(|a| a.contains("--permission-mode plan")),
@@ -1731,19 +1761,19 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
         dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
         assert!(
             send_keys_arg.contains("--permission-mode plan"),
             "dispatch_agent should use plan mode, got: {send_keys_arg}"
@@ -1758,19 +1788,19 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
         plan_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
         assert!(
             send_keys_arg.contains("--permission-mode plan"),
             "plan_agent should use plan mode, got: {send_keys_arg}"
@@ -1955,17 +1985,15 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_uses_detected_default_branch() {
+    fn dispatch_uses_task_base_branch_in_prompt() {
         let dir = tempfile::TempDir::new().unwrap();
         let repo_path = dir.path().to_str().unwrap().to_string();
         let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            // detect_default_branch returns "master"
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"),
-            // git worktree add is skipped (dir exists), but provision_worktree
-            // receives Some("origin/master") from dispatch_with_prompt
+            // No detect_default_branch call — task.base_branch is used directly
+            // git worktree add is skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-option @dispatch_dir
             MockProcessRunner::ok(), // tmux set-hook
@@ -1973,21 +2001,20 @@ mod tests {
             MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
-        let task = make_task(&repo_path);
+        let mut task = make_task(&repo_path);
+        task.base_branch = "master".to_string();
         dispatch_agent(&task, &mock, None).unwrap();
 
-        // Verify the prompt uses the detected branch.
-        // detect_default_branch strips the refs/remotes/origin/ prefix,
-        // returning just "master".
+        // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
         let prompt_file = worktree_dir.join(".claude-prompt");
         let prompt = std::fs::read_to_string(prompt_file).unwrap();
         assert!(
             prompt.contains("rebase your branch from master"),
-            "prompt should reference master, got: {prompt}"
+            "prompt should reference task.base_branch (master), got: {prompt}"
         );
         assert!(
             !prompt.contains("rebase your branch from main"),
-            "prompt should not reference main as default branch"
+            "prompt should not reference main when task.base_branch is master"
         );
     }
 
@@ -1997,7 +2024,6 @@ mod tests {
         let repo_path = dir.path().to_str().unwrap().to_string();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch: symbolic-ref fails → fallback to "main"
             MockProcessRunner::fail("not a git repo"), // git worktree add fails
         ]);
 
@@ -2007,8 +2033,8 @@ mod tests {
         let calls = mock.recorded_calls();
         assert_eq!(
             calls.len(),
-            2,
-            "detect_default_branch and git worktree add should have been called"
+            1,
+            "only git worktree add should have been called (no detect_default_branch)"
         );
     }
 
@@ -2020,7 +2046,7 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
+            // No detect_default_branch call — task.base_branch is used directly
             // git worktree add is skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -2039,8 +2065,8 @@ mod tests {
                 .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
             "git worktree add should be skipped for existing worktree"
         );
-        assert_eq!(calls[1].0, "tmux");
-        assert_eq!(calls[1].1[0], "new-window");
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "new-window");
     }
 
     #[test]
@@ -2051,12 +2077,12 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook (after-split-window)
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
@@ -2083,7 +2109,7 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
+            // No detect_default_branch call — task.base_branch is used directly
             // git worktree add is skipped (dir exists)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -2102,8 +2128,8 @@ mod tests {
                 .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
             "git worktree add should be skipped for existing worktree"
         );
-        assert_eq!(calls[1].0, "tmux");
-        assert_eq!(calls[1].1[0], "new-window");
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1[0], "new-window");
     }
 
     #[test]
@@ -2114,12 +2140,12 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook (after-split-window)
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
@@ -2181,8 +2207,7 @@ mod tests {
     #[test]
     fn finish_task_happy_path() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
-            MockProcessRunner::ok_with_stdout(b"main\n"),                     // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
             MockProcessRunner::ok(), // git pull origin main
             MockProcessRunner::ok(), // git rebase main (from worktree)
@@ -2196,6 +2221,7 @@ mod tests {
             "/repo",
             "/repo/.worktrees/42-fix-bug",
             "42-fix-bug",
+            "main",
             Some("task-42"),
             &mock,
         )
@@ -2211,8 +2237,7 @@ mod tests {
     #[test]
     fn finish_task_with_master_default_branch() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"), // symbolic-ref → master
-            MockProcessRunner::ok_with_stdout(b"master\n"),                     // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"master\n"), // rev-parse HEAD
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
             MockProcessRunner::ok(), // git pull origin master
             MockProcessRunner::ok(), // git rebase master (from worktree)
@@ -2223,6 +2248,7 @@ mod tests {
             "/repo",
             "/repo/.worktrees/42-fix-bug",
             "42-fix-bug",
+            "master",
             None,
             &mock,
         )
@@ -2246,14 +2272,14 @@ mod tests {
     #[test]
     fn finish_task_not_on_default_branch() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::ok_with_stdout(b"feature-branch\n"),           // rev-parse HEAD
+            MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD
         ]);
 
         let result = finish_task(
             "/repo",
             "/repo/.worktrees/42-fix-bug",
             "42-fix-bug",
+            "main",
             None,
             &mock,
         );
@@ -2266,7 +2292,6 @@ mod tests {
     #[test]
     fn finish_task_rebase_conflict() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::fail(""),                         // remote get-url (no remote)
             Ok(Output {
@@ -2281,6 +2306,7 @@ mod tests {
             "/repo",
             "/repo/.worktrees/42-fix-bug",
             "42-fix-bug",
+            "main",
             None,
             &mock,
         );
@@ -2295,7 +2321,6 @@ mod tests {
     #[test]
     fn finish_task_pull_fails() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
             MockProcessRunner::ok_with_stdout(b"main\n"),
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // remote get-url origin
             MockProcessRunner::fail("fatal: unable to access remote"),           // git pull fails
@@ -2305,6 +2330,7 @@ mod tests {
             "/repo",
             "/repo/.worktrees/42-fix-bug",
             "42-fix-bug",
+            "main",
             None,
             &mock,
         );
@@ -2316,37 +2342,43 @@ mod tests {
     #[test]
     fn create_pr_happy_path() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::ok(),                                          // git push
+            MockProcessRunner::ok(), // git push
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url origin
             MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
         ]);
 
-        let result = create_pr("/repo", "42-fix-bug", "Fix bug", "A nasty crash", &mock).unwrap();
+        let result = create_pr(
+            "/repo",
+            "42-fix-bug",
+            "Fix bug",
+            "A nasty crash",
+            "main",
+            &mock,
+        )
+        .unwrap();
         assert_eq!(result.pr_url, "https://github.com/org/repo/pull/42");
 
         let calls = mock.recorded_calls();
+        assert_eq!(calls[0].0, "git");
+        assert!(calls[0].1.contains(&"push".to_string()));
+        assert!(calls[0].1.contains(&"-u".to_string()));
         assert_eq!(calls[1].0, "git");
-        assert!(calls[1].1.contains(&"push".to_string()));
-        assert!(calls[1].1.contains(&"-u".to_string()));
-        assert_eq!(calls[2].0, "git");
-        assert!(calls[2].1.contains(&"get-url".to_string()));
-        assert_eq!(calls[3].0, "gh");
-        assert!(calls[3].1.contains(&"create".to_string()));
-        assert!(calls[3].1.contains(&"--draft".to_string()));
-        assert!(calls[3].1.contains(&"org/repo".to_string()));
+        assert!(calls[1].1.contains(&"get-url".to_string()));
+        assert_eq!(calls[2].0, "gh");
+        assert!(calls[2].1.contains(&"create".to_string()));
+        assert!(calls[2].1.contains(&"--draft".to_string()));
+        assert!(calls[2].1.contains(&"org/repo".to_string()));
     }
 
     #[test]
     fn create_pr_with_master_base() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"), // symbolic-ref → master
-            MockProcessRunner::ok(),                                            // git push
+            MockProcessRunner::ok(), // git push
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url origin
             MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
         ]);
 
-        create_pr("/repo", "42-fix-bug", "Fix bug", "desc", &mock).unwrap();
+        create_pr("/repo", "42-fix-bug", "Fix bug", "desc", "master", &mock).unwrap();
 
         let calls = mock.recorded_calls();
         let gh_call = calls.iter().find(|c| c.0 == "gh").unwrap();
@@ -2356,24 +2388,22 @@ mod tests {
     #[test]
     fn create_pr_push_fails() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::fail("fatal: no remote"),
+            MockProcessRunner::fail("fatal: no remote"), // git push fails
         ]);
 
-        let result = create_pr("/repo", "42-fix-bug", "Fix bug", "desc", &mock);
+        let result = create_pr("/repo", "42-fix-bug", "Fix bug", "desc", "main", &mock);
         assert!(matches!(result, Err(PrError::PushFailed(_))));
     }
 
     #[test]
     fn create_pr_gh_create_fails() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref
-            MockProcessRunner::ok(),                                          // git push succeeds
+            MockProcessRunner::ok(), // git push succeeds
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
             MockProcessRunner::fail("error: pull request already exists"),       // gh pr create
         ]);
 
-        let result = create_pr("/repo", "42-fix-bug", "Fix bug", "desc", &mock);
+        let result = create_pr("/repo", "42-fix-bug", "Fix bug", "desc", "main", &mock);
         assert!(matches!(result, Err(PrError::CreateFailed(_))));
     }
 
@@ -2456,18 +2486,18 @@ mod tests {
     #[test]
     fn finish_task_no_remote_skips_pull() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail(""), // symbolic-ref (no remote → fallback to "main")
             MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
-            MockProcessRunner::fail(""), // remote get-url (no remote)
-            MockProcessRunner::ok(),     // git rebase main (from worktree)
-            MockProcessRunner::ok(),     // git merge --ff-only (fast-forward)
-                                         // No tmux window, no cleanup
+            MockProcessRunner::fail(""),                  // remote get-url (no remote)
+            MockProcessRunner::ok(),                      // git rebase main (from worktree)
+            MockProcessRunner::ok(),                      // git merge --ff-only (fast-forward)
+                                                          // No tmux window, no cleanup
         ]);
 
         finish_task(
             "/repo",
             "/repo/.worktrees/42-fix-bug",
             "42-fix-bug",
+            "main",
             None,
             &mock,
         )
@@ -2475,6 +2505,105 @@ mod tests {
         let calls = mock.recorded_calls();
         // Should not have a "pull" call
         assert!(!calls.iter().any(|c| c.1.contains(&"pull".to_string())));
+    }
+
+    // --- new TDD tests for explicit base_branch ---
+
+    #[test]
+    fn finish_task_uses_explicit_base_branch_not_auto_detected() {
+        // "develop" is passed explicitly; no symbolic-ref (detect_default_branch) call
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"develop\n"), // rev-parse HEAD → on develop
+            MockProcessRunner::fail(""),                     // remote get-url (no remote)
+            MockProcessRunner::ok(),                         // git rebase develop
+            MockProcessRunner::ok(),                         // git merge --ff-only develop
+        ]);
+
+        finish_task(
+            "/repo",
+            "/repo/.worktrees/42-fix-bug",
+            "42-fix-bug",
+            "develop",
+            None,
+            &mock,
+        )
+        .unwrap();
+
+        let calls = mock.recorded_calls();
+        // No symbolic-ref call — branch was provided explicitly
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.0 == "git" && c.1.iter().any(|a| a == "symbolic-ref")),
+            "symbolic-ref must not be called when base_branch is explicit"
+        );
+        // Rebase should target "develop"
+        let rebase = calls
+            .iter()
+            .find(|c| c.1.contains(&"rebase".to_string()))
+            .unwrap();
+        assert!(rebase.1.contains(&"develop".to_string()));
+    }
+
+    #[test]
+    fn create_pr_uses_explicit_base_branch_not_auto_detected() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git push
+            MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
+            MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/1\n"), // gh pr create
+        ]);
+
+        create_pr("/repo", "42-fix-bug", "Fix bug", "desc", "develop", &mock).unwrap();
+
+        let calls = mock.recorded_calls();
+        // No symbolic-ref call
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.0 == "git" && c.1.iter().any(|a| a == "symbolic-ref")),
+            "symbolic-ref must not be called when base_branch is explicit"
+        );
+        let gh_call = calls.iter().find(|c| c.0 == "gh").unwrap();
+        assert!(
+            gh_call.1.contains(&"develop".to_string()),
+            "gh pr create should use explicit base_branch"
+        );
+    }
+
+    #[test]
+    fn dispatch_agent_uses_task_base_branch_in_prompt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo_path = dir.path().to_str().unwrap().to_string();
+        let worktree_dir = dir.path().join(".worktrees").join("42-fix-bug");
+        std::fs::create_dir_all(&worktree_dir).unwrap();
+
+        // No detect_default_branch call expected — task.base_branch is used directly
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
+        ]);
+
+        let mut task = make_task(&repo_path);
+        task.base_branch = "develop".to_string();
+        dispatch_agent(&task, &mock, None).unwrap();
+
+        let prompt_file = worktree_dir.join(".claude-prompt");
+        let prompt = std::fs::read_to_string(prompt_file).unwrap();
+        assert!(
+            prompt.contains("rebase your branch from develop"),
+            "prompt should reference task.base_branch (develop), got: {prompt}"
+        );
+        // No symbolic-ref call
+        let calls = mock.recorded_calls();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.0 == "git" && c.1.iter().any(|a| a == "symbolic-ref")),
+            "dispatch_agent must not call symbolic-ref when task.base_branch is set"
+        );
     }
 
     // --- dispatch_review_agent tests ---
@@ -2729,19 +2858,19 @@ mod tests {
         std::fs::create_dir_all(&worktree_dir).unwrap();
 
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]);
 
         let task = make_task(&repo_path);
         dispatch_agent(&task, &mock, None).unwrap();
 
         let calls = mock.recorded_calls();
-        let send_keys_arg = calls[4].1.iter().find(|a| a.contains("claude")).unwrap();
+        let send_keys_arg = calls[3].1.iter().find(|a| a.contains("claude")).unwrap();
         assert!(
             send_keys_arg.contains("--plugin-dir"),
             "dispatch_agent should include --plugin-dir, got: {send_keys_arg}"

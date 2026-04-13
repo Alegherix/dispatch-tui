@@ -381,6 +381,7 @@ impl TuiRuntime {
             epic_id: epic_id.map(|e| e.0),
             sort_order: None,
             tag,
+            base_branch: None,
         }) {
             Ok(task) => Some(task),
             Err(e) => {
@@ -458,6 +459,7 @@ impl TuiRuntime {
             epic_id: None,
             worktree: Some(option_to_field_update(task.worktree.clone())),
             tmux_window: Some(option_to_field_update(task.tmux_window.clone())),
+            base_branch: None,
         }) {
             app.update(Message::Error(Self::db_error("persisting task", e)));
         }
@@ -484,6 +486,7 @@ impl TuiRuntime {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         }) {
             app.update(Message::Error(Self::db_error("patching sub_status", e)));
         }
@@ -665,6 +668,7 @@ impl TuiRuntime {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            base_branch: None,
         }) {
             app.update(Message::Error(Self::db_error("updating task", e)));
         }
@@ -1003,6 +1007,7 @@ impl TuiRuntime {
                 epic_id: None,
                 worktree: Some(FieldUpdate::Clear),
                 tmux_window: Some(FieldUpdate::Clear),
+                base_branch: None,
             }) {
                 let _ = self
                     .msg_tx
@@ -1029,6 +1034,7 @@ impl TuiRuntime {
         id: TaskId,
         repo_path: String,
         branch: String,
+        base_branch: String,
         worktree: String,
         tmux_window: Option<String>,
     ) {
@@ -1056,6 +1062,7 @@ impl TuiRuntime {
                 epic_id: None,
                 worktree: Some(FieldUpdate::Clear),
                 tmux_window: Some(FieldUpdate::Clear),
+                base_branch: None,
             }) {
                 let _ = self
                     .msg_tx
@@ -1073,6 +1080,7 @@ impl TuiRuntime {
                 &repo_path,
                 &worktree,
                 &branch,
+                &base_branch,
                 tmux_window.as_deref(),
                 &*runner,
             ) {
@@ -1265,6 +1273,7 @@ impl TuiRuntime {
                 epic_id: Some(epic.id.0),
                 sort_order: None,
                 tag: None,
+                base_branch: None,
             }) {
             Ok(task) => task,
             Err(e) => {
@@ -1328,6 +1337,7 @@ impl TuiRuntime {
         id: TaskId,
         repo_path: String,
         branch: String,
+        base_branch: String,
         title: String,
         description: String,
     ) {
@@ -1335,7 +1345,14 @@ impl TuiRuntime {
         let runner = self.runner.clone();
 
         tokio::task::spawn_blocking(move || {
-            match dispatch::create_pr(&repo_path, &branch, &title, &description, &*runner) {
+            match dispatch::create_pr(
+                &repo_path,
+                &branch,
+                &title,
+                &description,
+                &base_branch,
+                &*runner,
+            ) {
                 Ok(result) => {
                     let _ = tx.send(Message::PrCreated {
                         id,
@@ -1725,9 +1742,10 @@ async fn execute_commands(
                 id,
                 repo_path,
                 branch,
+                base_branch,
                 worktree,
                 tmux_window,
-            } => rt.exec_finish(id, repo_path, branch, worktree, tmux_window),
+            } => rt.exec_finish(id, repo_path, branch, base_branch, worktree, tmux_window),
             // Epic commands
             Command::InsertEpic(draft) => {
                 rt.exec_insert_epic(app, draft.title, draft.description, draft.repo_path)
@@ -1753,9 +1771,10 @@ async fn execute_commands(
                 id,
                 repo_path,
                 branch,
+                base_branch,
                 title,
                 description,
-            } => rt.exec_create_pr(id, repo_path, branch, title, description),
+            } => rt.exec_create_pr(id, repo_path, branch, base_branch, title, description),
             Command::CheckPrStatus { id, pr_url } => rt.exec_check_pr_status(id, pr_url),
             Command::MergePr { id, pr_url } => rt.exec_merge_pr(id, pr_url),
             Command::PersistStringSetting { key, value } => {
@@ -2183,7 +2202,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
+            // No detect_default_branch call — task.base_branch is used directly
             // git worktree add is skipped (dir pre-created above)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -2389,12 +2408,11 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail(""), // symbolic-ref (no remote → fallback to "main")
             MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
-            MockProcessRunner::fail(""), // remote get-url (no remote)
-            MockProcessRunner::ok(),     // git rebase main (from worktree)
-            MockProcessRunner::ok(),     // git merge --ff-only (fast-forward)
-                                         // Worktree is preserved; cleanup happens later during archive.
+            MockProcessRunner::fail(""),                  // remote get-url (no remote)
+            MockProcessRunner::ok(),                      // git rebase main (from worktree)
+            MockProcessRunner::ok(),                      // git merge --ff-only (fast-forward)
+                                                          // Worktree is preserved; cleanup happens later during archive.
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
@@ -2413,6 +2431,7 @@ mod tests {
             id,
             "/repo".into(),
             "1-test".into(),
+            "main".into(),
             "/repo/.worktrees/1-test".into(),
             None,
         );
@@ -2435,7 +2454,6 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail(""),                   // symbolic-ref (no remote → fallback to "main")
             MockProcessRunner::ok_with_stdout(b"main\n"), // rev-parse HEAD
             MockProcessRunner::fail(""),                   // remote get-url (no remote)
             Ok(Output {
@@ -2462,6 +2480,7 @@ mod tests {
             id,
             "/repo".into(),
             "1-test".into(),
+            "main".into(),
             "/repo/.worktrees/1-test".into(),
             None,
         );
@@ -2517,7 +2536,6 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
             MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD (not main)
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
@@ -2537,6 +2555,7 @@ mod tests {
             id,
             "/repo".into(),
             "1-test".into(),
+            "main".into(),
             "/repo/.worktrees/1-test".into(),
             None,
         );
@@ -2613,8 +2632,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
-            MockProcessRunner::ok(),                                          // git push
+            MockProcessRunner::ok(), // git push
             MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
             MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
         ]));
@@ -2624,6 +2642,7 @@ mod tests {
             TaskId(1),
             "/repo".to_string(),
             "1-task".to_string(),
+            "main".to_string(),
             "Fix bug".to_string(),
             "Description".to_string(),
         );
@@ -2640,8 +2659,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // symbolic-ref (detect default branch)
-            MockProcessRunner::fail("fatal: no remote"),
+            MockProcessRunner::fail("fatal: no remote"), // git push fails
         ]));
         let rt = make_runtime(db, tx, mock);
 
@@ -2649,6 +2667,7 @@ mod tests {
             TaskId(1),
             "/repo".to_string(),
             "1-task".to_string(),
+            "main".to_string(),
             "Fix bug".to_string(),
             "Description".to_string(),
         );
@@ -2766,7 +2785,7 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch (fallback to "main")
+            // No detect_default_branch call — task.base_branch is used directly
             // provision_worktree: dir exists so git worktree add is skipped
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -2821,12 +2840,12 @@ mod tests {
         let epic = db.create_epic("My Epic", "epic desc", repo).unwrap();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook
-            MockProcessRunner::ok(),                   // tmux send-keys -l (claude command)
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l (claude command)
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
         let tasks = db.list_all().unwrap();
@@ -3920,12 +3939,12 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 
@@ -3989,12 +4008,12 @@ mod tests {
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::fail("not a git repo"), // detect_default_branch
-            MockProcessRunner::ok(),                   // tmux new-window
-            MockProcessRunner::ok(),                   // tmux set-option @dispatch_dir
-            MockProcessRunner::ok(),                   // tmux set-hook
-            MockProcessRunner::ok(),                   // tmux send-keys -l
-            MockProcessRunner::ok(),                   // tmux send-keys Enter
+            // No detect_default_branch call — task.base_branch is used directly
+            MockProcessRunner::ok(), // tmux new-window
+            MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+            MockProcessRunner::ok(), // tmux set-hook
+            MockProcessRunner::ok(), // tmux send-keys -l
+            MockProcessRunner::ok(), // tmux send-keys Enter
         ]));
         let rt = make_runtime(db.clone(), tx, mock);
 

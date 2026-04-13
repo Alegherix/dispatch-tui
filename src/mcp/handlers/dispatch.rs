@@ -120,6 +120,10 @@ mcp_tools! {
                 "epic_id": {
                     "type": "integer",
                     "description": "Link this task to an epic by ID"
+                },
+                "base_branch": {
+                    "type": "string",
+                    "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
                 }
             },
             "required": ["task_id"]
@@ -171,6 +175,10 @@ mcp_tools! {
                     "type": "string",
                     "description": "Task tag: bug, feature, chore, or epic. Controls dispatch behavior.",
                     "enum": ["bug", "feature", "chore", "epic"]
+                },
+                "base_branch": {
+                    "type": "string",
+                    "description": "The base branch for rebase and PR operations (e.g. 'main', 'develop'). Defaults to 'main' if not specified."
                 }
             },
             "required": ["title", "repo_path"]

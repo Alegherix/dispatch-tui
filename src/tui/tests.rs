@@ -5449,18 +5449,25 @@ fn column_scrolls_back_up_when_cursor_moves_up() {
 }
 
 #[test]
+fn notifications_disabled_by_default() {
+    let app = make_app();
+    assert!(!app.notifications_enabled());
+}
+
+#[test]
 fn toggle_notifications_flips_state() {
     let mut app = make_app();
-    assert!(app.notifications_enabled()); // default: true
-    app.update(Message::ToggleNotifications);
-    assert!(!app.notifications_enabled());
+    assert!(!app.notifications_enabled()); // default: false
     app.update(Message::ToggleNotifications);
     assert!(app.notifications_enabled());
+    app.update(Message::ToggleNotifications);
+    assert!(!app.notifications_enabled());
 }
 
 #[test]
 fn refresh_tasks_emits_notification_on_review_transition() {
     let mut app = make_app();
+    app.set_notifications_enabled(true);
     // Task 3 starts as Running
     assert_eq!(app.board.tasks[2].status, TaskStatus::Running);
 
@@ -5486,6 +5493,7 @@ fn refresh_tasks_emits_notification_on_review_transition() {
 #[test]
 fn refresh_tasks_emits_urgent_notification_on_needs_input() {
     let mut app = make_app();
+    app.set_notifications_enabled(true);
 
     let mut updated = app.board.tasks.to_vec();
     updated[2].sub_status = SubStatus::NeedsInput;
@@ -5539,6 +5547,7 @@ fn refresh_tasks_does_not_duplicate_needs_input_notifications() {
 #[test]
 fn refresh_tasks_renotifies_needs_input_after_clearing() {
     let mut app = make_app();
+    app.set_notifications_enabled(true);
 
     // First transition to NeedsInput
     let mut updated = app.board.tasks.to_vec();
@@ -5569,7 +5578,7 @@ fn refresh_tasks_renotifies_needs_input_after_clearing() {
 #[test]
 fn refresh_tasks_skips_notification_when_disabled() {
     let mut app = make_app();
-    app.update(Message::ToggleNotifications); // disable
+    // notifications disabled by default — no toggle needed
 
     let mut updated = app.board.tasks.to_vec();
     updated[2].status = TaskStatus::Review;
@@ -5585,20 +5594,21 @@ fn refresh_tasks_skips_notification_when_disabled() {
 #[test]
 fn key_n_uppercase_toggles_notifications() {
     let mut app = make_app();
-    assert!(app.notifications_enabled());
+    assert!(!app.notifications_enabled()); // default: false
     let cmds = app.handle_key(make_key(KeyCode::Char('N')));
-    assert!(!app.notifications_enabled());
+    assert!(app.notifications_enabled()); // toggled to enabled
     // Should emit PersistSetting command
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::PersistSetting { .. })));
     // Should show status message
-    assert!(app.status.message.as_deref().unwrap().contains("disabled"));
+    assert!(app.status.message.as_deref().unwrap().contains("enabled"));
 }
 
 #[test]
 fn refresh_tasks_clears_notified_when_task_leaves_review() {
     let mut app = make_app();
+    app.set_notifications_enabled(true);
 
     // Move to review — triggers notification
     let mut updated = app.board.tasks.to_vec();
@@ -5624,6 +5634,7 @@ fn refresh_tasks_clears_notified_when_task_leaves_review() {
 #[test]
 fn refresh_tasks_clears_notified_state_even_when_disabled() {
     let mut app = make_app();
+    app.set_notifications_enabled(true);
 
     // Task transitions to review while notifications enabled — gets notified
     let mut updated = app.board.tasks.to_vec();
@@ -5664,7 +5675,8 @@ fn refresh_tasks_clears_notified_state_even_when_disabled() {
 
 #[test]
 fn summary_row_shows_bell_and_hint_when_notifications_enabled() {
-    let mut app = make_app(); // notifications_enabled defaults to true
+    let mut app = make_app();
+    app.set_notifications_enabled(true); // explicitly enable (default is false)
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "\u{1F514}")); // 🔔
     assert!(buffer_contains(&buf, "[N]"));
@@ -5673,7 +5685,7 @@ fn summary_row_shows_bell_and_hint_when_notifications_enabled() {
 #[test]
 fn summary_row_shows_muted_bell_and_hint_when_disabled() {
     let mut app = make_app();
-    app.update(Message::ToggleNotifications); // disable
+    // notifications disabled by default — no toggle needed
     let buf = render_to_buffer(&mut app, 100, 20);
     assert!(buffer_contains(&buf, "\u{1F515}")); // 🔕
     assert!(buffer_contains(&buf, "[N]"));
@@ -5726,6 +5738,7 @@ fn pr_merged_moves_to_done_and_detaches() {
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.set_notifications_enabled(true);
 
     let cmds = app.update(Message::PrMerged(TaskId(1)));
 

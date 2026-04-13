@@ -103,7 +103,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let notif_enabled = database
         .get_setting_bool("notifications_enabled")
         .unwrap_or(None)
-        .unwrap_or(true);
+        .unwrap_or(false);
     app.set_notifications_enabled(notif_enabled);
 
     // Load repo filter (intersect with known repo_paths to prune stale entries)
@@ -2179,6 +2179,7 @@ mod tests {
             )
             .unwrap();
 
+        app.set_notifications_enabled(true);
         // Refresh should detect the transition and return a SendNotification
         let cmds = rt.exec_refresh_from_db(&mut app);
         assert!(cmds

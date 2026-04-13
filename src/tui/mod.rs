@@ -80,7 +80,7 @@ impl App {
             },
             status: StatusState::default(),
             should_quit: false,
-            notifications_enabled: true,
+            notifications_enabled: false,
             input: InputState::default(),
             agents: AgentTracking::new(inactivity_timeout),
             archive: ArchiveState::default(),

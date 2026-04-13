@@ -187,7 +187,7 @@ config {
     tick_interval: Duration = 2.seconds
     inactivity_timeout: Duration = 3.minutes
     status_message_expiry: Duration = 5.seconds
-    notifications_enabled: Boolean = true
+    notifications_enabled: Boolean = false
     pr_poll_interval: Duration = 30.seconds
     default_branch: String = detect_from_remote("main")
 }

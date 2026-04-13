@@ -1124,32 +1124,26 @@ pub fn dispatch_review_agent(
 ) -> Result<DispatchResult> {
     let prompt = if req.is_dependabot {
         format!(
-            "You are reviewing a dependency update PR #{} in {}: {}\n\n\
-             {}\n\n\
-             This is an automated dependency update. Run `/anthropic-review-pr:review-pr {}` to review.\n\n\
+            "Review dependency update PR #{} in {}.\n\n\
+             Run `/anthropic-review-pr:review-pr {}` to review.\n\n\
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
             req.number,
             req.github_repo,
-            req.title,
-            req.body,
             req.number,
             req.github_repo,
             req.number
         )
     } else {
         format!(
-            "You are reviewing PR #{} in {}: {}\n\n\
-             {}\n\n\
+            "Review PR #{} in {}.\n\n\
              Run `/anthropic-review-pr:review-pr {}` to perform a comprehensive code review.\n\n\
              After the review completes, call the `update_review_status` MCP tool:\n\
              update_review_status(repo=\"{}\", number={}, status=\"findings_ready\")\n\n\
              Wait for the user.",
             req.number,
             req.github_repo,
-            req.title,
-            req.body,
             req.number,
             req.github_repo,
             req.number
@@ -2654,23 +2648,10 @@ mod tests {
         head_ref: &str,
         is_dependabot: bool,
     ) -> crate::tui::ReviewAgentRequest {
-        review_req_with(repo_path, number, "Fix it", "body", head_ref, is_dependabot)
-    }
-
-    fn review_req_with(
-        repo_path: &str,
-        number: i64,
-        title: &str,
-        body: &str,
-        head_ref: &str,
-        is_dependabot: bool,
-    ) -> crate::tui::ReviewAgentRequest {
         crate::tui::ReviewAgentRequest {
             repo: repo_path.to_string(),
             github_repo: "acme/app".to_string(),
             number,
-            title: title.to_string(),
-            body: body.to_string(),
             head_ref: head_ref.to_string(),
             is_dependabot,
         }
@@ -2757,14 +2738,7 @@ mod tests {
         ]);
 
         let result = dispatch_review_agent(
-            &review_req_with(
-                &repo_path,
-                99,
-                "Fix it",
-                "PR body here",
-                "feature-branch",
-                false,
-            ),
+            &review_req(&repo_path, 99, "feature-branch", false),
             &mock,
         )
         .unwrap();
@@ -2789,11 +2763,6 @@ mod tests {
         assert!(
             prompt.contains("PR #99"),
             "prompt should reference PR number"
-        );
-        assert!(prompt.contains("Fix it"), "prompt should include PR title");
-        assert!(
-            prompt.contains("PR body here"),
-            "prompt should include PR body"
         );
         assert!(
             prompt.contains("/anthropic-review-pr:review-pr 99"),
@@ -3010,6 +2979,14 @@ mod tests {
             !prompt.contains("gh pr review"),
             "prompt should NOT tell agent to submit review directly"
         );
+        assert!(
+            !prompt.contains("Fix it"),
+            "prompt should not contain PR title"
+        );
+        assert!(
+            !prompt.contains("body"),
+            "prompt should not contain PR body"
+        );
     }
 
     #[test]
@@ -3028,14 +3005,7 @@ mod tests {
             MockProcessRunner::ok(),                // tmux send-keys Enter
         ]);
         dispatch_review_agent(
-            &review_req_with(
-                &repo_path,
-                42,
-                "Bump lodash",
-                "body",
-                "dependabot/npm",
-                true,
-            ),
+            &review_req(&repo_path, 42, "dependabot/npm", true),
             &mock,
         )
         .unwrap();
@@ -3048,6 +3018,14 @@ mod tests {
         assert!(
             prompt.contains("update_review_status"),
             "prompt should reference MCP tool"
+        );
+        assert!(
+            !prompt.contains("Bump lodash"),
+            "dependabot prompt should not contain PR title"
+        );
+        assert!(
+            !prompt.contains("body"),
+            "dependabot prompt should not contain PR body"
         );
     }
 

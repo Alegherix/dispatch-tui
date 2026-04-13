@@ -4232,8 +4232,6 @@ mod tests {
             repo: repo.to_string(),
             github_repo: "acme/app".into(),
             number: 42,
-            title: "Fix bug".into(),
-            body: "Fixes #1".into(),
             head_ref: "fix-branch".into(),
             is_dependabot: false,
         });
@@ -4261,8 +4259,6 @@ mod tests {
             repo: "/nonexistent".into(),
             github_repo: "acme/app".into(),
             number: 42,
-            title: "Fix bug".into(),
-            body: "Fixes #1".into(),
             head_ref: "fix-branch".into(),
             is_dependabot: false,
         });

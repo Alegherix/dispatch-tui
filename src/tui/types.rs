@@ -76,8 +76,6 @@ pub struct ReviewAgentRequest {
     pub repo: String,
     pub github_repo: String,
     pub number: i64,
-    pub title: String,
-    pub body: String,
     pub head_ref: String,
     pub is_dependabot: bool,
 }

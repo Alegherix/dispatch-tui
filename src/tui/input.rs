@@ -1009,8 +1009,6 @@ impl App {
                         repo: pr.repo.clone(),
                         github_repo: pr.repo.clone(),
                         number: pr.number,
-                        title: pr.title.clone(),
-                        body: pr.body.clone(),
                         head_ref: pr.head_ref.clone(),
                         is_dependabot,
                     }))

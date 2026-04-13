@@ -12616,8 +12616,6 @@ fn make_review_agent_req(repo: &str, number: i64) -> ReviewAgentRequest {
     ReviewAgentRequest {
         github_repo: repo.to_string(),
         number,
-        title: format!("PR {number}"),
-        body: String::new(),
         head_ref: "main".to_string(),
         repo: "/home/user/Code/repo".to_string(),
         is_dependabot: false,
@@ -13482,8 +13480,6 @@ fn handle_key_text_input_dispatch_repo_path_enter_selects_cursor() {
         repo: "acme/app".to_string(),
         github_repo: "acme/app".to_string(),
         number: 1,
-        title: "PR 1".to_string(),
-        body: String::new(),
         head_ref: String::new(),
         is_dependabot: false,
     }));

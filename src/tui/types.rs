@@ -31,7 +31,10 @@ pub enum ReviewBoardMode {
 
 impl ReviewBoardMode {
     pub fn column_count(&self) -> usize {
-        4
+        match self {
+            Self::Reviewer | Self::Author => 4,
+            Self::Dependabot => 3,
+        }
     }
 
     pub fn column_label(&self, col: usize) -> &'static str {
@@ -44,10 +47,9 @@ impl ReviewBoardMode {
                 _ => "",
             },
             Self::Dependabot => match col {
-                0 => "CI Passing",
-                1 => "CI Failing",
-                2 => "CI Pending",
-                3 => "Approved",
+                0 => "Backlog",
+                1 => "In Review",
+                2 => "Approved",
                 _ => "",
             },
         }
@@ -58,11 +60,33 @@ impl ReviewBoardMode {
             Self::Reviewer | Self::Author => pr.review_decision.column_index(),
             Self::Dependabot => {
                 if pr.review_decision == crate::models::ReviewDecision::Approved {
-                    3
+                    2
+                } else if matches!(
+                    pr.agent_status,
+                    Some(
+                        crate::models::ReviewAgentStatus::Reviewing
+                            | crate::models::ReviewAgentStatus::FindingsReady
+                    )
+                ) {
+                    1
                 } else {
-                    pr.ci_status.column_index()
+                    0
                 }
             }
+        }
+    }
+
+    /// Sort key for the in_review column. Lower = floats to top.
+    /// Only meaningful for Dependabot mode; returns 0 for other modes
+    /// (leaving repo-alphabetical order unchanged).
+    pub fn dependabot_sort_key(&self, pr: &crate::models::ReviewPr) -> usize {
+        match self {
+            Self::Dependabot => match pr.agent_status {
+                Some(crate::models::ReviewAgentStatus::FindingsReady) => 0,
+                Some(crate::models::ReviewAgentStatus::Reviewing) => 1,
+                _ => 2,
+            },
+            _ => 0,
         }
     }
 }

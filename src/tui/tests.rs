@@ -6587,6 +6587,23 @@ fn make_review_pr_for_repo(
     }
 }
 
+fn make_bot_pr(
+    number: i64,
+    decision: crate::models::ReviewDecision,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+    ci: crate::models::CiStatus,
+) -> crate::models::ReviewPr {
+    let mut pr = make_review_pr_for_repo(
+        number,
+        "app/dependabot",
+        decision,
+        "acme/app",
+    );
+    pr.agent_status = agent_status;
+    pr.ci_status = ci;
+    pr
+}
+
 fn make_security_alert(
     number: i64,
     repo: &str,
@@ -9325,6 +9342,101 @@ fn shift_tab_toggles_review_board_mode() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Dependabot column placement
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dependabot_col_approved_wins_over_agent_status() {
+    let mode = ReviewBoardMode::Dependabot;
+    let pr = make_bot_pr(
+        1,
+        crate::models::ReviewDecision::Approved,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        crate::models::CiStatus::None,
+    );
+    assert_eq!(mode.pr_column(&pr), 2, "Approved should be column 2");
+}
+
+#[test]
+fn dependabot_col_in_review_when_reviewing() {
+    let mode = ReviewBoardMode::Dependabot;
+    let pr = make_bot_pr(
+        1,
+        crate::models::ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        crate::models::CiStatus::None,
+    );
+    assert_eq!(mode.pr_column(&pr), 1, "Reviewing agent should be column 1");
+}
+
+#[test]
+fn dependabot_col_in_review_when_findings_ready() {
+    let mode = ReviewBoardMode::Dependabot;
+    let pr = make_bot_pr(
+        1,
+        crate::models::ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::FindingsReady),
+        crate::models::CiStatus::Success,
+    );
+    assert_eq!(mode.pr_column(&pr), 1, "FindingsReady should be column 1");
+}
+
+#[test]
+fn dependabot_col_backlog_when_no_agent() {
+    let mode = ReviewBoardMode::Dependabot;
+    let pr = make_bot_pr(
+        1,
+        crate::models::ReviewDecision::ReviewRequired,
+        None,
+        crate::models::CiStatus::Success,
+    );
+    assert_eq!(mode.pr_column(&pr), 0, "No agent should be column 0 (Backlog)");
+}
+
+#[test]
+fn dependabot_col_backlog_when_agent_idle() {
+    let mode = ReviewBoardMode::Dependabot;
+    let pr = make_bot_pr(
+        1,
+        crate::models::ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::Idle),
+        crate::models::CiStatus::None,
+    );
+    assert_eq!(mode.pr_column(&pr), 0, "Idle agent should be column 0 (Backlog)");
+}
+
+#[test]
+fn dependabot_sort_key_findings_ready_before_reviewing() {
+    let mode = ReviewBoardMode::Dependabot;
+    let findings = make_bot_pr(
+        1,
+        crate::models::ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::FindingsReady),
+        crate::models::CiStatus::None,
+    );
+    let reviewing = make_bot_pr(
+        2,
+        crate::models::ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        crate::models::CiStatus::None,
+    );
+    assert!(
+        mode.dependabot_sort_key(&findings) < mode.dependabot_sort_key(&reviewing),
+        "FindingsReady should sort before Reviewing"
+    );
+    // Non-Dependabot modes return 0 for all PRs (no reordering)
+    assert_eq!(ReviewBoardMode::Reviewer.dependabot_sort_key(&findings), 0);
+    assert_eq!(ReviewBoardMode::Reviewer.dependabot_sort_key(&reviewing), 0);
+}
+
+#[test]
+fn dependabot_column_count_is_3() {
+    assert_eq!(ReviewBoardMode::Dependabot.column_count(), 3);
+    assert_eq!(ReviewBoardMode::Reviewer.column_count(), 4);
+    assert_eq!(ReviewBoardMode::Author.column_count(), 4);
+}
+
 #[test]
 fn toggle_to_author_fetches_my_prs() {
     let mut app = make_app();
@@ -10798,7 +10910,7 @@ fn render_review_board_dependabot_shows_bot_prs() {
 }
 
 #[test]
-fn render_review_board_dependabot_shows_ci_columns() {
+fn render_review_board_dependabot_shows_lifecycle_columns() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
@@ -10813,12 +10925,12 @@ fn render_review_board_dependabot_shows_ci_columns() {
     app.update(Message::ToggleReviewBoardMode); // Reviewer → Author
     app.update(Message::ToggleReviewBoardMode); // Author → Dependabot
     let buf = render_to_buffer(&mut app, 120, 30);
-    let has_ci_column = buffer_contains(&buf, "CI Passing")
-        || buffer_contains(&buf, "CI Pending")
-        || buffer_contains(&buf, "CI Failing");
+    let has_lifecycle_column = buffer_contains(&buf, "Backlog")
+        || buffer_contains(&buf, "In Review")
+        || buffer_contains(&buf, "Approved");
     assert!(
-        has_ci_column,
-        "dependabot mode should show CI-based column headers (CI Passing, CI Pending, or CI Failing)"
+        has_lifecycle_column,
+        "dependabot mode should show lifecycle column headers (Backlog, In Review, or Approved)"
     );
 }
 
@@ -11971,9 +12083,9 @@ fn dependabot_m_starts_batch_merge() {
     let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
     pr.ci_status = CiStatus::Success;
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Select the PR — it's in Approved column (3)
+    // Select the PR — it's in Approved column (2)
     if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(3);
+        sel.set_column(2);
     }
     app.handle_key(make_key(KeyCode::Char(' '))); // select
     assert!(app.has_bot_pr_selection());
@@ -12061,7 +12173,7 @@ fn confirm_batch_merge_y_confirms() {
     pr.ci_status = CiStatus::Success;
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
     if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(3); // Approved column
+        sel.set_column(2); // Approved column
     }
     app.handle_key(make_key(KeyCode::Char(' '))); // select
     app.handle_key(make_key(KeyCode::Char('m'))); // start batch merge
@@ -14013,9 +14125,9 @@ fn review_board_m_starts_batch_merge_in_dependabot() {
     let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::Approved);
     pr.ci_status = crate::models::CiStatus::Success;
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Select the PR (navigate to Approved column = 3)
+    // Select the PR (navigate to Approved column = 2)
     if let Some(sel) = app.review_selection_mut() {
-        sel.selected_column = 3;
+        sel.selected_column = 2;
     }
     if let Some(pr) = app.selected_review_pr() {
         let url = pr.url.clone();

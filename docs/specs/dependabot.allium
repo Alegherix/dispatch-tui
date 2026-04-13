@@ -1,0 +1,67 @@
+-- allium: 3
+-- dependabot.allium
+--
+-- Scope: Dependabot PR board lifecycle
+-- Includes: Column placement, in-review sort priority, CI badge
+-- Excludes: PR fetching, agent dispatch mechanics, merge flow (see tasks.allium)
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum DependabotColumn { backlog | in_review | approved }
+
+-- Agent status variants are defined in core.allium (ReviewAgentStatus)
+
+------------------------------------------------------------
+-- Column Placement
+------------------------------------------------------------
+
+-- A DependabotPr is placed in a column according to these rules, evaluated
+-- in priority order:
+--
+--   1. review_decision == approved        → approved
+--   2. agent_status in {reviewing,
+--      findings_ready}                    → in_review
+--   3. otherwise                          → backlog
+--
+-- Approved always wins, even if an agent is still running.
+
+rule DependabotColumnPlacement(pr: ReviewPr) -> DependabotColumn {
+    when pr.review_decision == approved    => approved
+    when pr.agent_status in
+         {reviewing, findings_ready}       => in_review
+    otherwise                              => backlog
+}
+
+------------------------------------------------------------
+-- Sort Priority within In Review
+------------------------------------------------------------
+
+-- Within the in_review column, FindingsReady items float to the top
+-- because they need user action (approve). Reviewing items sit below.
+
+rule InReviewSortPriority(pr: ReviewPr) -> Nat {
+    when pr.agent_status == findings_ready => 0
+    when pr.agent_status == reviewing      => 1
+    otherwise                              => 2
+}
+
+------------------------------------------------------------
+-- CI Badge (visual)
+------------------------------------------------------------
+
+-- CI status is displayed as a colored dot on each card.
+-- It does NOT influence column placement.
+--
+-- success  → green  "●"
+-- failure  → red    "●"
+-- pending  → yellow "●"
+-- none     → gray   "●"
+
+visual CiBadge(status: CiStatus) -> (Color, String) {
+    success => (green,  "●")
+    failure => (red,    "●")
+    pending => (yellow, "●")
+    none    => (gray,   "●")
+}

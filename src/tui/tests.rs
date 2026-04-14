@@ -15437,3 +15437,33 @@ fn reviewer_mode_column_sort_unaffected_by_dependabot_sort_key() {
     );
     assert_eq!(prs[1].repo, "org/zebra");
 }
+
+#[test]
+fn epic_view_header_shows_auto_dispatch_indicator() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(1);
+    epic.auto_dispatch = true;
+    app.board.epics = vec![epic];
+    app.update(Message::EnterEpic(EpicId(1)));
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "auto dispatch [U]"),
+        "Expected 'auto dispatch [U]' in header"
+    );
+}
+
+#[test]
+fn epic_view_header_shows_manual_dispatch_indicator() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut epic = make_epic(1);
+    epic.auto_dispatch = false;
+    app.board.epics = vec![epic];
+    app.update(Message::EnterEpic(EpicId(1)));
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "manual dispatch [U]"),
+        "Expected 'manual dispatch [U]' in header"
+    );
+}

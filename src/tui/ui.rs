@@ -329,6 +329,23 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     // Right-aligned indicators (filter, notifications)
     let mut right_parts: Vec<Span> = Vec::new();
+    // Auto dispatch indicator — only in epic view
+    if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
+        if let Some(epic) = app.epics().iter().find(|e| e.id == *epic_id) {
+            let (label, style) = if epic.auto_dispatch {
+                (
+                    "auto dispatch [U]  ",
+                    Style::default().fg(Color::Green),
+                )
+            } else {
+                (
+                    "manual dispatch [U]  ",
+                    Style::default().fg(MUTED),
+                )
+            };
+            right_parts.push(Span::styled(label, style));
+        }
+    }
     if !app.repo_filter().is_empty() {
         let active = app.repo_filter().len();
         let total = app.board.repo_paths.len();
@@ -2545,6 +2562,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("Enter", "detail");
     push_hint("e", "edit");
     push_hint("W", "wrap up");
+    push_hint("U", "auto dispatch");
     push_hint("m", "status \u{2192}");
     push_hint("M", "status \u{2190}");
     push_hint("x", "archive");

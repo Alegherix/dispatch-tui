@@ -2005,6 +2005,14 @@ mod tests {
     }
 
     #[test]
+    fn github_repo_from_url_with_trailing_slash() {
+        assert_eq!(
+            github_repo_from_pr_url("https://github.com/org/repo/pull/42/"),
+            Some("org/repo".to_string())
+        );
+    }
+
+    #[test]
     fn review_decision_db_roundtrip() {
         for decision in ReviewDecision::ALL {
             let s = decision.as_db_str();

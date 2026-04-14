@@ -1204,6 +1204,18 @@ pub fn pr_number_from_url(url: &str) -> Option<i64> {
         .and_then(|s| s.parse::<i64>().ok())
 }
 
+/// Extract the GitHub repo slug (e.g. "org/repo") from a PR URL.
+/// Handles query parameters and fragment identifiers.
+/// Returns None for non-GitHub URLs or malformed input.
+pub fn github_repo_from_pr_url(url: &str) -> Option<String> {
+    url.split(['?', '#'])
+        .next()
+        .and_then(|u| u.strip_prefix("https://github.com/"))
+        .and_then(|rest| rest.split("/pull/").next())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1951,6 +1963,45 @@ mod tests {
             pr_number_from_url("https://github.com/org/repo/pull/42#issuecomment-123"),
             Some(42)
         );
+    }
+
+    // --- github_repo_from_pr_url ---
+
+    #[test]
+    fn github_repo_from_standard_url() {
+        assert_eq!(
+            github_repo_from_pr_url("https://github.com/org/repo/pull/42"),
+            Some("org/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn github_repo_from_url_with_query_params() {
+        assert_eq!(
+            github_repo_from_pr_url("https://github.com/org/repo/pull/42?diff=split"),
+            Some("org/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn github_repo_from_url_with_fragment() {
+        assert_eq!(
+            github_repo_from_pr_url("https://github.com/org/repo/pull/42#issuecomment-123"),
+            Some("org/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn github_repo_from_non_github_url() {
+        assert_eq!(
+            github_repo_from_pr_url("https://gitlab.com/org/repo/pull/42"),
+            None
+        );
+    }
+
+    #[test]
+    fn github_repo_from_empty_url() {
+        assert_eq!(github_repo_from_pr_url(""), None);
     }
 
     #[test]

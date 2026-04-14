@@ -2314,22 +2314,16 @@ impl App {
 
     fn handle_submit_repo_path(&mut self, value: String) -> Vec<Command> {
         self.input.buffer.clear();
-        let repo_path = if value.is_empty() {
-            if let Some(first) = self.board.repo_paths.first() {
-                first.clone()
-            } else {
-                self.set_status("Repo path required (no saved paths available)".to_string());
-                return vec![];
-            }
-        } else {
-            value
-        };
-        if let Err(msg) = crate::dispatch::validate_repo_path(&repo_path) {
+        if value.is_empty() {
+            self.set_status("Repo path required (no saved paths available)".to_string());
+            return vec![];
+        }
+        if let Err(msg) = crate::dispatch::validate_repo_path(&value) {
             self.set_status(msg);
             return vec![];
         }
         if let Some(ref mut draft) = self.input.task_draft {
-            draft.repo_path = repo_path;
+            draft.repo_path = value;
         }
         self.input.buffer = self
             .input
@@ -2376,27 +2370,45 @@ impl App {
     }
 
     fn handle_input_char(&mut self, c: char) -> Vec<Command> {
-        // In repo path mode with empty buffer, 1-9 selects a saved path
-        if (self.input.mode == InputMode::InputRepoPath
-            || self.input.mode == InputMode::InputEpicRepoPath)
-            && self.input.buffer.is_empty()
-            && c.is_ascii_digit()
-            && c != '0'
-        {
+        let is_repo_mode = matches!(
+            self.input.mode,
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
+        );
+        if is_repo_mode && c.is_ascii_digit() && c != '0' {
             let idx = (c as usize) - ('1' as usize);
-            if idx < self.board.repo_paths.len() {
-                let repo_path = self.board.repo_paths[idx].clone();
+            let filtered = filtered_repos(&self.board.repo_paths, &self.input.buffer);
+            if idx < filtered.len() {
+                let repo_path = filtered[idx].clone();
+                self.input.buffer.clear();
                 if self.input.mode == InputMode::InputEpicRepoPath {
                     return self.finish_epic_creation(repo_path);
                 }
                 return self.update(Message::SubmitRepoPath(repo_path));
             }
         }
+        // Per spec: cursor resets to 0 whenever the query changes
+        if matches!(
+            self.input.mode,
+            InputMode::InputRepoPath
+                | InputMode::InputEpicRepoPath
+                | InputMode::InputDispatchRepoPath
+        ) {
+            self.input.repo_cursor = 0;
+        }
         self.input.buffer.push(c);
         vec![]
     }
 
     fn handle_input_backspace(&mut self) -> Vec<Command> {
+        // Per spec: cursor resets to 0 whenever the query changes
+        if matches!(
+            self.input.mode,
+            InputMode::InputRepoPath
+                | InputMode::InputEpicRepoPath
+                | InputMode::InputDispatchRepoPath
+        ) {
+            self.input.repo_cursor = 0;
+        }
         self.input.buffer.pop();
         vec![]
     }
@@ -3844,21 +3856,15 @@ impl App {
 
     fn handle_submit_epic_repo_path(&mut self, value: String) -> Vec<Command> {
         self.input.buffer.clear();
-        let repo_path = if value.is_empty() {
-            if let Some(first) = self.board.repo_paths.first() {
-                first.clone()
-            } else {
-                self.set_status("Repo path required".to_string());
-                return vec![];
-            }
-        } else {
-            value
-        };
-        if let Err(msg) = crate::dispatch::validate_repo_path(&repo_path) {
+        if value.is_empty() {
+            self.set_status("Repo path required".to_string());
+            return vec![];
+        }
+        if let Err(msg) = crate::dispatch::validate_repo_path(&value) {
             self.set_status(msg);
             return vec![];
         }
-        self.finish_epic_creation(repo_path)
+        self.finish_epic_creation(value)
     }
 
     fn handle_start_repo_filter(&mut self) -> Vec<Command> {
@@ -3868,7 +3874,16 @@ impl App {
     }
 
     fn handle_move_repo_cursor(&mut self, delta: isize) -> Vec<Command> {
-        let count = self.board.repo_paths.len();
+        let count = if matches!(
+            self.input.mode,
+            InputMode::InputRepoPath
+                | InputMode::InputEpicRepoPath
+                | InputMode::InputDispatchRepoPath
+        ) {
+            filtered_repos(&self.board.repo_paths, &self.input.buffer).len()
+        } else {
+            self.board.repo_paths.len()
+        };
         if count == 0 {
             return vec![];
         }

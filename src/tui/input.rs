@@ -443,14 +443,14 @@ impl App {
     }
 
     fn handle_key_text_input(&mut self, key: KeyEvent) -> Vec<Command> {
-        // In repo path modes, j/k navigate saved repo paths when the buffer is empty
+        // In repo path modes, j/k navigate the filtered repo list
         let is_repo_mode = matches!(
             self.input.mode,
             InputMode::InputRepoPath
                 | InputMode::InputEpicRepoPath
                 | InputMode::InputDispatchRepoPath
         );
-        if is_repo_mode && self.input.buffer.is_empty() {
+        if is_repo_mode {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     return self.update(Message::MoveRepoCursor(1))
@@ -464,21 +464,24 @@ impl App {
         match key.code {
             KeyCode::Esc => self.update(Message::CancelInput),
             KeyCode::Enter => {
-                // In repo path modes with empty buffer, Enter selects the cursor repo
-                if is_repo_mode && self.input.buffer.is_empty() {
-                    let idx = self.input.repo_cursor;
-                    if let Some(path) = self.board.repo_paths.get(idx) {
+                // In repo path modes, Enter selects from the filtered list if there are matches,
+                // otherwise falls through to submit the literal buffer value as a new path.
+                if is_repo_mode {
+                    let filtered =
+                        super::filtered_repos(&self.board.repo_paths, &self.input.buffer);
+                    if !filtered.is_empty() {
+                        let idx = self.input.repo_cursor.min(filtered.len() - 1);
+                        let path = filtered[idx].clone();
                         let msg = match self.input.mode {
-                            InputMode::InputEpicRepoPath => {
-                                Message::SubmitEpicRepoPath(path.clone())
-                            }
+                            InputMode::InputEpicRepoPath => Message::SubmitEpicRepoPath(path),
                             InputMode::InputDispatchRepoPath => {
-                                Message::SubmitDispatchRepoPath(path.clone())
+                                Message::SubmitDispatchRepoPath(path)
                             }
-                            _ => Message::SubmitRepoPath(path.clone()),
+                            _ => Message::SubmitRepoPath(path),
                         };
                         return self.update(msg);
                     }
+                    // No filtered matches — fall through to submit literal buffer value
                 }
                 let value = self.input.buffer.trim().to_string();
                 match self.input.mode.clone() {

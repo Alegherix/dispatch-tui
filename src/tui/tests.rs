@@ -13746,14 +13746,19 @@ fn handle_key_text_input_repo_k_navigates_when_buffer_empty() {
 }
 
 #[test]
-fn handle_key_text_input_repo_j_types_when_buffer_non_empty() {
+fn handle_key_text_input_repo_j_navigates_when_buffer_non_empty() {
+    // j/k now always navigate the filtered list in repo modes, even with non-empty buffer
     let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string()];
+    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::InputRepoPath;
     app.input.buffer = "x".to_string();
+    app.input.repo_cursor = 0;
 
     app.handle_key(make_key(KeyCode::Char('j')));
-    assert_eq!(app.input.buffer, "xj");
+    // buffer unchanged — j navigates, does not type
+    assert_eq!(app.input.buffer, "x");
+    // filtered list for "x" against ["/repo", "/other"] is empty, so cursor stays 0
+    assert_eq!(app.input.repo_cursor, 0);
 }
 
 #[test]
@@ -15753,4 +15758,93 @@ fn repo_cursor_resets_on_copy_task() {
         app.input.repo_cursor, 0,
         "cursor should reset to top on copy"
     );
+}
+
+// =====================================================================
+// Fuzzy filter wiring into input handlers (Task 3)
+// =====================================================================
+
+#[test]
+fn move_repo_cursor_wraps_within_filtered_list() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string(), "/home".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    // Type "tmp" to filter — only /tmp matches (1 item)
+    for c in "tmp".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    assert_eq!(app.input.repo_cursor, 0);
+    // j wraps in a list of 1 — cursor stays at 0
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn number_key_selects_from_filtered_list() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    // Use two real existing dirs that both fuzzy-match "tmp" (both contain t, m, p)
+    // /tmp exists; /var/tmp also exists and contains t, m, p
+    app.board.repo_paths = vec![
+        "/tmp".to_string(),
+        "/var".to_string(),
+        "/var/tmp".to_string(),
+    ];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    // Type "tmp" — filtered = ["/tmp", "/var/tmp"]
+    for c in "tmp".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    // Press '2' — selects /var/tmp (2nd in filtered)
+    app.handle_key(make_key(KeyCode::Char('2')));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    let cmds = app.update(Message::SubmitBaseBranch("main".to_string()));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::InsertTask { ref draft, .. } if draft.repo_path == "/var/tmp"
+    )));
+}
+
+#[test]
+fn enter_with_typed_filter_selects_filtered_item() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    // Type "var" — only /var matches, cursor = 0
+    for c in "var".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    // Enter selects /var
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(app.input.task_draft.as_ref().unwrap().repo_path, "/var");
+}
+
+#[test]
+fn typing_resets_repo_cursor_to_zero() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    // Navigate to position 2
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert_eq!(app.input.repo_cursor, 2);
+    // Type a character — cursor should reset
+    app.handle_key(make_key(KeyCode::Char('/')));
+    assert_eq!(app.input.repo_cursor, 0);
 }

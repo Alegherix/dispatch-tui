@@ -233,7 +233,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 }
 
 #[test]
@@ -505,7 +505,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 }
 
 #[test]
@@ -1609,7 +1609,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -1710,7 +1710,7 @@ fn schema_version_is_21() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 }
 
 #[test]
@@ -1836,7 +1836,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -3857,7 +3857,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
 }
 
 #[test]
@@ -3891,6 +3891,17 @@ fn migrate_v32_adds_base_branch_column() {
                  (status = 'archived' AND sub_status = 'none')
              )
          );
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             plan_path   TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
          CREATE TABLE repo_paths (
              id        INTEGER PRIMARY KEY,
              path      TEXT NOT NULL UNIQUE,
@@ -3922,5 +3933,34 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 33);
+}
+
+#[test]
+fn migration_v33_adds_auto_dispatch_to_epics() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         PRAGMA user_version=32;
+         CREATE TABLE epics (
+             id          INTEGER PRIMARY KEY,
+             title       TEXT NOT NULL,
+             description TEXT NOT NULL,
+             repo_path   TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'backlog',
+             plan_path   TEXT,
+             sort_order  INTEGER,
+             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO epics (title, description, repo_path) VALUES ('Test', 'desc', '/r');",
+    )
+    .unwrap();
+
+    migrations::migrate_v33_add_auto_dispatch(&conn).unwrap();
+
+    let auto_dispatch: i64 = conn
+        .query_row("SELECT auto_dispatch FROM epics WHERE title = 'Test'", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(auto_dispatch, 1);
 }

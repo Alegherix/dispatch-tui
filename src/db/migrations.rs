@@ -36,6 +36,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (30, migrate_v30_allow_conflict_for_review),
     (31, migrate_v31_re_expand_tilde_paths),
     (32, migrate_v32_add_base_branch),
+    (33, migrate_v33_add_auto_dispatch),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -723,4 +724,11 @@ fn migrate_v29_json_filter_presets(conn: &Connection) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub(super) fn migrate_v33_add_auto_dispatch(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE epics ADD COLUMN auto_dispatch BOOLEAN NOT NULL DEFAULT 1;",
+    )
+    .context("Failed to add auto_dispatch column to epics")
 }

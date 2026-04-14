@@ -615,6 +615,24 @@ pub(super) async fn handle_dispatch_next(
     };
     tracing::info!(epic_id = parsed.epic_id, "MCP dispatch_next");
 
+    // Check auto_dispatch flag before doing any work
+    match state.db.get_epic(crate::models::EpicId(parsed.epic_id)) {
+        Ok(Some(epic)) if !epic.auto_dispatch => {
+            return JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format!(
+                    "auto dispatch is disabled for epic #{} — dispatch the next task manually",
+                    parsed.epic_id
+                )}]}),
+            );
+        }
+        Ok(_) => {} // auto_dispatch is true, or epic not found — proceed normally
+        Err(e) => {
+            tracing::warn!("dispatch_next: failed to fetch epic #{}: {e}", parsed.epic_id);
+            // Don't block dispatch on a DB error reading the flag
+        }
+    }
+
     let svc = TaskService::new(state.db.clone());
     let next_task = match svc.next_backlog_task(parsed.epic_id) {
         Ok(Some(task)) => task,

@@ -4405,3 +4405,43 @@ async fn update_task_with_base_branch_updates_it() {
     let task = state.db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task.base_branch, "release/2.0");
 }
+
+#[tokio::test]
+async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
+    let state = test_state();
+
+    // Create epic with auto_dispatch = false
+    let epic = state.db.create_epic("E", "desc", "/repo").unwrap();
+    state
+        .db
+        .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
+        .unwrap();
+
+    // Create a backlog subtask linked to the epic
+    let task_id = state
+        .db
+        .create_task("Sub", "desc", "/repo", None, TaskStatus::Backlog, "main")
+        .unwrap();
+    state.db.set_task_epic_id(task_id, Some(epic.id)).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_next",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+
+    // Should return informational message, not dispatch
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("auto dispatch is disabled"),
+        "Expected disabled message, got: {text}"
+    );
+
+    // Task must still be in backlog — not dispatched
+    let task_after = state.db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task_after.status, TaskStatus::Backlog);
+}

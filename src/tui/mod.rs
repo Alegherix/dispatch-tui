@@ -3455,7 +3455,11 @@ impl App {
             .into_iter()
             .filter(|pr| mode.pr_column(pr) == col)
             .collect();
-        prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+        prs.sort_by(|a, b| {
+            mode.dependabot_sort_key(a)
+                .cmp(&mode.dependabot_sort_key(b))
+                .then(a.repo.cmp(&b.repo))
+        });
         prs
     }
 

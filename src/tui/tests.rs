@@ -15302,3 +15302,57 @@ fn dependabot_right_arrow_clamps_at_column_2() {
     let col = app.review_selection().unwrap().column();
     assert_eq!(col, 2, "Right arrow should clamp at column 2 in Dependabot mode");
 }
+
+#[test]
+fn dependabot_in_review_column_sorts_findings_ready_first() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+    // Switch to Dependabot mode
+    app.update(Message::ToggleReviewBoardMode);
+    app.update(Message::ToggleReviewBoardMode);
+
+    let reviewing_pr = make_bot_pr(
+        10,
+        crate::models::ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        crate::models::CiStatus::None,
+    );
+    let findings_pr = make_bot_pr(
+        20,
+        crate::models::ReviewDecision::ReviewRequired,
+        Some(crate::models::ReviewAgentStatus::FindingsReady),
+        crate::models::CiStatus::Success,
+    );
+    // Load in order: Reviewing first, FindingsReady second
+    app.update(Message::PrsLoaded(
+        PrListKind::Bot,
+        vec![reviewing_pr, findings_pr],
+    ));
+
+    // Column 1 = In Review
+    let prs = app.active_prs_for_column(1);
+    assert_eq!(prs.len(), 2);
+    assert_eq!(prs[0].number, 20, "FindingsReady (#20) should be first");
+    assert_eq!(prs[1].number, 10, "Reviewing (#10) should be second");
+}
+
+#[test]
+fn reviewer_mode_column_sort_unaffected_by_dependabot_sort_key() {
+    // Confirms that dependabot_sort_key returning 0 for all Reviewer PRs
+    // leaves the existing repo-alphabetical sort intact.
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard); // starts in Reviewer mode
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr_for_repo(1, "alice", crate::models::ReviewDecision::ReviewRequired, "org/zebra"),
+            make_review_pr_for_repo(2, "bob", crate::models::ReviewDecision::ReviewRequired, "org/alpha"),
+        ],
+    ));
+
+    let col = crate::models::ReviewDecision::ReviewRequired.column_index();
+    let prs = app.active_prs_for_column(col);
+    assert_eq!(prs.len(), 2);
+    assert_eq!(prs[0].repo, "org/alpha", "alphabetical sort should still apply");
+    assert_eq!(prs[1].repo, "org/zebra");
+}

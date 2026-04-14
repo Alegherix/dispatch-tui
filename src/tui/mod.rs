@@ -2372,7 +2372,9 @@ impl App {
     fn handle_input_char(&mut self, c: char) -> Vec<Command> {
         let is_repo_mode = matches!(
             self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
+            InputMode::InputRepoPath
+                | InputMode::InputEpicRepoPath
+                | InputMode::InputDispatchRepoPath
         );
         if is_repo_mode && c.is_ascii_digit() && c != '0' {
             let idx = (c as usize) - ('1' as usize);
@@ -2380,10 +2382,13 @@ impl App {
             if idx < filtered.len() {
                 let repo_path = filtered[idx].clone();
                 self.input.buffer.clear();
-                if self.input.mode == InputMode::InputEpicRepoPath {
-                    return self.finish_epic_creation(repo_path);
-                }
-                return self.update(Message::SubmitRepoPath(repo_path));
+                return match self.input.mode {
+                    InputMode::InputEpicRepoPath => self.finish_epic_creation(repo_path),
+                    InputMode::InputDispatchRepoPath => {
+                        self.update(Message::SubmitDispatchRepoPath(repo_path))
+                    }
+                    _ => self.update(Message::SubmitRepoPath(repo_path)),
+                };
             }
         }
         // Per spec: cursor resets to 0 whenever the query changes

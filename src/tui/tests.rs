@@ -13828,6 +13828,32 @@ fn handle_key_text_input_dispatch_repo_path_enter_selects_cursor() {
 }
 
 #[test]
+fn digit_key_selects_in_dispatch_repo_path_mode() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
+    app.input.mode = InputMode::InputDispatchRepoPath;
+    app.input.buffer.clear();
+    app.input.pending_dispatch = Some(PendingDispatch::Review(ReviewAgentRequest {
+        repo: "acme/app".to_string(),
+        github_repo: "acme/app".to_string(),
+        number: 1,
+        head_ref: String::new(),
+        is_dependabot: false,
+    }));
+    // With empty buffer, filtered = ["/tmp", "/var"]; pressing '1' should select /tmp, not append
+    let cmds = app.handle_key(make_key(KeyCode::Char('1')));
+    assert!(
+        !app.input.buffer.contains('1'),
+        "digit should not append to buffer when a filtered match exists"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::DispatchReviewAgent(_))),
+        "digit '1' should dispatch the first matching repo path"
+    );
+}
+
+#[test]
 fn handle_key_epic_repo_path_enter_selects_cursor() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/tmp".to_string()];

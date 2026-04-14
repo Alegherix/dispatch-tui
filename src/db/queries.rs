@@ -487,7 +487,7 @@ impl super::EpicCrud for Database {
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
+            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, created_at, updated_at
              FROM epics WHERE id = ?1",
             params![id.0],
             row_to_epic,
@@ -500,7 +500,7 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, created_at, updated_at
                  FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_epics")?;
@@ -543,6 +543,10 @@ impl super::EpicCrud for Database {
         if let Some(rp) = patch.repo_path {
             sets.push("repo_path = ?");
             values.push(Box::new(rp.to_string()));
+        }
+        if let Some(ad) = patch.auto_dispatch {
+            sets.push("auto_dispatch = ?");
+            values.push(Box::new(ad as i64));
         }
 
         sets.push("updated_at = datetime('now')");
@@ -1147,6 +1151,7 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         status: TaskStatus::parse(&status_str).unwrap_or(TaskStatus::Backlog),
         plan_path: row.get("plan_path")?,
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
+        auto_dispatch: row.get::<_, bool>("auto_dispatch").unwrap_or(true),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })

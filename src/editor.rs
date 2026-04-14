@@ -116,6 +116,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            auto_dispatch: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

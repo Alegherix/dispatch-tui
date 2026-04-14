@@ -133,6 +133,7 @@ pub struct EpicPatch<'a> {
     pub plan_path: Option<Option<&'a str>>,
     pub sort_order: Option<Option<i64>>,
     pub repo_path: Option<&'a str>,
+    pub auto_dispatch: Option<bool>,
 }
 
 impl<'a> EpicPatch<'a> {
@@ -170,6 +171,11 @@ impl<'a> EpicPatch<'a> {
         self
     }
 
+    pub fn auto_dispatch(mut self, auto_dispatch: bool) -> Self {
+        self.auto_dispatch = Some(auto_dispatch);
+        self
+    }
+
     pub fn has_changes(&self) -> bool {
         self.title.is_some()
             || self.description.is_some()
@@ -177,6 +183,7 @@ impl<'a> EpicPatch<'a> {
             || self.plan_path.is_some()
             || self.sort_order.is_some()
             || self.repo_path.is_some()
+            || self.auto_dispatch.is_some()
     }
 }
 

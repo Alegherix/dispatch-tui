@@ -395,6 +395,7 @@ pub struct Epic {
     pub status: TaskStatus,
     pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
+    pub auto_dispatch: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1804,6 +1805,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            auto_dispatch: true,
             created_at: now,
             updated_at: now,
         };
@@ -1822,6 +1824,7 @@ mod tests {
             status,
             plan_path: None,
             sort_order: None,
+            auto_dispatch: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -1971,6 +1974,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            auto_dispatch: true,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

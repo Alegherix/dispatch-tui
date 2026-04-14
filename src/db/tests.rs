@@ -3954,3 +3954,18 @@ fn migration_v33_adds_auto_dispatch_to_epics() {
         .unwrap();
     assert_eq!(auto_dispatch, 1);
 }
+
+#[test]
+fn patch_epic_auto_dispatch_persists() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "desc", "/repo").unwrap();
+    assert!(epic.auto_dispatch); // default true
+
+    db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(false)).unwrap();
+    let updated = db.get_epic(epic.id).unwrap().unwrap();
+    assert!(!updated.auto_dispatch);
+
+    db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(true)).unwrap();
+    let re_enabled = db.get_epic(epic.id).unwrap().unwrap();
+    assert!(re_enabled.auto_dispatch);
+}

@@ -6593,12 +6593,7 @@ fn make_bot_pr(
     agent_status: Option<crate::models::ReviewAgentStatus>,
     ci: crate::models::CiStatus,
 ) -> crate::models::ReviewPr {
-    let mut pr = make_review_pr_for_repo(
-        number,
-        "app/dependabot",
-        decision,
-        "acme/app",
-    );
+    let mut pr = make_review_pr_for_repo(number, "app/dependabot", decision, "acme/app");
     pr.agent_status = agent_status;
     pr.ci_status = ci;
     pr
@@ -9391,7 +9386,11 @@ fn dependabot_col_backlog_when_no_agent() {
         None,
         crate::models::CiStatus::Success,
     );
-    assert_eq!(mode.pr_column(&pr), 0, "No agent should be column 0 (Backlog)");
+    assert_eq!(
+        mode.pr_column(&pr),
+        0,
+        "No agent should be column 0 (Backlog)"
+    );
 }
 
 #[test]
@@ -9403,7 +9402,11 @@ fn dependabot_col_backlog_when_agent_idle() {
         Some(crate::models::ReviewAgentStatus::Idle),
         crate::models::CiStatus::None,
     );
-    assert_eq!(mode.pr_column(&pr), 0, "Idle agent should be column 0 (Backlog)");
+    assert_eq!(
+        mode.pr_column(&pr),
+        0,
+        "Idle agent should be column 0 (Backlog)"
+    );
 }
 
 #[test]
@@ -15300,7 +15303,10 @@ fn dependabot_right_arrow_clamps_at_column_2() {
         app.handle_key(make_key(KeyCode::Right));
     }
     let col = app.review_selection().unwrap().column();
-    assert_eq!(col, 2, "Right arrow should clamp at column 2 in Dependabot mode");
+    assert_eq!(
+        col, 2,
+        "Right arrow should clamp at column 2 in Dependabot mode"
+    );
 }
 
 #[test]
@@ -15343,11 +15349,26 @@ fn dependabot_board_shows_lifecycle_column_labels() {
     app.update(Message::ToggleReviewBoardMode); // → Author
     app.update(Message::ToggleReviewBoardMode); // → Dependabot
     let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(buffer_contains(&buf, "Backlog"), "Backlog column label should be visible");
-    assert!(buffer_contains(&buf, "In Review"), "In Review column label should be visible");
-    assert!(!buffer_contains(&buf, "CI Passing"), "old CI Passing label should not appear");
-    assert!(!buffer_contains(&buf, "CI Failing"), "old CI Failing label should not appear");
-    assert!(!buffer_contains(&buf, "CI Pending"), "old CI Pending label should not appear");
+    assert!(
+        buffer_contains(&buf, "Backlog"),
+        "Backlog column label should be visible"
+    );
+    assert!(
+        buffer_contains(&buf, "In Review"),
+        "In Review column label should be visible"
+    );
+    assert!(
+        !buffer_contains(&buf, "CI Passing"),
+        "old CI Passing label should not appear"
+    );
+    assert!(
+        !buffer_contains(&buf, "CI Failing"),
+        "old CI Failing label should not appear"
+    );
+    assert!(
+        !buffer_contains(&buf, "CI Pending"),
+        "old CI Pending label should not appear"
+    );
 }
 
 #[test]
@@ -15359,14 +15380,27 @@ fn reviewer_mode_column_sort_unaffected_by_dependabot_sort_key() {
     app.update(Message::PrsLoaded(
         PrListKind::Review,
         vec![
-            make_review_pr_for_repo(1, "alice", crate::models::ReviewDecision::ReviewRequired, "org/zebra"),
-            make_review_pr_for_repo(2, "bob", crate::models::ReviewDecision::ReviewRequired, "org/alpha"),
+            make_review_pr_for_repo(
+                1,
+                "alice",
+                crate::models::ReviewDecision::ReviewRequired,
+                "org/zebra",
+            ),
+            make_review_pr_for_repo(
+                2,
+                "bob",
+                crate::models::ReviewDecision::ReviewRequired,
+                "org/alpha",
+            ),
         ],
     ));
 
     let col = crate::models::ReviewDecision::ReviewRequired.column_index();
     let prs = app.active_prs_for_column(col);
     assert_eq!(prs.len(), 2);
-    assert_eq!(prs[0].repo, "org/alpha", "alphabetical sort should still apply");
+    assert_eq!(
+        prs[0].repo, "org/alpha",
+        "alphabetical sort should still apply"
+    );
     assert_eq!(prs[1].repo, "org/zebra");
 }

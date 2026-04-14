@@ -1704,16 +1704,6 @@ fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
 }
 
 #[test]
-fn schema_version_is_21() {
-    let db = Database::open_in_memory().unwrap();
-    let conn = db.conn.lock().unwrap();
-    let version: i64 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .unwrap();
-    assert_eq!(version, 33);
-}
-
-#[test]
 fn check_constraint_rejects_review_with_active_substatus() {
     let db = Database::open_in_memory().unwrap();
     let conn = db.conn.lock().unwrap();
@@ -3929,7 +3919,7 @@ fn migrate_v32_adds_base_branch_column() {
         .unwrap();
     assert_eq!(base_branch, "main");
 
-    // Schema version bumped to 32
+    // init_schema runs all pending migrations (v32 and v33), so final version is 33
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();

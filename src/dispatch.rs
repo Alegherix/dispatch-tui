@@ -552,15 +552,8 @@ fn mcp_tools_instruction() -> &'static str {
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
 fn plan_and_attach_instruction(_task_id: TaskId) -> String {
-    "Your goal is to explore the codebase and write a focused implementation plan. \
-Use /plan mode for a structured planning session. When done, save the plan and attach it to the task:\n\
-\n\
-1. Write the plan to docs/plans/\n\
-2. Call update_task via the dispatch MCP tools to set the plan field to the plan file path\n\
-\n\
-After planning, ask whether to continue implementing or stop.\n\
-\n\
-Use the dispatch MCP tools to attach the plan (update_task — set the plan field)."
+    "Use /brainstorming to design the solution, then save the plan to docs/plans/ \
+and call update_task to attach it."
         .to_string()
 }
 
@@ -687,19 +680,13 @@ fn build_brainstorm_prompt(
 \n\
 {block}\n\
 \n\
-Before diving in, ask the user any clarifying questions needed to ensure you \
-fully understand the requirements and intended behaviour.\n\
-\n\
 {attach}\n\
-\n\
-{tdd}\n\
 \n\
 {allium}\n\
 \n\
 {mcp}",
         block = block,
         attach = plan_and_attach_instruction(task_id),
-        tdd = tdd_instruction(),
         allium = allium_instruction(),
         mcp = mcp_tools_instruction(),
     )
@@ -1325,7 +1312,6 @@ mod tests {
         let instr = plan_and_attach_instruction(TaskId(9));
         assert!(instr.contains("docs/plans/"));
         assert!(instr.contains("update_task"));
-        assert!(instr.contains("plan field") || instr.contains("plan="));
     }
 
     #[test]
@@ -1627,10 +1613,6 @@ mod tests {
         assert!(prompt.contains("7"));
         assert!(prompt.contains("Design auth"));
         assert!(prompt.contains("Rework the auth flow"));
-        assert!(
-            prompt.contains("clarifying questions"),
-            "brainstorm prompt should ask for clarifying questions"
-        );
         assert!(prompt.contains("brainstorm"));
         assert!(prompt.contains("update_task"));
     }
@@ -1652,6 +1634,57 @@ mod tests {
         assert_ne!(plan, brainstorm);
         assert!(plan.contains("planning"));
         assert!(brainstorm.contains("brainstorm"));
+    }
+
+    #[test]
+    fn brainstorm_prompt_omits_tdd() {
+        let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None);
+        assert!(
+            !prompt.contains("TDD"),
+            "brainstorm prompt should not include TDD — no code is written at design stage"
+        );
+    }
+
+    #[test]
+    fn brainstorm_prompt_omits_clarifying_questions_opener() {
+        let prompt = build_brainstorm_prompt(TaskId(7), "Design auth", "Rework auth", None);
+        assert!(
+            !prompt.contains("clarifying questions"),
+            "brainstorm prompt should not have a clarifying-questions opener — /brainstorming skill handles it"
+        );
+    }
+
+    #[test]
+    fn all_planning_prompts_reference_brainstorming_skill() {
+        let brainstorm = build_brainstorm_prompt(TaskId(1), "T", "D", None);
+        let plan = build_plan_prompt(TaskId(1), "T", "D", None);
+        let standard = build_prompt(TaskId(1), "T", "D", None, None);
+        let quick = build_quick_dispatch_prompt(TaskId(1), "T", "D", None);
+
+        for (name, prompt) in [
+            ("brainstorm", brainstorm),
+            ("plan", plan),
+            ("standard-no-plan", standard),
+            ("quick", quick),
+        ] {
+            assert!(
+                prompt.contains("/brainstorming"),
+                "{name} prompt should reference /brainstorming skill"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_and_attach_instruction_is_concise() {
+        let instruction = plan_and_attach_instruction(TaskId(42));
+        assert!(
+            instruction.len() < 200,
+            "plan_and_attach_instruction should be concise (< 200 chars), got {} chars",
+            instruction.len()
+        );
+        assert!(instruction.contains("/brainstorming"));
+        assert!(instruction.contains("update_task"));
+        assert!(instruction.contains("docs/plans/"));
     }
 
     #[test]
@@ -2090,8 +2123,8 @@ mod tests {
             "prompt should mention brainstorming"
         );
         assert!(
-            prompt.contains("implementation plan"),
-            "prompt should mention planning"
+            prompt.contains("/brainstorming"),
+            "prompt should reference /brainstorming skill"
         );
     }
 

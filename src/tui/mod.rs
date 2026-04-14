@@ -2656,6 +2656,7 @@ impl App {
 
     fn handle_pr_merged(&mut self, id: TaskId) -> Vec<Command> {
         let mut cmds = Vec::new();
+        let mut review_pr_ref: Option<(String, i64)> = None;
 
         if let Some(task) = self.find_task_mut(id) {
             if task.status != TaskStatus::Review {
@@ -2668,6 +2669,13 @@ impl App {
                 .and_then(crate::models::pr_number_from_url)
                 .map_or("PR".to_string(), |n| format!("PR #{n}"));
             let title = task.title.clone();
+
+            // Capture (repo, number) for review board cleanup after this borrow ends
+            if let Some(url) = &task.pr_url {
+                let repo = crate::models::github_repo_from_pr_url(url);
+                let number = crate::models::pr_number_from_url(url);
+                review_pr_ref = repo.zip(number);
+            }
 
             // Detach: kill tmux window but preserve worktree
             if let Some(window) = task.tmux_window.take() {
@@ -2692,6 +2700,31 @@ impl App {
                     urgent: false,
                 });
             }
+        }
+
+        // Kill any active review agent window on the Review Board for this PR
+        if let Some((repo, number)) = review_pr_ref {
+            for pr in self
+                .review
+                .review
+                .prs
+                .iter_mut()
+                .chain(self.review.authored.prs.iter_mut())
+                .chain(self.review.bot.prs.iter_mut())
+            {
+                if pr.repo == repo && pr.number == number {
+                    if let Some(window) = pr.tmux_window.take() {
+                        cmds.push(Command::KillTmuxWindow { window });
+                    }
+                    pr.worktree = None;
+                    pr.agent_status = None;
+                }
+            }
+            cmds.push(Command::UpdateAgentStatus {
+                repo,
+                number,
+                status: None,
+            });
         }
 
         cmds.extend(self.maybe_respawn_split_pane(id));

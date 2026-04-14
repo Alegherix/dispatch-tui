@@ -399,6 +399,10 @@ rule PrMerged {
         -- This is an automatic transition triggered by PR status polling.
         -- It bypasses the ConfirmDone human confirmation because the PR
         -- merge itself is the human confirmation (via GitHub review process).
+        -- Side effect: PrMergedCleanupReviewBoard (see review-board.allium)
+        -- fires concurrently to kill any active review agent window on the
+        -- Review Board for the same PR, identified by (repo, number) parsed
+        -- from task.pr_url.
 }
 
 -- == Wrap Up ==

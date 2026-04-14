@@ -870,6 +870,7 @@ impl TuiRuntime {
             plan_path: None,
             sort_order: None,
             repo_path: Some(repo_path.clone()),
+            auto_dispatch: None,
         }) {
             app.update(Message::Error(Self::db_error("updating epic", e)));
         }
@@ -962,6 +963,7 @@ impl TuiRuntime {
             plan_path: None,
             sort_order,
             repo_path: None,
+            auto_dispatch: None,
         }) {
             app.update(Message::Error(Self::db_error("updating epic", e)));
         }

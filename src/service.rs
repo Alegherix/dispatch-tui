@@ -560,6 +560,7 @@ pub struct UpdateEpicParams {
     pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
     pub repo_path: Option<String>,
+    pub auto_dispatch: Option<bool>,
 }
 
 impl UpdateEpicParams {
@@ -570,6 +571,7 @@ impl UpdateEpicParams {
             || self.plan_path.is_some()
             || self.sort_order.is_some()
             || self.repo_path.is_some()
+            || self.auto_dispatch.is_some()
     }
 
     pub fn updated_field_names(&self) -> Vec<&str> {
@@ -702,6 +704,9 @@ impl EpicService {
         }
         if let Some(ref rp) = repo_path {
             patch = patch.repo_path(rp);
+        }
+        if let Some(ad) = params.auto_dispatch {
+            patch = patch.auto_dispatch(ad);
         }
 
         let epic_id = EpicId(params.epic_id);
@@ -1183,6 +1188,7 @@ mod tests {
             plan_path: None,
             sort_order: None,
             repo_path: None,
+            auto_dispatch: None,
         })
         .unwrap();
 
@@ -1213,9 +1219,41 @@ mod tests {
                 plan_path: None,
                 sort_order: None,
                 repo_path: None,
+                auto_dispatch: None,
             })
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
+    }
+
+    #[test]
+    fn update_epic_auto_dispatch_persists() {
+        let db = test_db();
+        let svc = epic_svc(&db);
+
+        let epic = svc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        assert!(db.get_epic(epic.id).unwrap().unwrap().auto_dispatch);
+
+        svc.update_epic(UpdateEpicParams {
+            epic_id: epic.id.0,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: Some(false),
+        })
+        .unwrap();
+
+        assert!(!db.get_epic(epic.id).unwrap().unwrap().auto_dispatch);
     }
 
     #[test]

@@ -194,6 +194,7 @@ pub(super) fn handle_update_epic(
         plan_path: parsed.plan_path,
         sort_order: parsed.sort_order,
         repo_path: parsed.repo_path,
+        auto_dispatch: None,
     };
     let field_names: Vec<String> = params
         .updated_field_names()

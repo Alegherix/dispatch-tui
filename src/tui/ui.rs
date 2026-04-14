@@ -3105,7 +3105,7 @@ fn build_review_pr_item(
         Span::styled(stripe, Style::default().fg(color)),
         Span::styled(header_truncated, line1_style),
         Span::styled(
-            format!(" \u{25cf}"), // ● BLACK CIRCLE
+            " \u{25cf}".to_string(), // ● BLACK CIRCLE
             Style::default().fg(ci_color),
         ),
     ]);

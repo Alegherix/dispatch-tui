@@ -585,22 +585,9 @@ pub(super) async fn handle_wrap_up(
                         let _ = db.recalculate_epic_status(epic_id);
                     }
                     let pr_url = result.pr_url.clone();
-                    let ad_runner = state.runner.clone();
-                    tokio::task::spawn_blocking(move || {
-                        if let Some(window) = &tmux_window {
-                            let review_cmd = format!("/code-review {}", result.pr_url);
-                            if let Err(e) = crate::tmux::send_keys(window, &review_cmd, &*ad_runner)
-                            {
-                                tracing::warn!(
-                                    task_id = task_id.0,
-                                    "Failed to inject review command: {e}"
-                                );
-                            }
-                        }
-                        if let Some(tx) = notify_tx {
-                            let _ = tx.send(crate::mcp::McpEvent::Refresh);
-                        }
-                    });
+                    if let Some(tx) = notify_tx {
+                        let _ = tx.send(crate::mcp::McpEvent::Refresh);
+                    }
                     JsonRpcResponse::ok(
                         id,
                         json!({"content": [{"type": "text", "text": format!("wrap_up complete (task {}, action: pr, pr_url: {})", parsed.task_id, pr_url)}]}),

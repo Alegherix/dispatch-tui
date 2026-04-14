@@ -3376,6 +3376,54 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
 }
 
 #[tokio::test]
+async fn wrap_up_pr_does_not_inject_review_command() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                                                      // git push
+        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),          // git remote get-url
+        MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
+        // No send-keys mock — injection must not occur
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner: mock.clone() as Arc<dyn ProcessRunner>,
+    });
+
+    let task_id = db
+        .create_task("Feature", "desc", "/repo", None, TaskStatus::Running, "main")
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-feature"))
+            .tmux_window(Some("task-1")),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": { "task_id": task_id.0, "action": "pr" }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "expected success: {:?}", resp.error);
+
+    // Give any spawned background tasks time to complete so their calls are recorded.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls.iter().any(|(cmd, args)| cmd == "tmux" && args.iter().any(|a| a == "send-keys")),
+        "wrap_up pr must not inject a review command via send-keys; got calls: {calls:?}"
+    );
+}
+
+#[tokio::test]
 async fn wrap_up_rebase_recalculates_epic_status() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![

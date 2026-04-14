@@ -56,6 +56,20 @@ rule CreateEpic {
     )
 }
 
+rule RecordRepoPathFromEpic {
+    when: core/Epic.created(repo_path: path)
+
+    ensures: core/SavedRepoPath.created_or_updated(
+        path: path,
+        last_used: now
+    )
+
+    @guidance
+        -- Mirrors RecordRepoPath in tasks.allium but fires on epic
+        -- creation. Same upsert semantics: update last_used if the
+        -- path exists, create if not.
+}
+
 rule DispatchEpicPlanning {
     when: DispatchEpic(epic)
 

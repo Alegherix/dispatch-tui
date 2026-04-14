@@ -159,6 +159,11 @@ entity TaskUsage {
         -- time of the most recent report.
 }
 
+entity SavedRepoPath {
+    path: String             -- filesystem path, unique across all saved paths
+    last_used: Timestamp     -- updated on each use; drives recency ordering
+}
+
 -- SplitPane is a runtime-only UI concept (not persisted) that tracks
 -- whether the TUI is displaying a task's tmux window as a side pane.
 -- It is modelled here because task lifecycle events (finish, PR creation)

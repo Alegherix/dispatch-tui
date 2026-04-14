@@ -59,6 +59,22 @@ rule CreateQuickTask {
         -- current epic, linking the quick task as a subtask.
 }
 
+rule RecordRepoPath {
+    when: core/Task.created(repo_path: path)
+
+    ensures: core/SavedRepoPath.created_or_updated(
+        path: path,
+        last_used: now
+    )
+
+    @guidance
+        -- Fires after any task creation (CreateTask, CreateQuickTask).
+        -- If a SavedRepoPath with the same path already exists, only
+        -- last_used is updated. If it does not exist, a new record is
+        -- created. Cap enforcement (maximum stored paths) is an
+        -- implementation detail and not specified here.
+}
+
 -- == Dispatch ==
 
 rule DispatchTask {
@@ -1056,6 +1072,84 @@ rule HookNotification {
         -- The task appears in the Blocked visual column (running, needs_input).
         -- When the agent resumes, HookPreToolUse fires and update_status_if
         -- resets sub_status back to active (default for running).
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface RepoPathPicker {
+    facing user: User
+
+    let saved = core/SavedRepoPaths ordered_by last_used desc
+    let query: String = ""
+    let cursor: Integer = 0
+
+    -- Fuzzy subsequence match: every character of lowercased query
+    -- appears in the lowercased path as a forward subsequence.
+    -- Empty query matches all saved paths.
+    let filtered = saved where fuzzy_subsequence(lowercase(query), lowercase(path))
+
+    exposes:
+        query
+        filtered
+        cursor
+
+    provides:
+        -- Typing appends to query and resets cursor to 0
+        TypeChar(user, char)
+            ensures: query = query + char
+            ensures: cursor = 0
+
+        -- Backspace removes the last character of query
+        Backspace(user)
+            when query != ""
+            ensures: query = remove_last(query)
+            ensures: cursor = 0
+
+        -- j/k move cursor within filtered list (wrapping)
+        CursorDown(user)
+            when filtered.count > 0
+            ensures: cursor = (cursor + 1) mod filtered.count
+
+        CursorUp(user)
+            when filtered.count > 0
+            ensures: cursor = (cursor - 1 + filtered.count) mod filtered.count
+
+        -- Enter: select filtered[cursor] if filtered is non-empty,
+        -- otherwise use literal query as the path
+        Confirm(user)
+            ensures:
+                if filtered.count > 0:
+                    SelectedPath(filtered[cursor].path)
+                else:
+                    SelectedPath(query)
+
+        -- Digit 1-9: select filtered[digit-1] if that index exists,
+        -- otherwise append the digit to query
+        DigitSelect(user, digit: Integer)
+            requires: digit >= 1 and digit <= 9
+            ensures:
+                if digit - 1 < filtered.count:
+                    SelectedPath(filtered[digit - 1].path)
+                else:
+                    TypeChar(user, to_string(digit))
+
+        -- Escape dismisses the picker without selecting
+        Dismiss(user)
+
+    @guarantee CursorResetOnEntry
+        -- cursor is always 0 when the picker is first displayed.
+        -- This ensures the most-recently-used path is pre-selected.
+
+    @guidance
+        -- This surface appears during task creation (InputRepoPath),
+        -- epic creation (InputEpicRepoPath), and dispatch fallback
+        -- (InputDispatchRepoPath). It replaces a plain text input
+        -- with a fuzzy-filtered list of previously-used repo paths.
+        -- The filtered list is ordered by recency (most recent first).
+        -- When the user has not typed anything, all saved paths are
+        -- shown, letting them pick with a single keystroke.
 }
 
 ------------------------------------------------------------

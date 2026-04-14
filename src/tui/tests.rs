@@ -15651,3 +15651,37 @@ fn epic_view_header_shows_manual_dispatch_indicator() {
         "Expected 'manual dispatch [U]' in header"
     );
 }
+
+#[test]
+fn repo_cursor_resets_on_entering_repo_path_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
+    app.input.repo_cursor = 2; // cursor was left at position 2
+    app.input.mode = InputMode::InputDescription;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: String::new(),
+        ..Default::default()
+    });
+    app.input.buffer = "some desc".to_string();
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::InputRepoPath);
+    assert_eq!(app.input.repo_cursor, 0, "cursor should reset to top");
+}
+
+#[test]
+fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
+    app.input.repo_cursor = 1;
+    app.input.mode = InputMode::InputEpicDescription;
+    app.input.epic_draft = Some(crate::tui::types::EpicDraft {
+        title: "E".to_string(),
+        description: String::new(),
+        repo_path: String::new(),
+    });
+    app.input.buffer = "epic desc".to_string();
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
+    assert_eq!(app.input.repo_cursor, 0, "cursor should reset to top");
+}

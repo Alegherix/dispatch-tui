@@ -2277,6 +2277,7 @@ impl App {
         if let Some(ref mut draft) = self.input.task_draft {
             draft.description = value;
         }
+        self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputRepoPath;
         self.set_status("Enter repo path: ".to_string());
         vec![]
@@ -3806,6 +3807,7 @@ impl App {
         if let Some(ref mut draft) = self.input.epic_draft {
             draft.description = value;
         }
+        self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputEpicRepoPath;
         self.set_status("Epic repo path: ".to_string());
         vec![]
@@ -4129,15 +4131,16 @@ impl App {
             .chain(self.review.authored.prs.iter_mut())
             .chain(self.review.bot.prs.iter_mut())
         {
-            if pr.repo == repo && pr.number == number {
-                if pr.tmux_window.is_some() || pr.worktree.is_some() || pr.agent_status.is_some() {
-                    matched = true;
-                    if let Some(window) = pr.tmux_window.take() {
-                        cmds.push(Command::KillTmuxWindow { window });
-                    }
-                    pr.worktree = None;
-                    pr.agent_status = None;
+            if pr.repo == repo
+                && pr.number == number
+                && (pr.tmux_window.is_some() || pr.worktree.is_some() || pr.agent_status.is_some())
+            {
+                matched = true;
+                if let Some(window) = pr.tmux_window.take() {
+                    cmds.push(Command::KillTmuxWindow { window });
                 }
+                pr.worktree = None;
+                pr.agent_status = None;
             }
         }
         if matched {

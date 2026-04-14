@@ -3379,10 +3379,10 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
 async fn wrap_up_pr_does_not_inject_review_command() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
     let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(),                                                      // git push
-        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"),          // git remote get-url
+        MockProcessRunner::ok(), // git push
+        MockProcessRunner::ok_with_stdout(b"git@github.com:org/repo.git\n"), // git remote get-url
         MockProcessRunner::ok_with_stdout(b"https://github.com/org/repo/pull/42\n"), // gh pr create
-        // No send-keys mock — injection must not occur
+                                 // No send-keys mock — injection must not occur
     ]));
     let state = Arc::new(McpState {
         db: db.clone(),
@@ -3391,7 +3391,14 @@ async fn wrap_up_pr_does_not_inject_review_command() {
     });
 
     let task_id = db
-        .create_task("Feature", "desc", "/repo", None, TaskStatus::Running, "main")
+        .create_task(
+            "Feature",
+            "desc",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+        )
         .unwrap();
     db.patch_task(
         task_id,
@@ -3418,7 +3425,9 @@ async fn wrap_up_pr_does_not_inject_review_command() {
 
     let calls = mock.recorded_calls();
     assert!(
-        !calls.iter().any(|(cmd, args)| cmd == "tmux" && args.iter().any(|a| a == "send-keys")),
+        !calls
+            .iter()
+            .any(|(cmd, args)| cmd == "tmux" && args.iter().any(|a| a == "send-keys")),
         "wrap_up pr must not inject a review command via send-keys; got calls: {calls:?}"
     );
 }

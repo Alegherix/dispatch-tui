@@ -628,7 +628,10 @@ pub(super) async fn handle_dispatch_next(
         }
         Ok(_) => {} // auto_dispatch is true, or epic not found — proceed normally
         Err(e) => {
-            tracing::warn!("dispatch_next: failed to fetch epic #{}: {e}", parsed.epic_id);
+            tracing::warn!(
+                "dispatch_next: failed to fetch epic #{}: {e}",
+                parsed.epic_id
+            );
             // Don't block dispatch on a DB error reading the flag
         }
     }

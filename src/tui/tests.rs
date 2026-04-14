@@ -5815,9 +5815,10 @@ fn pr_merged_kills_matching_review_board_window() {
         "should kill review board PR window"
     );
     assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
-                if repo == "org/repo" && *number == 42)),
+        cmds.iter().any(
+            |c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
+                if repo == "org/repo" && *number == 42)
+        ),
         "should clear review agent status"
     );
     // Review PR state should be cleared in-memory
@@ -5833,7 +5834,8 @@ fn pr_merged_no_review_board_match_is_ok() {
     let mut app = App::new(vec![task], TEST_TIMEOUT);
 
     // Load a review PR with a DIFFERENT number — should not be cleaned up
-    let mut other_pr = make_review_pr_for_repo(99, "bob", ReviewDecision::ReviewRequired, "org/repo");
+    let mut other_pr =
+        make_review_pr_for_repo(99, "bob", ReviewDecision::ReviewRequired, "org/repo");
     other_pr.tmux_window = Some("review:pr-99".to_string());
     app.update(Message::PrsLoaded(PrListKind::Review, vec![other_pr]));
 
@@ -5873,11 +5875,15 @@ fn pr_merged_skips_update_agent_status_when_review_pr_has_no_agent_state() {
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
         "should not emit UpdateAgentStatus when review PR has no active agent state"
     );
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { .. })),
         "should not kill any window when review PR has no active agent state"
     );
 }
@@ -12128,9 +12134,10 @@ fn bot_prs_merged_kills_active_review_window() {
         "should kill review board PR window"
     );
     assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
-                if repo == "acme/app" && *number == 42)),
+        cmds.iter().any(
+            |c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
+                if repo == "acme/app" && *number == 42)
+        ),
         "should clear review agent status"
     );
     assert!(app.review.bot.prs[0].tmux_window.is_none());
@@ -12156,11 +12163,15 @@ fn bot_prs_merged_noop_when_no_active_window() {
     ]));
 
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::KillTmuxWindow { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { .. })),
         "no window to kill — should emit no KillTmuxWindow"
     );
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
         "no agent to clear — should emit no UpdateAgentStatus"
     );
 }

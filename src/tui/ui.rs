@@ -333,15 +333,9 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
         if let Some(epic) = app.epics().iter().find(|e| e.id == *epic_id) {
             let (label, style) = if epic.auto_dispatch {
-                (
-                    "auto dispatch [U]  ",
-                    Style::default().fg(Color::Green),
-                )
+                ("auto dispatch [U]  ", Style::default().fg(Color::Green))
             } else {
-                (
-                    "manual dispatch [U]  ",
-                    Style::default().fg(MUTED),
-                )
+                ("manual dispatch [U]  ", Style::default().fg(MUTED))
             };
             right_parts.push(Span::styled(label, style));
         }

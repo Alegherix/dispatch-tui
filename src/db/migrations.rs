@@ -727,8 +727,6 @@ fn migrate_v29_json_filter_presets(conn: &Connection) -> Result<()> {
 }
 
 pub(super) fn migrate_v33_add_auto_dispatch(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "ALTER TABLE epics ADD COLUMN auto_dispatch BOOLEAN NOT NULL DEFAULT 1;",
-    )
-    .context("Failed to add auto_dispatch column to epics")
+    conn.execute_batch("ALTER TABLE epics ADD COLUMN auto_dispatch BOOLEAN NOT NULL DEFAULT 1;")
+        .context("Failed to add auto_dispatch column to epics")
 }

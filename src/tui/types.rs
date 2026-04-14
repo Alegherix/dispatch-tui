@@ -294,6 +294,7 @@ pub enum Message {
     EditEpic(EpicId),
     EpicEdited(Epic),
     DeleteEpic(EpicId),
+    ToggleEpicAutoDispatch(EpicId),
     ConfirmDeleteEpic,
     MoveEpicStatus(EpicId, MoveDirection),
     ArchiveEpic(EpicId),
@@ -554,6 +555,10 @@ pub enum Command {
         id: EpicId,
         status: Option<TaskStatus>,
         sort_order: Option<i64>,
+    },
+    ToggleEpicAutoDispatch {
+        id: EpicId,
+        auto_dispatch: bool,
     },
     RefreshEpicsFromDb,
     SendNotification {

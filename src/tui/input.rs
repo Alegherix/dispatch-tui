@@ -1112,7 +1112,7 @@ impl App {
         }
     }
 
-    fn selected_dependabot_pr(&self) -> Option<&crate::models::ReviewPr> {
+    pub(super) fn selected_dependabot_pr(&self) -> Option<&crate::models::ReviewPr> {
         let dependabot_selection = match &self.board.view_mode {
             ViewMode::SecurityBoard {
                 dependabot_selection,

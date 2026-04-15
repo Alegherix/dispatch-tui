@@ -15456,11 +15456,9 @@ fn make_security_dependabot_app_with_pr() -> (App, String) {
     pr.ci_status = crate::models::CiStatus::Success;
     let url = pr.url.clone();
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Switch to Dependabot sub-mode, then select the PR with Space
     app.update(Message::SwitchSecurityBoardMode(
         SecurityBoardMode::Dependabot,
     ));
-    app.handle_key(make_key(KeyCode::Char(' ')));
     (app, url)
 }
 
@@ -15507,11 +15505,35 @@ fn dependabot_merge_confirm_y_emits_merge_command() {
 }
 
 #[test]
-fn dependabot_approve_with_no_selection_is_noop() {
+fn dependabot_approve_without_spacebar_uses_cursor() {
     let mut app = make_security_board_app();
-    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.ci_status = crate::models::CiStatus::Success;
+    let url = pr.url.clone();
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // Switch to Dependabot mode but do NOT press Space (no selection)
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    // Do NOT press Space — cursor should be enough
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmApproveBotPr(ref u) if u == &url));
+}
+
+#[test]
+fn dependabot_merge_without_spacebar_uses_cursor() {
+    let mut app = make_security_board_app();
+    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr.ci_status = crate::models::CiStatus::Success;
+    let url = pr.url.clone();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    // Do NOT press Space — cursor should be enough
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmMergeBotPr(ref u) if u == &url));
+}
+
+#[test]
+fn dependabot_approve_with_no_pr_at_cursor_is_noop() {
+    let mut app = make_security_board_app();
+    // No PRs loaded — cursor has nothing to point at
     app.update(Message::SwitchSecurityBoardMode(
         SecurityBoardMode::Dependabot,
     ));
@@ -15521,19 +15543,19 @@ fn dependabot_approve_with_no_selection_is_noop() {
 }
 
 #[test]
-fn approve_clears_selection_after_confirm() {
+fn approve_returns_to_normal_mode_after_confirm() {
     let (mut app, _url) = make_security_dependabot_app_with_pr();
     app.handle_key(make_key(KeyCode::Char('a')));
     app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(app.security.dependabot.selected_prs.is_empty());
+    assert!(matches!(app.input.mode, InputMode::Normal));
 }
 
 #[test]
-fn merge_clears_selection_after_confirm() {
+fn merge_returns_to_normal_mode_after_confirm() {
     let (mut app, _url) = make_security_dependabot_app_with_pr();
     app.handle_key(make_key(KeyCode::Char('m')));
     app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(app.security.dependabot.selected_prs.is_empty());
+    assert!(matches!(app.input.mode, InputMode::Normal));
 }
 
 // ---------------------------------------------------------------------------

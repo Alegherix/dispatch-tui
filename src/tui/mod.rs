@@ -3471,40 +3471,26 @@ impl App {
     }
 
     fn handle_start_approve_bot_pr(&mut self) -> Vec<Command> {
-        let url = self.security.dependabot.selected_prs.iter().next().cloned();
-        let Some(url) = url else {
+        let pr = self.selected_dependabot_pr();
+        let Some(pr) = pr else {
             self.set_status("No PR selected".into());
             return vec![];
         };
-        let number_str = self
-            .security
-            .dependabot
-            .prs
-            .prs
-            .iter()
-            .find(|pr| pr.url == url)
-            .map(|pr| format!("#{}", pr.number))
-            .unwrap_or_else(|| "?".into());
+        let url = pr.url.clone();
+        let number_str = format!("#{}", pr.number);
         self.set_status(format!("Approve PR {number_str}? (y/N)"));
         self.input.mode = InputMode::ConfirmApproveBotPr(url);
         vec![]
     }
 
     fn handle_start_merge_bot_pr(&mut self) -> Vec<Command> {
-        let url = self.security.dependabot.selected_prs.iter().next().cloned();
-        let Some(url) = url else {
+        let pr = self.selected_dependabot_pr();
+        let Some(pr) = pr else {
             self.set_status("No PR selected".into());
             return vec![];
         };
-        let number_str = self
-            .security
-            .dependabot
-            .prs
-            .prs
-            .iter()
-            .find(|pr| pr.url == url)
-            .map(|pr| format!("#{}", pr.number))
-            .unwrap_or_else(|| "?".into());
+        let url = pr.url.clone();
+        let number_str = format!("#{}", pr.number);
         self.set_status(format!("Merge PR {number_str}? (y/N)"));
         self.input.mode = InputMode::ConfirmMergeBotPr(url);
         vec![]

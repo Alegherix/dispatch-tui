@@ -2,19 +2,17 @@
 -- dependabot.allium
 --
 -- Scope: Dependabot PR board lifecycle
--- Includes: Column placement, in-review sort priority, CI badge
--- Excludes: PR fetching, agent dispatch mechanics, merge flow (see tasks.allium)
+-- Includes: Column placement, sort priority, approve/merge flow, agent lifecycle,
+--           visual badges, staleness coloring
+-- Excludes: PR fetching (runtime detail), review-board agent dispatch mechanics (see review-board.allium)
+
+use "./review-board.allium" as rb
 
 ------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
 enum DependabotColumn { backlog | in_review | approved }
-
--- Note: ReviewPr, CiStatus, and ReviewAgentStatus are domain types defined in
--- src/models.rs and not yet formalised in a separate allium spec.
-
--- Agent status variants are defined in core.allium (ReviewAgentStatus)
 
 ------------------------------------------------------------
 -- Column Placement
@@ -23,10 +21,10 @@ enum DependabotColumn { backlog | in_review | approved }
 -- A DependabotPr is placed in a column according to these rules, evaluated
 -- in priority order:
 --
---   1. review_decision == approved        → approved
+--   1. review_decision == approved        -> approved
 --   2. agent_status in {reviewing,
---      findings_ready}                    → in_review
---   3. otherwise                          → backlog
+--      findings_ready}                    -> in_review
+--   3. otherwise                          -> backlog
 --
 -- Approved always wins, even if an agent is still running.
 
@@ -58,10 +56,10 @@ rule InReviewSortPriority(pr: ReviewPr) -> Nat {
 -- CI status is displayed as a colored dot on each card.
 -- It does NOT influence column placement.
 --
--- success  → green  "●"
--- failure  → red    "●"
--- pending  → yellow "●"
--- none     → gray   "●"
+-- success  -> green  "●"
+-- failure  -> red    "●"
+-- pending  -> yellow "●"
+-- none     -> gray   "●"
 
 visual CiBadge(status: CiStatus) -> (Color, String) {
     success => (green,  "●")
@@ -69,3 +67,92 @@ visual CiBadge(status: CiStatus) -> (Color, String) {
     pending => (yellow, "●")
     none    => (gray,   "●")
 }
+
+------------------------------------------------------------
+-- Approve / Merge Bot PRs
+------------------------------------------------------------
+
+-- The Dependabot board allows bulk-approving and bulk-merging bot PRs
+-- (Dependabot / Renovate). These actions operate on the set of selected PRs.
+
+rule ApproveBotPrs {
+    when: ApproveBotPrs(prs)
+
+    requires: prs is not empty
+    requires: for each pr in prs: pr.review_decision != approved
+
+    ensures: for each pr in prs: pr.review_decision = approved
+    ensures: BotPrsApproved(approved_urls: prs.url[])
+
+    @guidance
+        -- Triggered from the Dependabot board (a key on selected PRs).
+        -- Runs "gh pr review --approve {number}" for each selected PR.
+        -- PRs are selected via Space (toggle individual) or prior selection state.
+        -- Uses ConfirmApproveBotPr y/n dialog before executing.
+        -- After approval the PR moves to the approved column on the next refresh.
+}
+
+rule MergeBotPrs {
+    when: MergeBotPrs(prs)
+
+    requires: prs is not empty
+
+    ensures: for each pr in prs: BotPrsMerged(merged_urls: [pr.url])
+
+    @guidance
+        -- Triggered from the Dependabot board (m key on selected PRs).
+        -- Uses ConfirmMergeBotPr y/n dialog before executing.
+        -- Runs "gh pr merge --merge {number}" for each selected PR.
+        -- Only successfully merged PRs appear in merged_urls;
+        -- failed merges are excluded from the BotPrsMerged event.
+        -- On completion BotPrsMergedCleanupReviewBoard fires (see review-board.allium).
+}
+
+------------------------------------------------------------
+-- Review Agent Lifecycle (Dependabot sub-view)
+------------------------------------------------------------
+
+-- Review agents can be dispatched from the Dependabot board. Their lifecycle
+-- mirrors DispatchReviewAgent / DetachReviewAgent / ReReview in review-board.allium
+-- but applies to bot PRs rather than regular PRs.
+--
+-- Key bindings:
+--   d key: dispatch a review agent for the selected bot PR.
+--          Same worktree/tmux logic as DispatchReviewAgent in review-board.allium.
+--   T key: detach/kill the review agent. Same as DetachReviewAgent.
+--   r key: re-trigger review. Same as ReReview. Only when agent_status == idle.
+--   g key: jump to the review agent tmux session.
+--   p key: open the bot PR URL in the browser.
+
+------------------------------------------------------------
+-- Visual: Agent Status Badge
+------------------------------------------------------------
+
+visual AgentStatusBadge(status: rb/ReviewAgentStatus?) -> (Color, String) {
+    reviewing      => (yellow, "◆")   -- agent analyzing
+    findings_ready => (green,  "✓")   -- findings ready, user should look
+    idle           => (dim,    "○")   -- agent waiting for user action
+    null           => (none,   "")    -- no agent
+}
+
+------------------------------------------------------------
+-- Visual: Staleness Coloring
+------------------------------------------------------------
+
+-- PR age is rendered with a color indicating how stale the PR is.
+-- Age is computed from pr.created_at to now.
+
+visual StalenessColor(age: Duration) -> Color {
+    age < 3.days  => green
+    age < 7.days  => yellow
+    age < 14.days => orange
+    otherwise     => red
+}
+
+------------------------------------------------------------
+-- Visual: Selection Marker
+------------------------------------------------------------
+
+-- Selected PRs (multi-select) display a "* " prefix on their card.
+-- Selection is used for bulk approve/merge operations (ApproveBotPrs, MergeBotPrs).
+-- Selection state is cleared when the Dependabot board is exited.

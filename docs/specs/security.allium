@@ -55,8 +55,9 @@ entity SecurityAlert {
 -- Config
 ------------------------------------------------------------
 
+-- security_poll_interval is defined in core.allium (config.security_poll_interval = 5.minutes)
+
 config {
-    security_poll_interval: Duration = 5.minutes
     max_graphql_pages: Integer = 3         -- pagination cap for alert fetching
     repos_per_page: Integer = 100          -- repos fetched per GraphQL request
 }

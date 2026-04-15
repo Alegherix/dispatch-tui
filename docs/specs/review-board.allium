@@ -203,7 +203,7 @@ rule BotPrsMergedCleanupReviewBoard {
     @guidance
         -- Only URLs that successfully merged appear in merged_urls; failed
         -- merges are excluded. For each URL, (repo, number) is parsed via
-        -- github_repo_from_pr_url / pr_number_from_url. All three Review Board
+        -- github_repo_from_pr_url / pr_number_from_url. Both Review Board
         -- PR lists are searched (reviewer / author). If no
         -- matching ReviewPr has an active agent session, the rule is a no-op
         -- for that URL. The cleared state is persisted via

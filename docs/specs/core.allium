@@ -89,7 +89,7 @@ entity Task {
     sub_status: SubStatus
     worktree: Worktree?
     tmux_window: TmuxWindow?
-    plan: String?
+    plan_path: String?    -- filesystem path to the implementation plan file
     epic: Epic?
     pr_url: String?
     tag: TaskTag?
@@ -114,7 +114,7 @@ entity Task {
     }
 
     -- Derived
-    has_plan: plan != null
+    has_plan: plan_path != null
     is_stale: sub_status == stale
     is_crashed: sub_status == crashed
     is_epic: tag = epic
@@ -129,13 +129,13 @@ entity Epic {
     description: String
     repo_path: String
     status: TaskStatus
-    plan: String?
+    plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
     auto_dispatch: Boolean = true
     created_at: Timestamp
     updated_at: Timestamp
 
-    has_plan: plan != null
+    has_plan: plan_path != null
 
     subtasks: Task with epic = this
     active_subtasks: subtasks where status != archived
@@ -195,6 +195,8 @@ config {
     status_message_expiry: Duration = 5.seconds
     notifications_enabled: Boolean = false
     pr_poll_interval: Duration = 30.seconds
+    review_refresh_interval: Duration = 30.seconds   -- how often the Review Board auto-refreshes PR data
+    security_poll_interval: Duration = 5.minutes     -- how often the Security Board polls GitHub for alerts
     default_branch: String = detect_from_remote("main")
 }
 

@@ -21,7 +21,7 @@ rule CreateTask {
         repo_path: repo_path,
         status: backlog,
         sub_status: core/SubStatus.default_for(backlog),
-        plan: plan,
+        plan_path: plan,
         epic: epic,
         tag: tag,
         sort_order: sort_order,
@@ -715,8 +715,8 @@ rule EditTask {
             task.status = edited.status
             task.sub_status = core/SubStatus.default_for(edited.status)
     ensures:
-        if edited.plan != "": task.plan = edited.plan
-        else: task.plan = null
+        if edited.plan != "": task.plan_path = edited.plan
+        else: task.plan_path = null
     ensures:
         if edited.tag != "": task.tag = edited.tag
         else: task.tag = null
@@ -939,7 +939,7 @@ rule UpdateTaskViaMcp {
         if sub_status != null: task.sub_status = sub_status
         else if status != null: task.sub_status = core/SubStatus.default_for(status)
     ensures:
-        if plan != null: task.plan = plan
+        if plan != null: task.plan_path = plan
     ensures:
         if title != null: task.title = title
     ensures:

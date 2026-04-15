@@ -264,7 +264,7 @@ rule UpdateEpicViaMcp {
     ensures:
         if status != null: epic.status = status
     ensures:
-        if plan != null: epic.plan = plan
+        if plan != null: epic.plan_path = plan
     ensures:
         if sort_order != null: epic.sort_order = sort_order
     ensures:

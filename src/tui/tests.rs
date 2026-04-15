@@ -15783,3 +15783,21 @@ fn find_and_set_pr_agent_finds_dependabot_pr() {
         Some(crate::models::ReviewAgentStatus::Reviewing)
     );
 }
+
+// Regression note for: buffered editor keystrokes leaking into repo picker.
+//
+// Root cause: InputPausedGuard::drop() (runtime.rs) restores the terminal and
+// sets input_paused=false, which resumes the polling thread. That thread
+// immediately reads OS-buffered keystrokes from the editor session (e.g. `:wq\n`
+// from vim) and sends them into key_rx. By the time the app transitions to
+// InputRepoPath mode, those keystrokes are waiting in the channel and get
+// processed as repo selections.
+//
+// Fix: run_editor() sleeps 200ms after drop(_guard) (covering the worst-case
+// thread wake-up + poll cycle) then drains key_rx before returning.
+//
+// Manual verification: cargo run -- tui → create task → open vim → type chars
+// → :wq → confirm the repo picker does not jump to a pre-selected item.
+#[test]
+#[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
+fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}

@@ -603,6 +603,14 @@ impl TuiRuntime {
         let status = std::process::Command::new(&editor).arg(tmp.path()).status();
         drop(_guard);
 
+        // Drain any keystrokes buffered in the OS terminal while the editor was
+        // running. The polling thread checks input_paused every 100ms and then
+        // polls for up to 50ms, so allow 200ms for it to flush OS-buffered events
+        // before we clear the channel. Without this, editor keystrokes (e.g. `:wq`)
+        // arrive in key_rx and get processed by whatever InputMode is active next.
+        std::thread::sleep(Duration::from_millis(200));
+        while key_rx.try_recv().is_ok() {}
+
         match status {
             Ok(exit) if exit.success() => Ok(std::fs::read_to_string(tmp.path()).ok()),
             Ok(exit) => {

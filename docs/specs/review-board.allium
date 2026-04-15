@@ -12,11 +12,12 @@ use "./core.allium" as core
 ------------------------------------------------------------
 
 enum ReviewAgentStatus {
-    dispatched      -- agent is running in the review worktree
+    idle            -- agent waiting; user can trigger re-review with r key
+    reviewing       -- agent is actively analyzing in the review worktree
     findings_ready  -- agent has completed its review and posted findings
 }
 
-enum ReviewBoardMode { reviewer | author | dependabot }
+enum ReviewBoardMode { reviewer | author }
 
 ------------------------------------------------------------
 -- Entities
@@ -41,8 +42,9 @@ entity ReviewPr {
 
 enum ReviewDecision {
     review_required
-    approved
+    waiting_for_response
     changes_requested
+    approved
 }
 
 enum CiStatus { none | pending | success | failure }
@@ -64,7 +66,7 @@ rule DispatchReviewAgent {
         branch: "review-" + pr.number
     )
     ensures: pr.tmux_window = core/TmuxWindow.created(name: "review:" + pr.number)
-    ensures: pr.agent_status = dispatched
+    ensures: pr.agent_status = reviewing
     ensures: ReviewAgentLaunched(pr: pr)
 
     @guidance
@@ -93,7 +95,7 @@ rule DetachReviewAgent {
         -- active review agent). Kills the tmux window and clears the worktree
         -- and agent_status on the ReviewPr. The cleared state is persisted to
         -- the database via UpdateAgentStatus(status: null).
-        -- Available in all three Review Board modes (reviewer / author / dependabot).
+        -- Available in both Review Board modes (reviewer / author).
 }
 
 -- == PR Merge Cleanup ==
@@ -123,7 +125,7 @@ rule PrMergedCleanupReviewBoard {
     @guidance
         -- The PR is identified by parsing (repo, number) from task.pr_url.
         -- All three Review Board PR lists are searched (reviewer / author /
-        -- dependabot). If no matching PR has an active agent, the rule is a
+        -- author). If no matching PR has an active agent, the rule is a
         -- no-op. The cleared state is persisted via UpdateAgentStatus(status: null).
         -- This ensures that merging a PR via GitHub (or via the TUI M key)
         -- never leaves a zombie review agent window open.
@@ -153,7 +155,7 @@ rule BotPrsMergedCleanupReviewBoard {
         -- Only URLs that successfully merged appear in merged_urls; failed
         -- merges are excluded. For each URL, (repo, number) is parsed via
         -- github_repo_from_pr_url / pr_number_from_url. All three Review Board
-        -- PR lists are searched (reviewer / author / dependabot). If no
+        -- PR lists are searched (reviewer / author). If no
         -- matching ReviewPr has an active agent session, the rule is a no-op
         -- for that URL. The cleared state is persisted via
         -- UpdateAgentStatus(status: null). If no PRs merged successfully,

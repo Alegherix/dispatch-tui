@@ -273,7 +273,7 @@ impl super::SettingsStore for Database {
     }
 
     fn get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn()?;
         conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             params![key],
@@ -287,7 +287,7 @@ impl super::SettingsStore for Database {
     }
 
     fn set_setting_bool(&self, key: &str, value: bool) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn()?;
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = ?2",
@@ -297,7 +297,7 @@ impl super::SettingsStore for Database {
     }
 
     fn get_setting_string(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn()?;
         conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             params![key],
@@ -308,7 +308,7 @@ impl super::SettingsStore for Database {
     }
 
     fn set_setting_string(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn()?;
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = ?2",
@@ -318,7 +318,7 @@ impl super::SettingsStore for Database {
     }
 
     fn seed_github_query_defaults(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn()?;
         let defaults: &[(&str, &str)] = &[
             (
                 "github_queries_review",

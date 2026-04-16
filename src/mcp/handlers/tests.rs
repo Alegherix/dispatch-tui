@@ -4630,6 +4630,36 @@ async fn create_epic_tool_schema_includes_parent_epic_id() {
 // Fixtures for review/security tests
 // ---------------------------------------------------------------------------
 
+fn insert_my_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
+    use crate::db::PrKind;
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    let pr = ReviewPr {
+        number,
+        title: format!("My PR #{number}"),
+        author: "alice".to_string(),
+        repo: repo.to_string(),
+        url: format!("https://github.com/{repo}/pull/{number}"),
+        is_draft: false,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        additions: 5,
+        deletions: 1,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: "feature/branch".to_string(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    let mut existing = state.db.load_prs(PrKind::My).unwrap_or_default();
+    existing.retain(|p| !(p.repo == repo && p.number == number));
+    existing.push(pr);
+    state.db.save_prs(PrKind::My, &existing).unwrap();
+}
+
 fn insert_review_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
     use crate::db::PrKind;
     use crate::models::{CiStatus, ReviewDecision, ReviewPr};
@@ -5012,4 +5042,228 @@ async fn dispatch_fix_agent_already_reviewing() {
     )
     .await;
     assert_error(&resp, "already has an active fix agent");
+}
+
+#[tokio::test]
+async fn list_review_prs_mode_author() {
+    let state = test_state();
+    insert_my_pr_fixture(&state, 55, "acme/app");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_review_prs", "arguments": {"mode": "author"}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("55"), "PR #55 should appear in author mode");
+}
+
+#[tokio::test]
+async fn list_review_prs_mode_all() {
+    let state = test_state();
+    insert_review_pr_fixture(&state, 10, "acme/app");
+    insert_my_pr_fixture(&state, 20, "acme/app");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_review_prs", "arguments": {"mode": "all"}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("10"), "reviewer PR #10 should appear in all mode");
+    assert!(text.contains("20"), "author PR #20 should appear in all mode");
+}
+
+#[tokio::test]
+async fn list_security_alerts_filters_by_severity() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+    let state = test_state();
+
+    let high_alert = SecurityAlert {
+        number: 1,
+        repo: "acme/api".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "High Alert".to_string(),
+        package: None,
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: "https://example.com/1".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    let critical_alert = SecurityAlert {
+        number: 2,
+        repo: "acme/api".to_string(),
+        severity: AlertSeverity::Critical,
+        kind: AlertKind::Dependabot,
+        title: "Critical Alert".to_string(),
+        package: None,
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: None,
+        url: "https://example.com/2".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    state
+        .db
+        .save_security_alerts(&[high_alert, critical_alert])
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_security_alerts", "arguments": {"severity": "high"}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("High Alert"), "High alert should appear");
+    assert!(!text.contains("Critical Alert"), "Critical alert should not appear");
+}
+
+#[tokio::test]
+async fn list_security_alerts_filters_by_repo() {
+    use crate::models::AlertKind;
+    let state = test_state();
+    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot);
+    insert_security_alert_fixture(&state, 2, "acme/web", AlertKind::Dependabot);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_security_alerts", "arguments": {"repo": "acme/api"}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("acme/api"), "acme/api alert should appear");
+    assert!(!text.contains("acme/web"), "acme/web alert should not appear");
+}
+
+#[tokio::test]
+async fn dispatch_review_agent_success() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    // Pre-create worktree dir so git worktree add is skipped.
+    std::fs::create_dir_all(dir.path().join(".worktrees").join("review-42")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),  // tmux list-windows (has_window → false, empty stdout)
+        MockProcessRunner::ok(),  // git worktree prune
+        MockProcessRunner::ok(),  // git fetch origin feature/branch
+        // git worktree add skipped (dir pre-exists)
+        MockProcessRunner::ok(),  // tmux new-window
+        MockProcessRunner::ok(),  // tmux send-keys -l (claude cmd)
+        MockProcessRunner::ok(),  // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    insert_review_pr_fixture(&state, 42, "acme/app");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_review_agent",
+            "arguments": {"repo": "acme/app", "number": 42, "local_repo": repo_path}
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "expected success, got error: {:?}", resp.error);
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Review agent dispatched"), "expected dispatch confirmation: {text}");
+
+    let pr = db.get_review_pr("acme/app", 42).unwrap().unwrap();
+    assert_eq!(pr.agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+    assert!(pr.tmux_window.is_some());
+    assert!(pr.worktree.is_some());
+}
+
+#[tokio::test]
+async fn dispatch_fix_agent_success() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    // Pre-create worktree dir so git worktree add is skipped.
+    std::fs::create_dir_all(dir.path().join(".worktrees").join("fix-vuln-7")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                                           // tmux list-windows (has_window)
+        MockProcessRunner::ok(),                                           // git worktree prune
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"), // git symbolic-ref (detect default branch)
+        MockProcessRunner::ok(),                                           // git fetch origin main
+        // git worktree add skipped (dir pre-exists)
+        MockProcessRunner::ok(),                                           // tmux new-window
+        MockProcessRunner::ok(),                                           // tmux send-keys -l (claude cmd)
+        MockProcessRunner::ok(),                                           // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let alert = SecurityAlert {
+        number: 7,
+        repo: "acme/api".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-0001".to_string(),
+        package: Some("lodash".to_string()),
+        vulnerable_range: None,
+        fixed_version: Some("4.17.21".to_string()),
+        cvss_score: None,
+        url: "https://example.com/7".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: "Prototype pollution".to_string(),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    db.save_security_alerts(&[alert]).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_fix_agent",
+            "arguments": {
+                "repo": "acme/api", "number": 7,
+                "kind": "dependabot", "local_repo": repo_path
+            }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "expected success, got error: {:?}", resp.error);
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Fix agent dispatched"), "expected dispatch confirmation: {text}");
+
+    let alert = db
+        .get_security_alert("acme/api", 7, AlertKind::Dependabot)
+        .unwrap()
+        .unwrap();
+    assert_eq!(alert.agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+    assert!(alert.tmux_window.is_some());
+    assert!(alert.worktree.is_some());
 }

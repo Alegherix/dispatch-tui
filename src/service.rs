@@ -66,19 +66,7 @@ pub struct UpdateTaskParams {
 
 impl UpdateTaskParams {
     fn has_any_field(&self) -> bool {
-        self.status.is_some()
-            || self.plan_path.is_some()
-            || self.title.is_some()
-            || self.description.is_some()
-            || self.repo_path.is_some()
-            || self.sort_order.is_some()
-            || self.pr_url.is_some()
-            || self.tag.is_some()
-            || self.sub_status.is_some()
-            || self.epic_id.is_some()
-            || self.worktree.is_some()
-            || self.tmux_window.is_some()
-            || self.base_branch.is_some()
+        !self.updated_field_names().is_empty()
     }
 
     pub fn updated_field_names(&self) -> Vec<&str> {
@@ -669,13 +657,7 @@ pub struct UpdateEpicParams {
 
 impl UpdateEpicParams {
     fn has_any_field(&self) -> bool {
-        self.title.is_some()
-            || self.description.is_some()
-            || self.status.is_some()
-            || self.plan_path.is_some()
-            || self.sort_order.is_some()
-            || self.repo_path.is_some()
-            || self.auto_dispatch.is_some()
+        !self.updated_field_names().is_empty()
     }
 
     pub fn updated_field_names(&self) -> Vec<&str> {
@@ -2241,6 +2223,68 @@ mod tests {
             empty.updated_field_names().is_empty(),
             "updated_field_names should be empty when no fields are set"
         );
+    }
+
+    #[test]
+    fn update_task_params_every_field_covered() {
+        // Each field set individually must trigger both has_any_field() and
+        // updated_field_names(). Add a case here whenever a new field is added
+        // to UpdateTaskParams so both methods stay in sync.
+        let cases: Vec<UpdateTaskParams> = vec![
+            UpdateTaskParams::for_task(1).status(TaskStatus::Backlog),
+            UpdateTaskParams::for_task(1).plan_path(Some("p".to_string())),
+            UpdateTaskParams::for_task(1).title("t".to_string()),
+            UpdateTaskParams::for_task(1).description("d".to_string()),
+            UpdateTaskParams::for_task(1).repo_path("r".to_string()),
+            UpdateTaskParams::for_task(1).sort_order(0),
+            UpdateTaskParams::for_task(1).pr_url(FieldUpdate::Set("u".to_string())),
+            UpdateTaskParams::for_task(1).tag(Some(TaskTag::Bug)),
+            UpdateTaskParams::for_task(1).sub_status(SubStatus::Active),
+            UpdateTaskParams::for_task(1).epic_id(1),
+            UpdateTaskParams::for_task(1).worktree(FieldUpdate::Set("w".to_string())),
+            UpdateTaskParams::for_task(1).tmux_window(FieldUpdate::Set("tw".to_string())),
+            UpdateTaskParams::for_task(1).base_branch(Some("main".to_string())),
+        ];
+        for params in &cases {
+            assert!(params.has_any_field(), "has_any_field() should be true when a field is set");
+            assert!(
+                !params.updated_field_names().is_empty(),
+                "updated_field_names() should be non-empty when a field is set"
+            );
+        }
+    }
+
+    #[test]
+    fn update_epic_params_every_field_covered() {
+        // Each field set individually must trigger both has_any_field() and
+        // updated_field_names(). Add a case here whenever a new field is added
+        // to UpdateEpicParams so both methods stay in sync.
+        let base = || UpdateEpicParams {
+            epic_id: 1,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            repo_path: None,
+            auto_dispatch: None,
+        };
+        let cases: Vec<UpdateEpicParams> = vec![
+            UpdateEpicParams { title: Some("t".to_string()), ..base() },
+            UpdateEpicParams { description: Some("d".to_string()), ..base() },
+            UpdateEpicParams { status: Some(TaskStatus::Backlog), ..base() },
+            UpdateEpicParams { plan_path: Some("p".to_string()), ..base() },
+            UpdateEpicParams { sort_order: Some(0), ..base() },
+            UpdateEpicParams { repo_path: Some("r".to_string()), ..base() },
+            UpdateEpicParams { auto_dispatch: Some(true), ..base() },
+        ];
+        for params in &cases {
+            assert!(params.has_any_field(), "has_any_field() should be true when a field is set");
+            assert!(
+                !params.updated_field_names().is_empty(),
+                "updated_field_names() should be non-empty when a field is set"
+            );
+        }
     }
 
     // -------------------------------------------------------------------------

@@ -1,0 +1,66 @@
+-- allium: 3
+-- tips.allium
+--
+-- Scope: Startup tips popup — show/browse/dismiss behaviour
+-- Depends on: core.allium (TipsShowMode, TipsState, Tip)
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule ShowTipsOnStartup {
+    -- When the TUI starts, load TipsState from the database and all embedded
+    -- Tip records. Decide whether to show the tips overlay:
+    --   never    → do not show
+    --   new_only → show only if any Tip.id > TipsState.seen_up_to
+    --   always   → always show; start at first new tip if any, else random index
+    when app_starts
+    requires core.TipsState, [core.Tip]
+    ensures {
+        show_mode == never    => tips_overlay is hidden
+        show_mode == new_only => tips_overlay is hidden when all(Tip.id <= seen_up_to)
+        show_mode == new_only => tips_overlay shows first Tip where Tip.id > seen_up_to
+        show_mode == always   => tips_overlay is visible
+        show_mode == always and exists(Tip where Tip.id > seen_up_to)
+            => tips_overlay starts at first such Tip
+        show_mode == always and all(Tip.id <= seen_up_to)
+            => tips_overlay starts at a pseudo-random index
+    }
+}
+
+rule BrowseTips {
+    -- h / ← moves to previous tip; l / → moves to next tip.
+    -- Navigation wraps at boundaries.
+    when tips_overlay is visible
+    ensures {
+        next_action => overlay.index = (overlay.index + 1) mod tip_count
+        prev_action => overlay.index = (overlay.index + tip_count - 1) mod tip_count
+        tip_count == 0 => index unchanged
+    }
+}
+
+rule DismissTips {
+    -- q or Escape closes the overlay and persists the current tip's id as seen_up_to,
+    -- capped below by the session-start seen_up_to (never goes backwards).
+    when dismiss_action and tips_overlay is visible
+    ensures {
+        tips_overlay is hidden
+        TipsState.seen_up_to = max(session_start_seen_up_to, current_tip.id)
+        TipsState.show_mode = overlay.show_mode
+    }
+}
+
+rule SetShowMode {
+    -- n toggles between always and new_only.
+    -- x sets never.
+    -- Mode is reflected immediately in the overlay state and persisted on dismiss.
+    when tips_overlay is visible
+    ensures {
+        n_action and show_mode == always   => show_mode = new_only
+        n_action and show_mode == new_only => show_mode = always
+        x_action                           => show_mode = never
+        mode_change => status_bar shows confirmation message
+    }
+}

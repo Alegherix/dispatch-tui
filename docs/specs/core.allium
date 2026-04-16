@@ -31,6 +31,8 @@ external entity TmuxPane {
 
 enum TaskTag { bug | feature | chore | epic }
 
+enum TipsShowMode { always | new_only | never }
+
 -- Legacy alias: "ready" maps to backlog
 enum TaskStatus { backlog | running | review | done | archived }
 
@@ -195,6 +197,28 @@ entity SplitPane {
         -- Reset to true on split entry and exit.
 }
 
+-- TipsState persists the user's tips preferences across sessions.
+-- There is exactly one row in the DB (singleton).
+entity TipsState {
+    seen_up_to: Integer    -- highest tip id shown in any previous session; 0 = never shown
+    show_mode: TipsShowMode
+
+    @guidance
+        -- Persisted to a single-row `tips_state` DB table (migration v36).
+        -- seen_up_to acts as a watermark: any Tip with id > seen_up_to is "new".
+        -- Updated on tips overlay close, reflecting the tip id viewed at that moment.
+}
+
+-- Tip is a runtime-only concept (embedded at compile time, never persisted).
+-- Tips are loaded from numbered markdown files in src/tips/ via include_str!.
+concept Tip {
+    id: Integer       -- numeric prefix from filename (e.g., 001 → 1)
+    title: String     -- extracted from the first ## heading in the file
+    body: String      -- everything after the first ## heading
+
+    is_new(state: TipsState): id > state.seen_up_to
+}
+
 ------------------------------------------------------------
 -- Config
 ------------------------------------------------------------
@@ -208,6 +232,7 @@ config {
     review_refresh_interval: Duration = 30.seconds   -- how often the Review Board auto-refreshes PR data
     security_poll_interval: Duration = 5.minutes     -- how often the Security Board polls GitHub for alerts
     default_branch: String = detect_from_remote("main")
+    tips_show_mode: TipsShowMode = always
 }
 
 ------------------------------------------------------------

@@ -12854,7 +12854,10 @@ fn G_in_split_mode_on_already_pinned_task_does_nothing() {
     app.board.split.pinned_task_id = Some(TaskId(4)); // same task already pinned
     app.selection_mut().set_column(1);
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(cmds.is_empty(), "G on already-pinned task must not emit commands");
+    assert!(
+        cmds.is_empty(),
+        "G on already-pinned task must not emit commands"
+    );
 }
 
 #[test]
@@ -12898,7 +12901,11 @@ fn G_in_split_mode_on_task_without_window_shows_status() {
     app.selection_mut().set_column(1);
     let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
     assert!(
-        app.status.message.as_deref().unwrap_or("").contains("No agent session"),
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No agent session"),
         "G on windowless task must show a status message"
     );
 }

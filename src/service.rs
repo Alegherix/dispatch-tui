@@ -2175,14 +2175,20 @@ mod tests {
         // If a new field is added to UpdateTaskParams without updating both methods,
         // this test will catch the divergence.
         let with_field = UpdateTaskParams::for_task(1).title("x".to_string());
-        assert!(with_field.has_any_field(), "has_any_field should be true when title is set");
+        assert!(
+            with_field.has_any_field(),
+            "has_any_field should be true when title is set"
+        );
         assert!(
             !with_field.updated_field_names().is_empty(),
             "updated_field_names should be non-empty when title is set"
         );
 
         let empty = UpdateTaskParams::for_task(1);
-        assert!(!empty.has_any_field(), "has_any_field should be false when no fields are set");
+        assert!(
+            !empty.has_any_field(),
+            "has_any_field should be false when no fields are set"
+        );
         assert!(
             empty.updated_field_names().is_empty(),
             "updated_field_names should be empty when no fields are set"
@@ -2202,7 +2208,10 @@ mod tests {
             repo_path: None,
             auto_dispatch: None,
         };
-        assert!(with_field.has_any_field(), "has_any_field should be true when title is set");
+        assert!(
+            with_field.has_any_field(),
+            "has_any_field should be true when title is set"
+        );
         assert!(
             !with_field.updated_field_names().is_empty(),
             "updated_field_names should be non-empty when title is set"
@@ -2218,7 +2227,10 @@ mod tests {
             repo_path: None,
             auto_dispatch: None,
         };
-        assert!(!empty.has_any_field(), "has_any_field should be false when no fields are set");
+        assert!(
+            !empty.has_any_field(),
+            "has_any_field should be false when no fields are set"
+        );
         assert!(
             empty.updated_field_names().is_empty(),
             "updated_field_names should be empty when no fields are set"
@@ -2246,7 +2258,10 @@ mod tests {
             UpdateTaskParams::for_task(1).base_branch(Some("main".to_string())),
         ];
         for params in &cases {
-            assert!(params.has_any_field(), "has_any_field() should be true when a field is set");
+            assert!(
+                params.has_any_field(),
+                "has_any_field() should be true when a field is set"
+            );
             assert!(
                 !params.updated_field_names().is_empty(),
                 "updated_field_names() should be non-empty when a field is set"
@@ -2270,16 +2285,40 @@ mod tests {
             auto_dispatch: None,
         };
         let cases: Vec<UpdateEpicParams> = vec![
-            UpdateEpicParams { title: Some("t".to_string()), ..base() },
-            UpdateEpicParams { description: Some("d".to_string()), ..base() },
-            UpdateEpicParams { status: Some(TaskStatus::Backlog), ..base() },
-            UpdateEpicParams { plan_path: Some("p".to_string()), ..base() },
-            UpdateEpicParams { sort_order: Some(0), ..base() },
-            UpdateEpicParams { repo_path: Some("r".to_string()), ..base() },
-            UpdateEpicParams { auto_dispatch: Some(true), ..base() },
+            UpdateEpicParams {
+                title: Some("t".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                description: Some("d".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                status: Some(TaskStatus::Backlog),
+                ..base()
+            },
+            UpdateEpicParams {
+                plan_path: Some("p".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                sort_order: Some(0),
+                ..base()
+            },
+            UpdateEpicParams {
+                repo_path: Some("r".to_string()),
+                ..base()
+            },
+            UpdateEpicParams {
+                auto_dispatch: Some(true),
+                ..base()
+            },
         ];
         for params in &cases {
-            assert!(params.has_any_field(), "has_any_field() should be true when a field is set");
+            assert!(
+                params.has_any_field(),
+                "has_any_field() should be true when a field is set"
+            );
             assert!(
                 !params.updated_field_names().is_empty(),
                 "updated_field_names() should be non-empty when a field is set"

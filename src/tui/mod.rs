@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
-    SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn,
-    DEFAULT_BASE_BRANCH, DEFAULT_QUICK_TASK_TITLE,
+    epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision, SubStatus,
+    Task, TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn, DEFAULT_BASE_BRANCH,
+    DEFAULT_QUICK_TASK_TITLE,
 };
 
 // ---------------------------------------------------------------------------

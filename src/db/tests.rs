@@ -229,7 +229,7 @@ fn set_setting_string_upserts() {
 #[test]
 fn fresh_db_has_latest_schema_version() {
     let db = in_memory_db();
-    let conn = db.conn.lock().unwrap();
+    let conn = db.conn().unwrap();
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
@@ -240,7 +240,7 @@ fn fresh_db_has_latest_schema_version() {
 fn self_referential_epic_is_rejected() {
     let db = in_memory_db();
     let epic = db.create_epic("E", "", "/repo", None).unwrap();
-    let conn = db.conn.lock().unwrap();
+    let conn = db.conn().unwrap();
     let result = conn.execute(
         "UPDATE epics SET parent_epic_id = id WHERE id = ?1",
         rusqlite::params![epic.id.0],
@@ -415,7 +415,7 @@ fn migration_25_renames_plan_to_plan_path() {
 #[test]
 fn migrate_v26_adds_agent_columns() {
     let db = in_memory_db();
-    let conn = db.conn.lock().unwrap();
+    let conn = db.conn().unwrap();
 
     // Verify columns exist by inserting data with them
     conn.execute(
@@ -1565,7 +1565,7 @@ fn save_review_prs_preserves_agent_fields() {
 
     // Simulate agent dispatch by setting agent fields directly
     {
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn().unwrap();
         conn.execute(
             "UPDATE review_prs SET tmux_window = 'dispatch:review-42', worktree = '/tmp/wt'
              WHERE repo = 'acme/app' AND number = 42",
@@ -1850,7 +1850,7 @@ fn update_status_if_leaves_sub_status_unchanged_when_condition_fails() {
 #[test]
 fn check_constraint_rejects_review_with_active_substatus() {
     let db = Database::open_in_memory().unwrap();
-    let conn = db.conn.lock().unwrap();
+    let conn = db.conn().unwrap();
     conn.execute(
         "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
          VALUES ('T', 'D', '/r', 'backlog', 'none')",
@@ -1870,7 +1870,7 @@ fn check_constraint_rejects_review_with_active_substatus() {
 #[test]
 fn check_constraint_accepts_review_with_awaiting_review() {
     let db = Database::open_in_memory().unwrap();
-    let conn = db.conn.lock().unwrap();
+    let conn = db.conn().unwrap();
     conn.execute(
         "INSERT INTO tasks (title, description, repo_path, status, sub_status) \
          VALUES ('T', 'D', '/r', 'backlog', 'none')",
@@ -2451,7 +2451,7 @@ fn save_security_alerts_preserves_agent_fields() {
 
     // Simulate agent dispatch
     {
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn().unwrap();
         conn.execute(
             "UPDATE security_alerts SET tmux_window = 'dispatch:fix-1', worktree = '/tmp/wt'
              WHERE repo = 'acme/app' AND number = 1 AND kind = 'dependabot'",
@@ -4316,14 +4316,14 @@ fn recalculate_epic_status_terminates_on_cycle() {
     // then verify recalculate_epic_status returns Ok(()) rather than hanging.
     let db = in_memory_db();
     {
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
     }
     let a = db.create_epic("A", "", "/repo", None).unwrap();
     let b = db.create_epic("B", "", "/repo", Some(a.id)).unwrap();
     // Point a's parent back to b → a→b→a cycle
     {
-        let conn = db.conn.lock().unwrap();
+        let conn = db.conn().unwrap();
         conn.execute(
             "UPDATE epics SET parent_epic_id = ?1 WHERE id = ?2",
             rusqlite::params![b.id.0, a.id.0],

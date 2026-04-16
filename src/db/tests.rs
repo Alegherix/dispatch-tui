@@ -3990,3 +3990,28 @@ fn patch_epic_auto_dispatch_persists() {
     let re_enabled = db.get_epic(epic.id).unwrap().unwrap();
     assert!(re_enabled.auto_dispatch);
 }
+
+#[test]
+fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
+    let db = in_memory_db();
+    let epic1_id = db.create_epic("E1", "", "/repo").unwrap().id;
+    let epic2_id = db.create_epic("E2", "", "/repo").unwrap().id;
+
+    let t1 = db
+        .create_task("Task1", "", "/repo", None, TaskStatus::Backlog, "main")
+        .unwrap();
+    let t2 = db
+        .create_task("Task2", "", "/repo", None, TaskStatus::Backlog, "main")
+        .unwrap();
+    let _t3 = db
+        .create_task("Orphan", "", "/repo", None, TaskStatus::Backlog, "main")
+        .unwrap();
+
+    db.set_task_epic_id(t1, Some(epic1_id)).unwrap();
+    db.set_task_epic_id(t2, Some(epic2_id)).unwrap();
+
+    let tasks = db.list_all_tasks_with_epic_id().unwrap();
+    assert_eq!(tasks.len(), 2);
+    assert!(tasks.iter().any(|t| t.id == t1));
+    assert!(tasks.iter().any(|t| t.id == t2));
+}

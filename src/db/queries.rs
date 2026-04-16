@@ -605,6 +605,21 @@ impl super::EpicCrud for Database {
         Ok(tasks)
     }
 
+    fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id IS NOT NULL ORDER BY epic_id ASC, COALESCE(sort_order, id) ASC, id ASC"
+            ))
+            .context("Failed to prepare list_all_tasks_with_epic_id")?;
+        let tasks = stmt
+            .query_map([], row_to_task)
+            .context("Failed to query tasks with epic_id")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect tasks with epic_id")?;
+        Ok(tasks)
+    }
+
     fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
         let epic = match self.get_epic(epic_id)? {
             Some(e) => e,

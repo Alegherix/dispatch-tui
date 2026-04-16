@@ -248,6 +248,9 @@ pub trait EpicCrud: Send + Sync {
     fn delete_epic(&self, id: EpicId) -> Result<()>;
     fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
     fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
+    /// Fetch all tasks that have a non-null epic_id in a single query.
+    /// Use instead of looping over epics and calling list_tasks_for_epic() per epic.
+    fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
     /// Recalculate an epic's status from its non-archived subtasks.
     /// Only advances forward (never moves backward), so manual overrides are preserved.
     fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;

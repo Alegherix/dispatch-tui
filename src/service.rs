@@ -673,11 +673,28 @@ impl EpicService {
 
     pub fn list_epics_with_progress(&self) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
         let epics = self.list_epics()?;
+        let all_subtasks = self
+            .db
+            .list_all_tasks_with_epic_id()
+            .map_err(|e| ServiceError::Internal(format!("Failed to list tasks with epic: {e}")))?;
+
+        // Group tasks by epic_id in Rust — avoids N+1 queries
+        let mut tasks_by_epic: std::collections::HashMap<i64, Vec<&Task>> =
+            std::collections::HashMap::new();
+        for task in &all_subtasks {
+            if let Some(eid) = task.epic_id {
+                tasks_by_epic.entry(eid.0).or_default().push(task);
+            }
+        }
+
         let result = epics
             .into_iter()
             .filter(|e| e.status != TaskStatus::Archived)
             .map(|e| {
-                let subtasks = self.db.list_tasks_for_epic(e.id).unwrap_or_default();
+                let subtasks = tasks_by_epic
+                    .get(&e.id.0)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
                 let done = subtasks
                     .iter()
                     .filter(|t| t.status == TaskStatus::Done)
@@ -1322,6 +1339,98 @@ mod tests {
         let (_, done, total) = &list[0];
         assert_eq!(*done, 0);
         assert_eq!(*total, 1);
+    }
+
+    #[test]
+    fn list_epics_with_progress_multiple_epics() {
+        let db = test_db();
+        let task_svc = task_svc(&db);
+        let epic_svc = epic_svc(&db);
+
+        let e1 = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "E1".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+        let e2 = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "E2".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        // 2 tasks in E1
+        let t1 = task_svc
+            .create_task(CreateTaskParams {
+                title: "T1".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(e1.id.0),
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+        task_svc
+            .create_task(CreateTaskParams {
+                title: "T2".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(e1.id.0),
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+        // 1 task in E2
+        task_svc
+            .create_task(CreateTaskParams {
+                title: "T3".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(e2.id.0),
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+
+        // Mark T1 as done
+        task_svc
+            .update_task(UpdateTaskParams {
+                task_id: t1.0,
+                status: Some(TaskStatus::Done),
+                plan_path: None,
+                title: None,
+                description: None,
+                repo_path: None,
+                sort_order: None,
+                pr_url: None,
+                tag: None,
+                sub_status: None,
+                epic_id: None,
+                worktree: None,
+                tmux_window: None,
+                base_branch: None,
+            })
+            .unwrap();
+
+        let list = epic_svc.list_epics_with_progress().unwrap();
+        assert_eq!(list.len(), 2);
+        let e1_progress = list.iter().find(|(e, _, _)| e.id == e1.id).unwrap();
+        assert_eq!(e1_progress.1, 1); // 1 done
+        assert_eq!(e1_progress.2, 2); // 2 total
+        let e2_progress = list.iter().find(|(e, _, _)| e.id == e2.id).unwrap();
+        assert_eq!(e2_progress.1, 0);
+        assert_eq!(e2_progress.2, 1);
     }
 
     #[test]

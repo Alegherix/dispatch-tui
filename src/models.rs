@@ -738,6 +738,7 @@ pub struct ReviewPr {
 // ---------------------------------------------------------------------------
 
 pub const DEFAULT_QUICK_TASK_TITLE: &str = "Quick task";
+pub const DEFAULT_BASE_BRANCH: &str = "main";
 
 #[derive(Debug, Clone)]
 pub struct Task {
@@ -2435,5 +2436,10 @@ mod security_tests {
     fn pr_ref_display() {
         let pr = PrRef::new("org/repo".to_string(), 42);
         assert_eq!(pr.to_string(), "org/repo#42");
+    }
+
+    #[test]
+    fn default_base_branch_is_main() {
+        assert_eq!(DEFAULT_BASE_BRANCH, "main");
     }
 }

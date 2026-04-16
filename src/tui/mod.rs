@@ -11,7 +11,7 @@ use crate::dispatch;
 use crate::models::{
     epic_status, epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
     SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn,
-    DEFAULT_QUICK_TASK_TITLE,
+    DEFAULT_BASE_BRANCH, DEFAULT_QUICK_TASK_TITLE,
 };
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,6 @@ pub(in crate::tui) fn truncate_title(title: &str, max_len: usize) -> String {
 
 /// Returns true if every character in `query` appears in `path` as a
 /// forward subsequence (case-insensitive). An empty query matches everything.
-#[allow(dead_code)]
 pub(in crate::tui) fn fuzzy_matches(path: &str, query: &str) -> bool {
     if query.is_empty() {
         return true;
@@ -106,7 +105,6 @@ pub(in crate::tui) fn fuzzy_matches(path: &str, query: &str) -> bool {
 }
 
 /// Returns the subset of `paths` that fuzzy-match `query`, preserving order.
-#[allow(dead_code)]
 pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<String> {
     paths
         .iter()
@@ -1958,7 +1956,7 @@ impl App {
                 description: String::new(),
                 repo_path,
                 tag: None,
-                base_branch: "main".to_string(),
+                base_branch: DEFAULT_BASE_BRANCH.to_string(),
             },
             epic_id,
         }]
@@ -3273,7 +3271,7 @@ impl App {
             self.security.dependabot.prs.last_error = None;
             self.clamp_dependabot_selection();
         } else {
-            let list = self.review.list_mut(kind);
+            let list = self.review.list_mut(kind).unwrap();
             list.set_prs(prs);
             list.loading = false;
             list.last_fetch = Some(Instant::now());
@@ -3347,7 +3345,7 @@ impl App {
             self.security.dependabot.prs.loading = false;
             self.security.dependabot.prs.last_error = Some(error);
         } else {
-            let list = self.review.list_mut(kind);
+            let list = self.review.list_mut(kind).unwrap();
             list.loading = false;
             list.last_error = Some(error.clone());
             self.set_status(format!("Failed to fetch {} PRs: {error}", kind.label()));
@@ -4218,7 +4216,7 @@ impl App {
             } => PrListKind::Authored,
             _ => PrListKind::Review,
         };
-        self.review.list_mut(kind).loading = true;
+        self.review.list_mut(kind).unwrap().loading = true;
         vec![Command::FetchPrs(kind)]
     }
 

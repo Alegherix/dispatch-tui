@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, AlertSeverity, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
-    SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    AlertKind, AlertSeverity, DEFAULT_BASE_BRANCH, DispatchMode, Epic, EpicId, EpicSubstatus,
+    PrRef, ReviewDecision, SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
 };
 
 // ---------------------------------------------------------------------------
@@ -649,7 +649,7 @@ impl Default for TaskDraft {
             description: String::new(),
             repo_path: String::new(),
             tag: None,
-            base_branch: "main".to_string(),
+            base_branch: DEFAULT_BASE_BRANCH.to_string(),
         }
     }
 }
@@ -978,19 +978,19 @@ pub struct ReviewBoardState {
 }
 
 impl ReviewBoardState {
-    pub fn list(&self, kind: PrListKind) -> &PrListState {
+    pub fn list(&self, kind: PrListKind) -> Option<&PrListState> {
         match kind {
-            PrListKind::Review => &self.review,
-            PrListKind::Authored => &self.authored,
-            PrListKind::Bot => unreachable!("bot PRs are in SecurityBoardState"),
+            PrListKind::Review => Some(&self.review),
+            PrListKind::Authored => Some(&self.authored),
+            PrListKind::Bot => None,
         }
     }
 
-    pub fn list_mut(&mut self, kind: PrListKind) -> &mut PrListState {
+    pub fn list_mut(&mut self, kind: PrListKind) -> Option<&mut PrListState> {
         match kind {
-            PrListKind::Review => &mut self.review,
-            PrListKind::Authored => &mut self.authored,
-            PrListKind::Bot => unreachable!("bot PRs are in SecurityBoardState"),
+            PrListKind::Review => Some(&mut self.review),
+            PrListKind::Authored => Some(&mut self.authored),
+            PrListKind::Bot => None,
         }
     }
 
@@ -1004,7 +1004,7 @@ impl ReviewBoardState {
         worktree: &str,
     ) -> crate::db::PrKind {
         for kind in [PrListKind::Review, PrListKind::Authored] {
-            for pr in self.list_mut(kind).prs.iter_mut() {
+            for pr in self.list_mut(kind).unwrap().prs.iter_mut() {
                 if pr.repo == github_repo && pr.number == number {
                     pr.tmux_window = Some(tmux_window.to_string());
                     pr.worktree = Some(worktree.to_string());
@@ -1666,14 +1666,14 @@ mod tests {
             .authored
             .set_prs(vec![make_pr(2, "org/b"), make_pr(3, "org/c")]);
 
-        assert_eq!(state.list(PrListKind::Review).prs.len(), 1);
-        assert_eq!(state.list(PrListKind::Authored).prs.len(), 2);
+        assert_eq!(state.list(PrListKind::Review).unwrap().prs.len(), 1);
+        assert_eq!(state.list(PrListKind::Authored).unwrap().prs.len(), 2);
     }
 
     #[test]
     fn review_board_state_list_mut_mutates_correct_list() {
         let mut state = ReviewBoardState::default();
-        state.list_mut(PrListKind::Review).loading = true;
+        state.list_mut(PrListKind::Review).unwrap().loading = true;
         assert!(state.review.loading);
         assert!(!state.authored.loading);
     }
@@ -1710,5 +1710,29 @@ mod tests {
         let mut state = ReviewBoardState::default();
         let kind = state.find_and_set_pr_agent("org/unknown", 1, "win", "/wt");
         assert_eq!(kind, crate::db::PrKind::Review);
+    }
+
+    #[test]
+    fn review_board_list_bot_returns_none() {
+        let state = ReviewBoardState::default();
+        assert!(state.list(PrListKind::Bot).is_none());
+    }
+
+    #[test]
+    fn review_board_list_mut_bot_returns_none() {
+        let mut state = ReviewBoardState::default();
+        assert!(state.list_mut(PrListKind::Bot).is_none());
+    }
+
+    #[test]
+    fn review_board_list_review_returns_some() {
+        let state = ReviewBoardState::default();
+        assert!(state.list(PrListKind::Review).is_some());
+    }
+
+    #[test]
+    fn review_board_list_authored_returns_some() {
+        let state = ReviewBoardState::default();
+        assert!(state.list(PrListKind::Authored).is_some());
     }
 }

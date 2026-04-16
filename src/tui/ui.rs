@@ -233,20 +233,6 @@ fn my_prs_tab_label(app: &App, prefix: &str) -> String {
     }
 }
 
-#[allow(dead_code)]
-fn bot_prs_tab_label(app: &App, prefix: &str) -> String {
-    let bot_count = app.bot_prs().len();
-    let loading = if app.bot_prs_loading() {
-        " \u{21bb}"
-    } else {
-        ""
-    };
-    if bot_count > 0 {
-        format!("{prefix}Dependabot ({bot_count}){loading} ")
-    } else {
-        format!("{prefix}Dependabot{loading} ")
-    }
-}
 
 fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);

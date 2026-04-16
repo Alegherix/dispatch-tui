@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use crate::db::{self, EpicPatch, TaskPatch};
-use crate::models::{Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UsageReport};
+use crate::models::{
+    Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, UsageReport, DEFAULT_BASE_BRANCH,
+};
 
 // ---------------------------------------------------------------------------
 // Service error
@@ -426,7 +428,7 @@ impl TaskService {
                 .unwrap_or_else(|_| p.to_string())
         });
 
-        let base_branch = params.base_branch.as_deref().unwrap_or("main");
+        let base_branch = params.base_branch.as_deref().unwrap_or(DEFAULT_BASE_BRANCH);
         let task_id = self
             .db
             .create_task(

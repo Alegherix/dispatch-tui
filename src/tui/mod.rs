@@ -557,15 +557,34 @@ impl App {
         let tasks = self.tasks_by_status(status);
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
-        if matches!(self.board.view_mode, ViewMode::Board(_)) {
-            for epic in &self.board.epics {
-                if !self.repo_matches(&epic.repo_path) {
-                    continue;
-                }
-                if epic.status == status {
-                    items.push(ColumnItem::Epic(epic));
+        match &self.board.view_mode {
+            ViewMode::Board(_) => {
+                // Main board: show only root epics (no parent)
+                for epic in &self.board.epics {
+                    if epic.parent_epic_id.is_some() {
+                        continue;
+                    }
+                    if !self.repo_matches(&epic.repo_path) {
+                        continue;
+                    }
+                    if epic.status == status {
+                        items.push(ColumnItem::Epic(epic));
+                    }
                 }
             }
+            ViewMode::Epic { epic_id, .. } => {
+                // Inside an epic: show sub-epics whose parent_epic_id matches
+                let current = *epic_id;
+                for epic in &self.board.epics {
+                    if epic.parent_epic_id != Some(current) {
+                        continue;
+                    }
+                    if epic.status == status {
+                        items.push(ColumnItem::Epic(epic));
+                    }
+                }
+            }
+            _ => {}
         }
 
         items.sort_by_key(|item| match item {
@@ -599,15 +618,27 @@ impl App {
     /// Used by `clamp_selection()` which only needs counts, not the sorted items.
     fn column_item_count(&self, status: TaskStatus) -> usize {
         let task_count = self.tasks_by_status(status).len();
-        if !matches!(self.board.view_mode, ViewMode::Board(_)) {
-            return task_count;
-        }
-        let epic_count = self
-            .board
-            .epics
-            .iter()
-            .filter(|e| self.filter.matches(&e.repo_path) && e.status == status)
-            .count();
+        let epic_count = match &self.board.view_mode {
+            ViewMode::Board(_) => self
+                .board
+                .epics
+                .iter()
+                .filter(|e| {
+                    e.parent_epic_id.is_none()
+                        && self.filter.matches(&e.repo_path)
+                        && e.status == status
+                })
+                .count(),
+            ViewMode::Epic { epic_id, .. } => {
+                let current = *epic_id;
+                self.board
+                    .epics
+                    .iter()
+                    .filter(|e| e.parent_epic_id == Some(current) && e.status == status)
+                    .count()
+            }
+            _ => 0,
+        };
         task_count + epic_count
     }
 
@@ -625,12 +656,27 @@ impl App {
 
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
-        if matches!(self.board.view_mode, ViewMode::Board(_)) {
+        let epics_to_show: Vec<&Epic> = match &self.board.view_mode {
+            ViewMode::Board(_) => self
+                .board
+                .epics
+                .iter()
+                .filter(|e| e.parent_epic_id.is_none() && self.repo_matches(&e.repo_path))
+                .collect(),
+            ViewMode::Epic { epic_id, .. } => {
+                let current = *epic_id;
+                self.board
+                    .epics
+                    .iter()
+                    .filter(|e| e.parent_epic_id == Some(current))
+                    .collect()
+            }
+            _ => vec![],
+        };
+
+        if !epics_to_show.is_empty() {
             let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
-            for epic in &self.board.epics {
-                if !self.repo_matches(&epic.repo_path) {
-                    continue;
-                }
+            for epic in epics_to_show {
                 let epic_parent = epic.status;
                 if epic_parent != vcol.parent_status {
                     continue;
@@ -3139,13 +3185,22 @@ impl App {
     // Review board handlers
     // -----------------------------------------------------------------------
 
+    /// Resolve the `BoardSelection` to save when switching to review/security board.
+    /// For Epic views, walks up the parent chain to find the root BoardSelection.
+    fn board_selection_for_tab_switch(&self) -> BoardSelection {
+        let mut view = &self.board.view_mode;
+        loop {
+            match view {
+                ViewMode::Board(sel) => return sel.clone(),
+                ViewMode::Epic { parent, .. } => view = parent,
+                ViewMode::ReviewBoard { saved_board, .. }
+                | ViewMode::SecurityBoard { saved_board, .. } => return saved_board.clone(),
+            }
+        }
+    }
+
     fn handle_switch_to_security_board(&mut self) -> Vec<Command> {
-        let saved_board = match &self.board.view_mode {
-            ViewMode::Board(sel) => sel.clone(),
-            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
-            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
-            ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
-        };
+        let saved_board = self.board_selection_for_tab_switch();
         self.board.view_mode = ViewMode::SecurityBoard {
             mode: SecurityBoardMode::default(),
             selection: SecurityBoardSelection::new(),
@@ -3198,12 +3253,7 @@ impl App {
     }
 
     fn handle_switch_to_review_board(&mut self) -> Vec<Command> {
-        let saved_board = match &self.board.view_mode {
-            ViewMode::Board(sel) => sel.clone(),
-            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
-            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
-            ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
-        };
+        let saved_board = self.board_selection_for_tab_switch();
         self.board.view_mode = ViewMode::ReviewBoard {
             mode: ReviewBoardMode::Reviewer,
             selection: ReviewBoardSelection::new(),
@@ -3701,24 +3751,19 @@ impl App {
     }
 
     fn handle_enter_epic(&mut self, epic_id: EpicId) -> Vec<Command> {
-        let saved_board = match &self.board.view_mode {
-            ViewMode::Board(sel) => sel.clone(),
-            ViewMode::Epic { saved_board, .. } => saved_board.clone(),
-            ViewMode::ReviewBoard { saved_board, .. } => saved_board.clone(),
-            ViewMode::SecurityBoard { saved_board, .. } => saved_board.clone(),
-        };
+        let parent = Box::new(self.board.view_mode.clone());
         self.board.view_mode = ViewMode::Epic {
             epic_id,
             selection: BoardSelection::new(),
-            saved_board,
+            parent,
         };
         self.board.detail_visible = false;
         vec![]
     }
 
     fn handle_exit_epic(&mut self) -> Vec<Command> {
-        if let ViewMode::Epic { saved_board, .. } = &self.board.view_mode {
-            self.board.view_mode = ViewMode::Board(saved_board.clone());
+        if let ViewMode::Epic { parent, .. } = &self.board.view_mode {
+            self.board.view_mode = *parent.clone();
         }
         self.board.detail_visible = false;
         vec![]
@@ -3888,7 +3933,15 @@ impl App {
     fn handle_start_new_epic(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::InputEpicTitle;
         self.input.buffer.clear();
-        self.input.epic_draft = None;
+        let parent_epic_id = if let ViewMode::Epic { epic_id, .. } = self.board.view_mode {
+            Some(epic_id)
+        } else {
+            None
+        };
+        self.input.epic_draft = Some(EpicDraft {
+            parent_epic_id,
+            ..Default::default()
+        });
         self.set_status("Epic title: ".to_string());
         vec![]
     }
@@ -3900,10 +3953,16 @@ impl App {
             self.clear_status();
             vec![]
         } else {
+            let parent_epic_id = self
+                .input
+                .epic_draft
+                .as_ref()
+                .and_then(|d| d.parent_epic_id);
             self.input.epic_draft = Some(EpicDraft {
                 title: value,
                 description: String::new(),
                 repo_path: String::new(),
+                parent_epic_id,
             });
             self.input.mode = InputMode::InputEpicDescription;
             self.set_status("Opening editor for description...".to_string());

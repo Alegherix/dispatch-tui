@@ -233,7 +233,6 @@ fn my_prs_tab_label(app: &App, prefix: &str) -> String {
     }
 }
 
-
 fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
     let inactive_style = Style::default().fg(MUTED);
@@ -655,11 +654,26 @@ fn render_columns(
 ) {
     // In Epic mode, wrap the whole board in a purple rounded border with a
     // subtle purple background hint.
-    let board_area = if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
+    let board_area = if let ViewMode::Epic {
+        epic_id, parent, ..
+    } = app.view_mode()
+    {
         let epic = app.epics().iter().find(|e| e.id == *epic_id);
-        let title = epic
-            .map(|e| format!(" {} ", truncate(&e.title, 40)))
-            .unwrap_or_default();
+        let current_title = epic.map(|e| truncate(&e.title, 30)).unwrap_or_default();
+        let title = if let ViewMode::Epic {
+            epic_id: parent_id, ..
+        } = parent.as_ref()
+        {
+            let parent_title = app
+                .epics()
+                .iter()
+                .find(|e| e.id == *parent_id)
+                .map(|e| truncate(&e.title, 30))
+                .unwrap_or_default();
+            format!(" {} > {} ", parent_title, current_title)
+        } else {
+            format!(" {} ", current_title)
+        };
         let block = Block::default()
             .title(title)
             .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD))

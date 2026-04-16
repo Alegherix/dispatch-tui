@@ -396,6 +396,7 @@ pub struct Epic {
     pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
     pub auto_dispatch: bool,
+    pub parent_epic_id: Option<EpicId>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1812,6 +1813,7 @@ mod tests {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -1833,6 +1835,7 @@ mod tests {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -2032,6 +2035,7 @@ mod tests {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

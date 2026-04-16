@@ -132,14 +132,24 @@ entity Epic {
     plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
     auto_dispatch: Boolean = true
+    parent: Epic?         -- null for root epics; set for nested sub-epics
     created_at: Timestamp
     updated_at: Timestamp
 
     has_plan: plan_path != null
+    is_root: parent = null
 
     subtasks: Task with epic = this
     active_subtasks: subtasks where status != archived
     subtask_statuses: active_subtasks -> status
+
+    sub_epics: Epic with parent = this
+    active_sub_epics: sub_epics where status != archived
+
+    -- Heterogeneous set used for status recalculation and dispatch ordering.
+    -- Combines active tasks and active sub-epics; each element contributes
+    -- its .status value to the parent's recalculated status.
+    active_children: active_subtasks + active_sub_epics
 }
 
 entity TaskUsage {

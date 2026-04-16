@@ -7,7 +7,7 @@ fn full_epic_lifecycle() {
 
     // 1. Create an epic
     let epic = db
-        .create_epic("Auth Rewrite", "Rewrite auth system", "/repo")
+        .create_epic("Auth Rewrite", "Rewrite auth system", "/repo", None)
         .unwrap();
 
     // 2. Create subtasks linked to epic

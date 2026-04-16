@@ -37,6 +37,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (31, migrate_v31_re_expand_tilde_paths),
     (32, migrate_v32_add_base_branch),
     (33, migrate_v33_add_auto_dispatch),
+    (34, migrate_v34_add_parent_epic_id),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -729,4 +730,9 @@ fn migrate_v29_json_filter_presets(conn: &Connection) -> Result<()> {
 pub(super) fn migrate_v33_add_auto_dispatch(conn: &Connection) -> Result<()> {
     conn.execute_batch("ALTER TABLE epics ADD COLUMN auto_dispatch BOOLEAN NOT NULL DEFAULT 1;")
         .context("Failed to add auto_dispatch column to epics")
+}
+
+fn migrate_v34_add_parent_epic_id(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE epics ADD COLUMN parent_epic_id INTEGER REFERENCES epics(id);")
+        .context("Failed to add parent_epic_id column to epics")
 }

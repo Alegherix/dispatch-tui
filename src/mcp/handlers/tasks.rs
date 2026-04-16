@@ -534,7 +534,10 @@ pub(super) async fn handle_wrap_up(
                     }
                     if let Some(epic_id) = task.epic_id {
                         if let Err(err) = db.recalculate_epic_status(epic_id) {
-                            tracing::warn!("failed to recalculate epic status for epic {}: {err}", epic_id.0);
+                            tracing::warn!(
+                                "failed to recalculate epic status for epic {}: {err}",
+                                epic_id.0
+                            );
                         }
                     }
                     let ad_runner = state.runner.clone();
@@ -598,7 +601,10 @@ pub(super) async fn handle_wrap_up(
                     }
                     if let Some(epic_id) = task.epic_id {
                         if let Err(err) = db.recalculate_epic_status(epic_id) {
-                            tracing::warn!("failed to recalculate epic status for epic {}: {err}", epic_id.0);
+                            tracing::warn!(
+                                "failed to recalculate epic status for epic {}: {err}",
+                                epic_id.0
+                            );
                         }
                     }
                     let pr_url = result.pr_url.clone();
@@ -700,7 +706,10 @@ pub(super) async fn handle_dispatch_next(
                 }
                 if let Some(epic_id) = next_task.epic_id {
                     if let Err(err) = db.recalculate_epic_status(epic_id) {
-                        tracing::warn!("failed to recalculate epic status for epic {}: {err}", epic_id.0);
+                        tracing::warn!(
+                            "failed to recalculate epic status for epic {}: {err}",
+                            epic_id.0
+                        );
                     }
                 }
             }

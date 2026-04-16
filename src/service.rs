@@ -342,7 +342,10 @@ impl TaskService {
             if let Ok(Some(task)) = self.db.get_task(task_id) {
                 if let Some(old_epic_id) = task.epic_id {
                     if let Err(err) = self.db.recalculate_epic_status(old_epic_id) {
-                        tracing::warn!("failed to recalculate epic status for epic {}: {err}", old_epic_id.0);
+                        tracing::warn!(
+                            "failed to recalculate epic status for epic {}: {err}",
+                            old_epic_id.0
+                        );
                     }
                 }
             }
@@ -359,7 +362,10 @@ impl TaskService {
             if let Ok(Some(task)) = self.db.get_task(task_id) {
                 if let Some(epic_id) = task.epic_id {
                     if let Err(err) = self.db.recalculate_epic_status(epic_id) {
-                        tracing::warn!("failed to recalculate epic status for epic {}: {err}", epic_id.0);
+                        tracing::warn!(
+                            "failed to recalculate epic status for epic {}: {err}",
+                            epic_id.0
+                        );
                     }
                 }
             }
@@ -405,7 +411,10 @@ impl TaskService {
             if let Ok(Some(task)) = self.db.get_task(task_id) {
                 if let Some(epic_id) = task.epic_id {
                     if let Err(err) = self.db.recalculate_epic_status(epic_id) {
-                        tracing::warn!("failed to recalculate epic status for epic {}: {err}", epic_id.0);
+                        tracing::warn!(
+                            "failed to recalculate epic status for epic {}: {err}",
+                            epic_id.0
+                        );
                     }
                 }
             }
@@ -705,6 +714,7 @@ pub struct CreateEpicParams {
     pub description: String,
     pub repo_path: String,
     pub sort_order: Option<i64>,
+    pub parent_epic_id: Option<EpicId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -723,7 +733,12 @@ impl EpicService {
     pub fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
         let epic = self
             .db
-            .create_epic(&params.title, &params.description, &params.repo_path)
+            .create_epic(
+                &params.title,
+                &params.description,
+                &params.repo_path,
+                params.parent_epic_id,
+            )
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
         if let Some(so) = params.sort_order {
@@ -755,6 +770,18 @@ impl EpicService {
     pub fn list_epics(&self) -> Result<Vec<Epic>, ServiceError> {
         self.db
             .list_epics()
+            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
+    }
+
+    pub fn list_root_epics(&self) -> Result<Vec<Epic>, ServiceError> {
+        self.db
+            .list_root_epics()
+            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
+    }
+
+    pub fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>, ServiceError> {
+        self.db
+            .list_sub_epics(parent_id)
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
     }
 
@@ -1201,6 +1228,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1238,6 +1266,7 @@ mod tests {
                 description: "desc".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1264,6 +1293,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1294,6 +1324,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1323,6 +1354,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1355,6 +1387,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1390,6 +1423,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
         let e2 = epic_svc
@@ -1398,6 +1432,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1467,6 +1502,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1503,6 +1539,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1538,6 +1575,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1583,6 +1621,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1654,6 +1693,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1821,6 +1861,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -1961,6 +2002,7 @@ mod tests {
                 description: "".into(),
                 repo_path: "/repo".into(),
                 sort_order: None,
+                parent_epic_id: None,
             })
             .unwrap();
 
@@ -2199,5 +2241,97 @@ mod tests {
             empty.updated_field_names().is_empty(),
             "updated_field_names should be empty when no fields are set"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Epic-in-epic service tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn create_sub_epic_links_parent() {
+        let db = test_db();
+        let svc = epic_svc(&db);
+
+        let parent = svc
+            .create_epic(CreateEpicParams {
+                title: "Parent".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+            })
+            .unwrap();
+
+        let child = svc
+            .create_epic(CreateEpicParams {
+                title: "Child".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: Some(parent.id),
+            })
+            .unwrap();
+
+        assert_eq!(child.parent_epic_id, Some(parent.id));
+
+        let fetched = svc.get_epic(child.id.0).unwrap();
+        assert_eq!(fetched.parent_epic_id, Some(parent.id));
+    }
+
+    #[test]
+    fn list_root_epics_service() {
+        let db = test_db();
+        let svc = epic_svc(&db);
+
+        let parent = svc
+            .create_epic(CreateEpicParams {
+                title: "Root".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+            })
+            .unwrap();
+        svc.create_epic(CreateEpicParams {
+            title: "Sub".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            sort_order: None,
+            parent_epic_id: Some(parent.id),
+        })
+        .unwrap();
+
+        let roots = svc.list_root_epics().unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].id, parent.id);
+    }
+
+    #[test]
+    fn list_sub_epics_service() {
+        let db = test_db();
+        let svc = epic_svc(&db);
+
+        let parent = svc
+            .create_epic(CreateEpicParams {
+                title: "Parent".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: None,
+            })
+            .unwrap();
+        let child = svc
+            .create_epic(CreateEpicParams {
+                title: "Child".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+                parent_epic_id: Some(parent.id),
+            })
+            .unwrap();
+
+        let subs = svc.list_sub_epics(parent.id).unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].id, child.id);
     }
 }

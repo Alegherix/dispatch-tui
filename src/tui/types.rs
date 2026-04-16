@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, AlertSeverity, DEFAULT_BASE_BRANCH, DispatchMode, Epic, EpicId, EpicSubstatus,
-    PrRef, ReviewDecision, SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    AlertKind, AlertSeverity, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
+    SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -1299,7 +1299,10 @@ pub enum ViewMode {
     Epic {
         epic_id: EpicId,
         selection: BoardSelection,
-        saved_board: BoardSelection,
+        /// The view to restore when exiting this epic.
+        /// For a root epic entered from the board, this is `ViewMode::Board(...)`.
+        /// For a nested sub-epic, this is `ViewMode::Epic { ... }` of the parent.
+        parent: Box<ViewMode>,
     },
     ReviewBoard {
         mode: ReviewBoardMode,
@@ -1367,6 +1370,7 @@ pub struct EpicDraft {
     pub title: String,
     pub description: String,
     pub repo_path: String,
+    pub parent_epic_id: Option<EpicId>,
 }
 
 // ---------------------------------------------------------------------------

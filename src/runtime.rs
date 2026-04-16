@@ -798,12 +798,14 @@ impl TuiRuntime {
         title: String,
         description: String,
         repo_path: String,
+        parent_epic_id: Option<crate::models::EpicId>,
     ) {
         match self.epic_svc.create_epic(crate::service::CreateEpicParams {
             title,
             description,
             repo_path,
             sort_order: None,
+            parent_epic_id,
         }) {
             Ok(epic) => {
                 app.update(Message::EpicCreated(epic));
@@ -1738,9 +1740,13 @@ async fn execute_commands(
                 tmux_window,
             } => rt.exec_finish(id, repo_path, branch, base_branch, worktree, tmux_window),
             // Epic commands
-            Command::InsertEpic(draft) => {
-                rt.exec_insert_epic(app, draft.title, draft.description, draft.repo_path)
-            }
+            Command::InsertEpic(draft) => rt.exec_insert_epic(
+                app,
+                draft.title,
+                draft.description,
+                draft.repo_path,
+                draft.parent_epic_id,
+            ),
             Command::EditEpicInEditor(epic) => {
                 rt.exec_edit_epic_in_editor(app, epic, terminal, key_rx)?
             }
@@ -2515,7 +2521,7 @@ mod tests {
         // Create an epic in the DB
         let epic = rt
             .database
-            .create_epic("Auth redesign", "Rework login", "/repo")
+            .create_epic("Auth redesign", "Rework login", "/repo", None)
             .unwrap();
 
         rt.exec_dispatch_epic(&mut app, epic.clone());
@@ -2844,7 +2850,7 @@ mod tests {
         std::fs::create_dir_all(format!("{repo}/.worktrees/1-epic-task")).unwrap();
 
         let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-        let epic = db.create_epic("My Epic", "epic desc", repo).unwrap();
+        let epic = db.create_epic("My Epic", "epic desc", repo, None).unwrap();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
             // No detect_default_branch call — task.base_branch is used directly
@@ -3167,6 +3173,7 @@ mod tests {
             "My Epic".into(),
             "description".into(),
             "/repo".into(),
+            None,
         );
         assert_eq!(app.epics().len(), 1);
         assert_eq!(app.epics()[0].title, "My Epic");
@@ -3176,7 +3183,10 @@ mod tests {
     #[test]
     fn exec_delete_epic_removes_from_db() {
         let (rt, mut app) = test_runtime();
-        let epic = rt.database.create_epic("Doomed", "bye", "/repo").unwrap();
+        let epic = rt
+            .database
+            .create_epic("Doomed", "bye", "/repo", None)
+            .unwrap();
         rt.exec_delete_epic(&mut app, epic.id);
         assert!(rt.database.list_epics().unwrap().is_empty());
         assert!(app.error_popup().is_none());
@@ -3185,7 +3195,10 @@ mod tests {
     #[test]
     fn exec_persist_epic_updates_status() {
         let (rt, mut app) = test_runtime();
-        let epic = rt.database.create_epic("Epic", "desc", "/repo").unwrap();
+        let epic = rt
+            .database
+            .create_epic("Epic", "desc", "/repo", None)
+            .unwrap();
         rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None);
         let updated = rt.database.get_epic(epic.id).unwrap().unwrap();
         assert_eq!(updated.status, models::TaskStatus::Running);
@@ -3194,7 +3207,10 @@ mod tests {
     #[test]
     fn exec_persist_epic_noop_when_nothing_to_update() {
         let (rt, mut app) = test_runtime();
-        let epic = rt.database.create_epic("Epic", "desc", "/repo").unwrap();
+        let epic = rt
+            .database
+            .create_epic("Epic", "desc", "/repo", None)
+            .unwrap();
         // Should return early without error
         rt.exec_persist_epic(&mut app, epic.id, None, None);
         assert!(app.error_popup().is_none());
@@ -3204,7 +3220,9 @@ mod tests {
     fn exec_refresh_epics_from_db_syncs_to_app() {
         let (rt, mut app) = test_runtime();
         // Insert epic directly into DB, bypassing app
-        rt.database.create_epic("Direct", "desc", "/repo").unwrap();
+        rt.database
+            .create_epic("Direct", "desc", "/repo", None)
+            .unwrap();
         assert!(app.epics().is_empty());
         rt.exec_refresh_epics_from_db(&mut app);
         assert_eq!(app.epics().len(), 1);

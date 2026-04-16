@@ -117,6 +117,7 @@ mod tests {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

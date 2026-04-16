@@ -1079,7 +1079,7 @@ fn shift_d_in_epic_view_quick_dispatches_subtask_single_repo() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert_eq!(cmds.len(), 1);
@@ -1098,7 +1098,7 @@ fn shift_d_in_epic_view_shows_repo_selection_with_multiple_repos() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let cmds = app.handle_key(make_shift_key(KeyCode::Char('D')));
     assert!(cmds.is_empty());
@@ -1115,7 +1115,7 @@ fn shift_d_in_epic_view_repo_selection_dispatches_with_epic_id() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     // Enter selection mode
     app.handle_key(make_shift_key(KeyCode::Char('D')));
@@ -2079,8 +2079,7 @@ fn description_editor_result_for_epic() {
     app.input.mode = InputMode::InputEpicDescription;
     app.input.epic_draft = Some(EpicDraft {
         title: "E".to_string(),
-        description: String::new(),
-        repo_path: String::new(),
+        ..Default::default()
     });
     app.update(Message::DescriptionEditorResult(
         "epic desc\nline 2".to_string(),
@@ -3249,8 +3248,16 @@ fn make_epic(id: i64) -> Epic {
         plan_path: None,
         sort_order: None,
         auto_dispatch: true,
+        parent_epic_id: None,
         created_at: now,
         updated_at: now,
+    }
+}
+
+fn make_epic_with_title(id: i64, title: &str) -> Epic {
+    Epic {
+        title: title.to_string(),
+        ..make_epic(id)
     }
 }
 
@@ -3280,7 +3287,7 @@ fn tasks_for_current_view_epic_shows_only_subtasks() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
 
     let visible = app.tasks_for_current_view();
@@ -3354,16 +3361,13 @@ fn enter_epic_switches_to_epic_view() {
 
     match &app.board.view_mode {
         ViewMode::Epic {
-            epic_id,
-            saved_board,
-            ..
+            epic_id, parent, ..
         } => {
             assert_eq!(*epic_id, EpicId(10));
-            assert_eq!(
-                saved_board.column(),
-                2,
-                "board selection should be preserved"
-            );
+            match parent.as_ref() {
+                ViewMode::Board(sel) => assert_eq!(sel.column(), 2, "board column should be saved"),
+                _ => panic!("Expected parent to be ViewMode::Board"),
+            }
         }
         _ => panic!("Expected ViewMode::Epic"),
     }
@@ -3414,7 +3418,7 @@ fn column_items_epic_view_no_epics() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     app.board.epics = vec![make_epic(10)];
 
@@ -3749,7 +3753,7 @@ fn e_key_in_epic_view_edits_epic() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert_eq!(cmds.len(), 1);
@@ -3790,7 +3794,7 @@ fn esc_in_epic_view_exits_to_board() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     app.handle_key(make_key(KeyCode::Esc));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
@@ -6012,6 +6016,7 @@ fn repo_filter_applies_to_epics_in_column_items() {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: now,
             updated_at: now,
         },
@@ -6024,6 +6029,7 @@ fn repo_filter_applies_to_epics_in_column_items() {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: now,
             updated_at: now,
         },
@@ -6171,6 +6177,7 @@ fn repo_filter_exclude_applies_to_epics() {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: now,
             updated_at: now,
         },
@@ -6183,6 +6190,7 @@ fn repo_filter_exclude_applies_to_epics() {
             plan_path: None,
             sort_order: None,
             auto_dispatch: true,
+            parent_epic_id: None,
             created_at: now,
             updated_at: now,
         },
@@ -10348,7 +10356,7 @@ fn render_epic_banner_shows_title() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -10412,7 +10420,7 @@ fn render_detail_task_with_epic_reference() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
@@ -10684,7 +10692,7 @@ fn render_tab_bar_epic_mode_shows_epic_title() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
@@ -10702,7 +10710,7 @@ fn render_tab_bar_epic_mode_replaces_tasks_tab() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(10),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
@@ -13544,7 +13552,7 @@ fn handle_key_epic_repo_path_enter_selects_cursor() {
     app.input.epic_draft = Some(EpicDraft {
         title: "Epic".to_string(),
         description: "desc".to_string(),
-        repo_path: String::new(),
+        ..Default::default()
     });
     app.input.buffer.clear();
     app.input.repo_cursor = 0;
@@ -14740,7 +14748,7 @@ fn handle_key_normal_epic_view_routes_correctly() {
     app.board.view_mode = ViewMode::Epic {
         epic_id: EpicId(1),
         selection: BoardSelection::new(),
-        saved_board: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
     };
     // 'q' in epic view exits to board (doesn't quit)
     let cmds = app.handle_key(make_key(KeyCode::Char('q')));
@@ -15230,8 +15238,7 @@ fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
     app.input.mode = InputMode::InputEpicDescription;
     app.input.epic_draft = Some(crate::tui::types::EpicDraft {
         title: "E".to_string(),
-        description: String::new(),
-        repo_path: String::new(),
+        ..Default::default()
     });
     app.input.buffer = "epic desc".to_string();
     app.handle_key(make_key(KeyCode::Enter));
@@ -15897,5 +15904,225 @@ fn dependabot_in_review_column_findings_ready_sorts_before_reviewing() {
         in_review[1].agent_status,
         Some(crate::models::ReviewAgentStatus::Reviewing),
         "Reviewing should sort after FindingsReady"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Epic-in-epic: TUI navigation tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn enter_sub_epic_from_epic_view_nests_parent() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(1), make_epic(2)];
+    // Start in Epic view for epic 1
+    app.update(Message::EnterEpic(EpicId(1)));
+    app.selection_mut().set_column(2);
+
+    // Enter sub-epic 2 from within epic 1
+    app.update(Message::EnterEpic(EpicId(2)));
+
+    match &app.board.view_mode {
+        ViewMode::Epic {
+            epic_id, parent, ..
+        } => {
+            assert_eq!(*epic_id, EpicId(2), "should be in sub-epic 2");
+            match parent.as_ref() {
+                ViewMode::Epic {
+                    epic_id: parent_id, ..
+                } => {
+                    assert_eq!(*parent_id, EpicId(1), "parent should be epic 1");
+                }
+                _ => panic!("Expected parent to be ViewMode::Epic"),
+            }
+        }
+        _ => panic!("Expected ViewMode::Epic"),
+    }
+}
+
+#[test]
+fn exit_sub_epic_returns_to_parent_epic() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(1), make_epic(2)];
+    app.update(Message::EnterEpic(EpicId(1)));
+    app.update(Message::EnterEpic(EpicId(2)));
+
+    app.update(Message::ExitEpic);
+
+    match &app.board.view_mode {
+        ViewMode::Epic { epic_id, .. } => {
+            assert_eq!(*epic_id, EpicId(1), "should return to parent epic 1");
+        }
+        _ => panic!("Expected ViewMode::Epic after exiting sub-epic"),
+    }
+}
+
+#[test]
+fn exit_from_root_epic_returns_to_board() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(1)];
+    app.selection_mut().set_column(3);
+    app.update(Message::EnterEpic(EpicId(1)));
+    app.update(Message::ExitEpic);
+
+    match &app.board.view_mode {
+        ViewMode::Board(sel) => {
+            assert_eq!(sel.column(), 3, "board column should be restored");
+        }
+        _ => panic!("Expected ViewMode::Board"),
+    }
+}
+
+#[test]
+fn board_view_excludes_sub_epics() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut sub = make_epic(20);
+    sub.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), sub];
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    // Only root epic (id=10) should appear; sub-epic (id=20) must not
+    let epic_ids: Vec<i64> = items
+        .iter()
+        .filter_map(|i| {
+            if let ColumnItem::Epic(e) = i {
+                Some(e.id.0)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(epic_ids, vec![10], "only root epic should appear on board");
+}
+
+#[test]
+fn epic_view_includes_sub_epics_as_column_items() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut sub = make_epic(20);
+    sub.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), sub];
+
+    app.update(Message::EnterEpic(EpicId(10)));
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    // sub-epic (id=20) should appear as an Epic column item
+    let epic_ids: Vec<i64> = items
+        .iter()
+        .filter_map(|i| {
+            if let ColumnItem::Epic(e) = i {
+                Some(e.id.0)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        epic_ids.contains(&20),
+        "sub-epic should appear inside parent epic view"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 5: breadcrumb header for nested epic view
+// ---------------------------------------------------------------------------
+
+#[test]
+fn epic_view_breadcrumb_shows_parent_and_child_title() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let parent_epic = make_epic_with_title(1, "Root Epic");
+    let child_epic = make_epic_with_title(2, "Child Epic");
+    app.board.epics = vec![parent_epic.clone(), child_epic.clone()];
+
+    // Nested: viewing child epic, parent is another epic view
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: child_epic.id,
+        selection: BoardSelection::new(),
+        parent: Box::new(ViewMode::Epic {
+            epic_id: parent_epic.id,
+            selection: BoardSelection::new(),
+            parent: Box::new(ViewMode::Board(BoardSelection::new())),
+        }),
+    };
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Root Epic"),
+        "breadcrumb should show parent epic title"
+    );
+    assert!(
+        buffer_contains(&buf, "Child Epic"),
+        "breadcrumb should show current epic title"
+    );
+    // The separator between parent and child
+    assert!(
+        buffer_contains(&buf, ">"),
+        "breadcrumb should show > separator between parent and child"
+    );
+}
+
+#[test]
+fn epic_view_no_breadcrumb_when_parent_is_board() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let epic = make_epic_with_title(1, "Only Epic");
+    app.board.epics = vec![epic.clone()];
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: epic.id,
+        selection: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
+    };
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+    assert!(
+        buffer_contains(&buf, "Only Epic"),
+        "title should show current epic title"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: sub-epic creation from TUI
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_epic_in_epic_view_inherits_parent() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let parent_id = EpicId(42);
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: parent_id,
+        selection: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
+    };
+
+    // Enter the epic creation flow
+    app.update(Message::StartNewEpic);
+    assert_eq!(app.input.mode, InputMode::InputEpicTitle);
+
+    // The draft should already know about the parent
+    let draft_parent = app.input.epic_draft.as_ref().and_then(|d| d.parent_epic_id);
+    assert_eq!(
+        draft_parent,
+        Some(parent_id),
+        "epic_draft.parent_epic_id should be set to current epic's id"
+    );
+
+    // Submit title, description, repo path — the final command must carry parent_epic_id
+    app.update(Message::SubmitEpicTitle("Sub Epic".to_string()));
+    app.update(Message::SubmitEpicDescription("desc".to_string()));
+    let cmds = app.update(Message::SubmitEpicRepoPath("/tmp".to_string()));
+
+    let draft = cmds
+        .iter()
+        .find_map(|c| {
+            if let Command::InsertEpic(d) = c {
+                Some(d)
+            } else {
+                None
+            }
+        })
+        .expect("expected Command::InsertEpic");
+
+    assert_eq!(
+        draft.parent_epic_id,
+        Some(parent_id),
+        "InsertEpic draft must carry parent_epic_id"
     );
 }

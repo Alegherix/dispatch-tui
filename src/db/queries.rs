@@ -470,12 +470,18 @@ impl super::SettingsStore for Database {
 // ---------------------------------------------------------------------------
 
 impl super::EpicCrud for Database {
-    fn create_epic(&self, title: &str, description: &str, repo_path: &str) -> Result<Epic> {
+    fn create_epic(
+        &self,
+        title: &str,
+        description: &str,
+        repo_path: &str,
+        parent_epic_id: Option<EpicId>,
+    ) -> Result<Epic> {
         let id = {
             let conn = self.conn()?;
             conn.execute(
-                "INSERT INTO epics (title, description, repo_path) VALUES (?1, ?2, ?3)",
-                params![title, description, repo_path],
+                "INSERT INTO epics (title, description, repo_path, parent_epic_id) VALUES (?1, ?2, ?3, ?4)",
+                params![title, description, repo_path, parent_epic_id.map(|e| e.0)],
             )
             .context("Failed to insert epic")?;
             EpicId(conn.last_insert_rowid())
@@ -487,7 +493,7 @@ impl super::EpicCrud for Database {
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, created_at, updated_at
+            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
              FROM epics WHERE id = ?1",
             params![id.0],
             row_to_epic,
@@ -500,7 +506,7 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
                  FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_epics")?;
@@ -509,6 +515,38 @@ impl super::EpicCrud for Database {
             .context("Failed to query epics")?
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Failed to collect epics")?;
+        Ok(epics)
+    }
+
+    fn list_root_epics(&self) -> Result<Vec<Epic>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
+                 FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+            )
+            .context("Failed to prepare list_root_epics")?;
+        let epics = stmt
+            .query_map([], row_to_epic)
+            .context("Failed to query root epics")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect root epics")?;
+        Ok(epics)
+    }
+
+    fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
+                 FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
+            )
+            .context("Failed to prepare list_sub_epics")?;
+        let epics = stmt
+            .query_map(params![parent_id.0], row_to_epic)
+            .context("Failed to query sub-epics")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to collect sub-epics")?;
         Ok(epics)
     }
 
@@ -626,20 +664,32 @@ impl super::EpicCrud for Database {
             None => return Ok(()),
         };
 
-        let subtasks = self.list_tasks_for_epic(epic_id)?;
-        let statuses: Vec<TaskStatus> = subtasks
-            .iter()
+        // Collect statuses from active tasks
+        let task_statuses: Vec<TaskStatus> = self
+            .list_tasks_for_epic(epic_id)?
+            .into_iter()
             .filter(|t| t.status != TaskStatus::Archived)
             .map(|t| t.status)
             .collect();
 
-        let derived = if statuses.is_empty() {
+        // Collect statuses from active sub-epics
+        let sub_epic_statuses: Vec<TaskStatus> = self
+            .list_sub_epics(epic_id)?
+            .into_iter()
+            .filter(|e| e.status != TaskStatus::Archived)
+            .map(|e| e.status)
+            .collect();
+
+        let all_statuses: Vec<TaskStatus> =
+            task_statuses.into_iter().chain(sub_epic_statuses).collect();
+
+        let derived = if all_statuses.is_empty() {
             TaskStatus::Backlog
-        } else if statuses.iter().all(|s| *s == TaskStatus::Done) {
+        } else if all_statuses.iter().all(|s| *s == TaskStatus::Done) {
             TaskStatus::Done
-        } else if statuses.contains(&TaskStatus::Review) {
+        } else if all_statuses.contains(&TaskStatus::Review) {
             TaskStatus::Review
-        } else if statuses.contains(&TaskStatus::Running) {
+        } else if all_statuses.contains(&TaskStatus::Running) {
             TaskStatus::Running
         } else {
             TaskStatus::Backlog
@@ -648,6 +698,12 @@ impl super::EpicCrud for Database {
         if derived != epic.status {
             self.patch_epic(epic_id, &EpicPatch::new().status(derived))?;
         }
+
+        // Propagate upward to the parent epic if one exists
+        if let Some(parent_id) = epic.parent_epic_id {
+            self.recalculate_epic_status(parent_id)?;
+        }
+
         Ok(())
     }
 }
@@ -1167,6 +1223,10 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         plan_path: row.get("plan_path")?,
         sort_order: row.get::<_, Option<i64>>("sort_order").unwrap_or(None),
         auto_dispatch: row.get::<_, bool>("auto_dispatch").unwrap_or(true),
+        parent_epic_id: row
+            .get::<_, Option<i64>>("parent_epic_id")
+            .unwrap_or(None)
+            .map(EpicId),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })

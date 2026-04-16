@@ -1431,7 +1431,10 @@ async fn create_epic_missing_repo_path() {
 #[tokio::test]
 async fn get_epic_found() {
     let state = test_state();
-    let epic = state.db.create_epic("Get Me", "desc", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("Get Me", "desc", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1466,7 +1469,10 @@ async fn get_epic_not_found() {
 #[tokio::test]
 async fn get_epic_shows_subtask_summary() {
     let state = test_state();
-    let epic = state.db.create_epic("With Tasks", "", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("With Tasks", "", "/repo", None)
+        .unwrap();
     let t1 = state
         .db
         .create_task("Sub 1", "", "/repo", None, TaskStatus::Done, "main")
@@ -1497,7 +1503,10 @@ async fn get_epic_shows_subtask_summary() {
 #[tokio::test]
 async fn get_epic_accepts_string_id() {
     let state = test_state();
-    let epic = state.db.create_epic("String ID", "", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("String ID", "", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1533,8 +1542,14 @@ async fn list_epics_empty() {
 #[tokio::test]
 async fn list_epics_with_items() {
     let state = test_state();
-    state.db.create_epic("Epic A", "desc a", "/repo").unwrap();
-    state.db.create_epic("Epic B", "desc b", "/repo").unwrap();
+    state
+        .db
+        .create_epic("Epic A", "desc a", "/repo", None)
+        .unwrap();
+    state
+        .db
+        .create_epic("Epic B", "desc b", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1550,7 +1565,7 @@ async fn list_epics_with_items() {
 #[tokio::test]
 async fn list_epics_shows_subtask_counts() {
     let state = test_state();
-    let epic = state.db.create_epic("Tracked", "", "/repo").unwrap();
+    let epic = state.db.create_epic("Tracked", "", "/repo", None).unwrap();
     let t1 = state
         .db
         .create_task("Done", "", "/repo", None, TaskStatus::Done, "main")
@@ -1578,7 +1593,10 @@ async fn list_epics_shows_subtask_counts() {
 #[tokio::test]
 async fn update_epic_title() {
     let state = test_state();
-    let epic = state.db.create_epic("Old Title", "", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("Old Title", "", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1600,7 +1618,10 @@ async fn update_epic_title() {
 #[tokio::test]
 async fn update_epic_mark_done() {
     let state = test_state();
-    let epic = state.db.create_epic("To Finish", "", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("To Finish", "", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1624,7 +1645,10 @@ async fn update_epic_mark_done() {
 #[tokio::test]
 async fn update_epic_multiple_fields() {
     let state = test_state();
-    let epic = state.db.create_epic("Old", "old desc", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("Old", "old desc", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1649,7 +1673,7 @@ async fn update_epic_multiple_fields() {
 #[tokio::test]
 async fn update_epic_accepts_string_id() {
     let state = test_state();
-    let epic = state.db.create_epic("Str Epic", "", "/repo").unwrap();
+    let epic = state.db.create_epic("Str Epic", "", "/repo", None).unwrap();
 
     let resp = call(
         &state,
@@ -1670,7 +1694,10 @@ async fn update_epic_accepts_string_id() {
 #[tokio::test]
 async fn update_epic_plan() {
     let state = test_state();
-    let epic = state.db.create_epic("Planned Epic", "", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("Planned Epic", "", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1815,7 +1842,10 @@ async fn claim_task_worktree_without_worktrees_dir() {
 #[tokio::test]
 async fn create_task_with_epic_id() {
     let state = test_state();
-    let epic = state.db.create_epic("Parent Epic", "", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("Parent Epic", "", "/repo", None)
+        .unwrap();
 
     let resp = call(
         &state,
@@ -1840,7 +1870,7 @@ async fn create_task_with_epic_id() {
 #[tokio::test]
 async fn create_task_with_string_epic_id() {
     let state = test_state();
-    let epic = state.db.create_epic("Parent", "", "/repo").unwrap();
+    let epic = state.db.create_epic("Parent", "", "/repo", None).unwrap();
 
     let resp = call(
         &state,
@@ -1868,7 +1898,7 @@ async fn create_task_with_string_epic_id() {
 #[tokio::test]
 async fn update_epic_no_fields_errors() {
     let state = test_state();
-    let epic = state.db.create_epic("Test", "", "/repo").unwrap();
+    let epic = state.db.create_epic("Test", "", "/repo", None).unwrap();
 
     let resp = call(
         &state,
@@ -2551,7 +2581,7 @@ async fn wrap_up_pr_push_fails_returns_error() {
 #[tokio::test]
 async fn update_task_status_recalculates_epic_status() {
     let state = test_state();
-    let epic = state.db.create_epic("E", "", "/repo").unwrap();
+    let epic = state.db.create_epic("E", "", "/repo", None).unwrap();
     let task_id = state
         .db
         .create_task("T", "", "/repo", None, TaskStatus::Backlog, "main")
@@ -2987,7 +3017,7 @@ async fn update_task_valid_tag() {
 #[tokio::test]
 async fn update_task_sets_epic_id() {
     let state = test_state();
-    let epic = state.db.create_epic("Parent", "", "/repo").unwrap();
+    let epic = state.db.create_epic("Parent", "", "/repo", None).unwrap();
     let task_id = create_task_fixture(&state);
 
     let resp = call(
@@ -3108,7 +3138,7 @@ async fn create_task_with_nonexistent_epic() {
 #[tokio::test]
 async fn list_tasks_filters_by_epic_id() {
     let state = test_state();
-    let epic = state.db.create_epic("My Epic", "", "/repo").unwrap();
+    let epic = state.db.create_epic("My Epic", "", "/repo", None).unwrap();
     let t1 = state
         .db
         .create_task(
@@ -3156,7 +3186,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
     let state = test_state();
     let epic = state
         .db
-        .create_epic("Combined Filter", "", "/repo")
+        .create_epic("Combined Filter", "", "/repo", None)
         .unwrap();
     let t1 = state
         .db
@@ -3447,7 +3477,7 @@ async fn wrap_up_rebase_recalculates_epic_status() {
         runner,
     });
 
-    let epic = db.create_epic("E", "", "/repo").unwrap();
+    let epic = db.create_epic("E", "", "/repo", None).unwrap();
     let task_id = db
         .create_task(
             "Only Task",
@@ -3533,7 +3563,10 @@ async fn wrap_up_accepts_string_task_id() {
 #[tokio::test]
 async fn get_task_shows_all_fields() {
     let state = test_state();
-    let epic = state.db.create_epic("Parent Epic", "", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("Parent Epic", "", "/repo", None)
+        .unwrap();
     let task_id = state
         .db
         .create_task(
@@ -3658,7 +3691,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
 #[tokio::test]
 async fn list_tasks_shows_epic_indicator() {
     let state = test_state();
-    let epic = state.db.create_epic("Sprint 1", "", "/repo").unwrap();
+    let epic = state.db.create_epic("Sprint 1", "", "/repo", None).unwrap();
     let task_id = state
         .db
         .create_task(
@@ -3764,11 +3797,11 @@ async fn list_epics_excludes_archived() {
     let state = test_state();
     state
         .db
-        .create_epic("Active Epic", "desc", "/repo")
+        .create_epic("Active Epic", "desc", "/repo", None)
         .unwrap();
     let archived_epic = state
         .db
-        .create_epic("Archived Epic", "desc", "/repo")
+        .create_epic("Archived Epic", "desc", "/repo", None)
         .unwrap();
     state
         .db
@@ -3812,7 +3845,10 @@ async fn dispatch_next_epic_not_found_returns_error() {
 #[tokio::test]
 async fn dispatch_next_no_backlog_returns_success_noop() {
     let state = test_state();
-    let epic = state.db.create_epic("Test Epic", "desc", "/repo").unwrap();
+    let epic = state
+        .db
+        .create_epic("Test Epic", "desc", "/repo", None)
+        .unwrap();
 
     // Add a task that's already Running (not Backlog)
     let task_id = state
@@ -3865,7 +3901,9 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         runner,
     });
 
-    let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
+    let epic = db
+        .create_epic("Test Epic", "desc", &repo_path, None)
+        .unwrap();
     let task1_id = db
         .create_task(
             "Task 1",
@@ -3947,7 +3985,9 @@ async fn dispatch_next_respects_sort_order() {
         runner,
     });
 
-    let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
+    let epic = db
+        .create_epic("Test Epic", "desc", &repo_path, None)
+        .unwrap();
 
     // task1 has higher ID but lower sort_order — should be picked second
     let task1_id = db
@@ -4024,7 +4064,9 @@ async fn dispatch_next_respects_tag_routing() {
         runner,
     });
 
-    let epic = db.create_epic("Test Epic", "desc", &repo_path).unwrap();
+    let epic = db
+        .create_epic("Test Epic", "desc", &repo_path, None)
+        .unwrap();
 
     // Create a feature-tagged task with no plan — should use Plan mode
     let task_id = db
@@ -4420,7 +4462,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     let state = test_state();
 
     // Create epic with auto_dispatch = false
-    let epic = state.db.create_epic("E", "desc", "/repo").unwrap();
+    let epic = state.db.create_epic("E", "desc", "/repo", None).unwrap();
     state
         .db
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
@@ -4453,4 +4495,53 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     // Task must still be in backlog — not dispatched
     let task_after = state.db.get_task(task_id).unwrap().unwrap();
     assert_eq!(task_after.status, TaskStatus::Backlog);
+}
+
+// ---------------------------------------------------------------------------
+// Step 6: MCP sub-epic creation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn mcp_create_sub_epic() {
+    let state = test_state();
+
+    // Create parent epic first
+    let parent = state
+        .db
+        .create_epic("Parent Epic", "desc", "/tmp", None)
+        .unwrap();
+
+    // Create sub-epic via MCP with parent_epic_id
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_epic",
+            "arguments": {
+                "title": "Sub Epic",
+                "repo_path": "/tmp",
+                "description": "child",
+                "parent_epic_id": parent.id.0
+            }
+        })),
+    )
+    .await;
+
+    assert!(
+        resp.error.is_none(),
+        "expected success, got: {:?}",
+        resp.error
+    );
+
+    // Verify the sub-epic has the correct parent
+    let epics = state.db.list_epics().unwrap();
+    let sub = epics
+        .iter()
+        .find(|e| e.title == "Sub Epic")
+        .expect("sub epic should be created");
+    assert_eq!(
+        sub.parent_epic_id,
+        Some(parent.id),
+        "sub epic should have parent_epic_id set"
+    );
 }

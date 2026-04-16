@@ -43,7 +43,7 @@ rule EditEpic {
 -- == Epic Lifecycle ==
 
 rule CreateEpic {
-    when: CreateEpic(title, description?, repo_path, sort_order?)
+    when: CreateEpic(title, description?, repo_path, sort_order?, parent?)
 
     ensures: core/Epic.created(
         title: title,
@@ -51,9 +51,16 @@ rule CreateEpic {
         repo_path: repo_path,
         status: backlog,
         sort_order: sort_order,
+        parent: parent,
         created_at: now,
         updated_at: now
     )
+
+    @guidance
+        -- When parent is provided, this creates a sub-epic nested inside
+        -- the given parent. The TUI sets repo_path to the parent's repo_path
+        -- by default. Root epics (parent = null) appear on the main board;
+        -- sub-epics appear only inside their parent's epic view.
 }
 
 rule RecordRepoPathFromEpic {
@@ -75,7 +82,7 @@ rule DispatchEpicPlanning {
 
     requires: epic.status = backlog
     requires: !epic.has_plan
-    requires: epic.active_subtasks.count = 0
+    requires: epic.active_children.count = 0
 
     -- Creates a planning subtask and dispatches a planning agent.
     -- The planning agent brainstorms and writes an implementation plan
@@ -111,15 +118,15 @@ rule DispatchEpicSubtask {
     requires: epic.status = backlog
     requires: epic.has_plan
 
-    -- Dispatches the next backlog subtask of this epic, ordered by
-    -- sort_order ascending (nulls treated as task ID, tie-broken by id ascending).
-    -- If the subtask has a plan, it is dispatched for implementation.
-    -- If not, it is dispatched for brainstorming.
+    -- Dispatches the next backlog child of this epic (task or sub-epic),
+    -- ordered by sort_order ascending (nulls treated as ID, tie-broken by id ascending).
     ensures:
-        let candidates = epic.active_subtasks where status = backlog
+        let candidates = epic.active_children where status = backlog
         let next = sort_by_order(candidates).first
         if next != null:
-            if next.has_plan:
+            if next is Epic:
+                DispatchEpic(next)
+            else if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
             else if next.tag = epic:
                 AgentLaunched(task: next, mode: brainstorm)
@@ -129,22 +136,26 @@ rule DispatchEpicSubtask {
                 AgentLaunched(task: next, mode: standard)
 
     @guidance
-        -- The TUI requires epic.status = backlog so that all subtasks
+        -- active_children is the union of active_subtasks (Task) and
+        -- active_sub_epics (Epic). When the next child is a sub-epic,
+        -- DispatchEpic is called recursively so that the sub-epic's own
+        -- planning or dispatch logic applies.
+        --
+        -- The TUI requires epic.status = backlog so that all children
         -- are dispatched in a batch before any start running. Once the
-        -- first subtask is dispatched and the epic auto-advances to
+        -- first child is dispatched and the epic auto-advances to
         -- running (via RecalculateEpicStatus), no further TUI dispatches
         -- are possible until the epic returns to backlog. This is
         -- stricter than DispatchNextViaMcp, which omits the backlog
         -- guard so that running agents can chain-dispatch siblings.
         --
-        -- Routing is based on the subtask's plan and tag:
+        -- Task routing (when next is a Task):
         --   has_plan        → implementation mode
-        --   tag = epic    → brainstorm mode
-        --   tag = feature → plan mode
+        --   tag = epic      → brainstorm mode
+        --   tag = feature   → plan mode
         --   other           → standard mode (dispatch without plan)
-        -- When no backlog subtasks remain, the TUI shows a status
-        -- message instead of dispatching. This rule only fires when
-        -- there is at least one backlog subtask.
+        -- When no backlog children remain, the TUI shows a status
+        -- message instead of dispatching.
 }
 
 rule EpicBatchWrapUp {
@@ -217,8 +228,8 @@ rule ConfirmArchiveEpic {
     when: ConfirmArchiveEpic(epic)
 
     requires:
-        epic.active_subtasks.count = 0
-        or epic.active_subtasks.all(t => t.status = done)
+        epic.active_children.count = 0
+        or epic.active_children.all(c => c.status = done)
 
     ensures: ConfirmationShown(epic, "Archive epic and all subtasks?")
 }
@@ -229,21 +240,33 @@ rule ArchiveEpic {
     ensures:
         for task in epic.active_subtasks:
             ArchiveTask(task)
+    ensures:
+        for sub_epic in epic.active_sub_epics:
+            ArchiveEpic(sub_epic)
     ensures: not exists epic
+
+    @guidance
+        -- Recursively archives all sub-epics before archiving the parent.
+        -- Each sub-epic's ArchiveEpic rule runs in turn, ensuring tasks
+        -- at every depth are archived.
 }
 
 rule DeleteEpic {
     when: DeleteEpic(epic)
 
-    -- Deletes epic and all linked subtasks
+    -- Deletes epic and all linked subtasks and sub-epics (recursively)
     ensures:
         for task in epic.subtasks:
             not exists task
+    ensures:
+        for sub_epic in epic.sub_epics:
+            DeleteEpic(sub_epic)
     ensures: not exists epic
 
     @guidance
         -- Worktrees and tmux windows are cleaned up best-effort for
-        -- subtasks that have them before deletion.
+        -- subtasks that have them before deletion. Sub-epics are deleted
+        -- recursively before the parent is removed.
 }
 
 -- == MCP Epic Tools ==
@@ -284,10 +307,12 @@ rule DispatchNextViaMcp {
     -- will already be running.
 
     ensures:
-        let candidates = epic.subtasks where status = backlog
+        let candidates = epic.active_children where status = backlog
         let next = sort_by_order(candidates).first
         if next != null:
-            if next.has_plan:
+            if next is Epic:
+                DispatchEpic(next)
+            else if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
             else if next.tag = epic:
                 AgentLaunched(task: next, mode: brainstorm)
@@ -297,11 +322,13 @@ rule DispatchNextViaMcp {
                 AgentLaunched(task: next, mode: standard)
 
     @guidance
-        -- MCP tool for agents to dispatch the next backlog subtask of
-        -- their epic. Uses the same dispatch mode routing as the TUI's
-        -- DispatchEpicSubtask (plan/tag based). The task is transitioned
-        -- to running with a provisioned worktree and tmux window.
-        -- When no backlog subtasks remain, returns an informational
+        -- MCP tool for agents to dispatch the next backlog child of
+        -- their epic (task or sub-epic). Uses the same dispatch mode
+        -- routing as the TUI's DispatchEpicSubtask (plan/tag based).
+        -- When the next child is a sub-epic, DispatchEpic is called
+        -- recursively. The task is transitioned to running with a
+        -- provisioned worktree and tmux window.
+        -- When no backlog children remain, returns an informational
         -- message without error.
         -- When auto_dispatch = false, returns an informational message
         -- ("auto dispatch is disabled") without dispatching.
@@ -328,25 +355,35 @@ rule ToggleAutoDispatch {
 
 @invariant EpicStatusRecalculation
     -- Epic status is persisted and recalculated via recalculate_epic_status.
-    -- It moves both forward and backward to always reflect subtask reality.
+    -- It moves both forward and backward to always reflect child reality.
+    -- "Children" means active_children: the union of active_subtasks (Task)
+    -- and active_sub_epics (Epic). Each child contributes its .status value.
+    --
     -- Derivation logic (checked in priority order):
-    --   no active subtasks            => backlog
-    --   all active subtasks done      => done
-    --   any active subtask in review  => review
-    --   any active subtask running    => running
+    --   no active children            => backlog
+    --   all active children done      => done
+    --   any active child in review    => review
+    --   any active child running      => running
     --   otherwise                     => backlog
+    --
     -- The derived status is compared to the current epic.status; it is
     -- applied whenever the derived status differs from the current status.
+    --
+    -- Propagation: after recalculating an epic's status, if the epic has a
+    -- parent, recalculate_epic_status is called on the parent as well.
+    -- This propagates status changes up the full ancestry chain.
     --
     -- Epic substatus (display label for epic cards):
     --   backlog + no plan             => unplanned
     --   backlog + has plan            => planned
-    --   running + any subtask blocked => "N blocked" (N = count of running
-    --     subtasks with sub_status in {needs_input, stale, crashed, conflict})
+    --   running + any child blocked   => "N blocked" (N = count of running
+    --     tasks with sub_status in {needs_input, stale, crashed, conflict};
+    --     running sub-epics do not directly contribute to blocked count)
     --   running + no blocked          => active
     --   review + active merge         => wrapping up
     --   review + no active merge      => in review
     --   done/archived                 => done
     --
     -- Epic cards show colored status indicators (●N) for each non-zero
-    -- subtask count by parent status, using the column palette colors.
+    -- child count by parent status, using the column palette colors.
+    -- Sub-epic children are counted alongside task children in the indicators.

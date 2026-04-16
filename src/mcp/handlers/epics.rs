@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::mcp::McpState;
-use crate::models::TaskStatus;
+use crate::models::{EpicId, TaskStatus};
 use crate::service::{CreateEpicParams, EpicService, ServiceError, UpdateEpicParams};
 
 use super::types::{
@@ -22,6 +22,8 @@ pub(super) struct CreateEpicArgs {
     pub(super) description: String,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) sort_order: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
+    pub(super) parent_epic_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +71,7 @@ pub(super) fn handle_create_epic(
         description: parsed.description,
         repo_path: parsed.repo_path,
         sort_order: parsed.sort_order,
+        parent_epic_id: parsed.parent_epic_id.map(EpicId),
     }) {
         Ok(epic) => {
             state.notify();

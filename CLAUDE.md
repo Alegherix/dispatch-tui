@@ -18,6 +18,29 @@ Pre-push hook runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and `carg
 git config core.hooksPath .githooks
 ```
 
+### Running Tests
+
+Run the full suite or target a specific module:
+
+```bash
+# Full suite
+cargo test
+
+# Module-level tests
+cargo test db::tests               # database CRUD and migrations
+cargo test service::tests          # domain service layer
+cargo test tui::tests              # TUI input/message handling
+cargo test mcp::handlers::tests    # MCP JSON-RPC handlers
+
+# Integration tests
+cargo test --test lifecycle        # full task lifecycle (create → dispatch → done)
+cargo test --test epic_lifecycle   # full epic lifecycle
+cargo test --test cli              # CLI subcommand smoke tests
+
+# Single test by name (substring match)
+cargo test update_task_params_has_any_field
+```
+
 ## Test-Driven Development
 
 Always use TDD when working in this repo. Start by expressing the intended behaviour as tests — capture what the code should do before writing the code that does it. Then implement the minimum code to make the tests pass. This applies to all changes — new features, bug fixes, and refactors.
@@ -109,7 +132,7 @@ A task with a plan always dispatches directly regardless of tag. Tags are select
 | `src/tui/types.rs` | `Message`, `Command`, `ViewMode`, `InputMode`, `AgentTracking` enums and structs |
 | `src/tui/tests.rs` | TUI unit tests |
 | `src/models.rs` | Domain types (`Task`, `Epic`, `TaskStatus`, `SubStatus`, `TaskTag`), `DispatchMode::for_task()` tag routing |
-| `src/service.rs` | Domain service layer (`TaskService`, `EpicService`): business logic (validation, patch building, epic recalculation) decoupled from MCP/HTTP |
+| `src/service.rs` | Domain service layer (`TaskService`, `EpicService`): business logic (validation, patch building, epic recalculation) decoupled from MCP/HTTP; also owns `FieldUpdate` and `UpdateTaskParams`/`UpdateEpicParams` |
 | `src/db/mod.rs` | `Database` struct, constructor, `TaskStore` trait, `TaskPatch`/`EpicPatch` builders |
 | `src/db/migrations.rs` | Versioned schema migrations (`MIGRATIONS` array, `migrate_vN_*` functions) |
 | `src/db/queries.rs` | `impl TaskStore for Database` — all CRUD operations, row helpers |
@@ -155,6 +178,54 @@ The `MessageSent` variant additionally triggers `Message::MessageReceived(task_i
 ## Visibility Convention
 
 `App` fields use `pub(in crate::tui)` to restrict mutation to the TUI module. External code (runtime, MCP handlers) can only change `App` state by sending a `Message` through `app.update()`, which returns `Command`s. This keeps state transitions auditable in one place and prevents scattered mutation from outside the TUI boundary.
+
+## Quick Dispatch
+
+`Shift+D` creates and immediately dispatches a task without going through the task creation dialog. The flow:
+
+1. Key handler emits `Command::QuickDispatch { draft: TaskDraft { title: DEFAULT_QUICK_TASK_TITLE, repo_path, .. }, epic_id }` (`src/tui/mod.rs`)
+2. Runtime handles it in `exec_quick_dispatch()` (`src/runtime.rs`) — calls `create_task()` then immediately dispatches
+3. The created task gets title `"Quick task"` (`DEFAULT_QUICK_TASK_TITLE` in `src/models.rs`), no tag, no plan
+4. If the board has multiple repo paths, `Shift+D` first enters `InputMode::QuickDispatchRepo` (repo picker), then emits `Message::SelectQuickDispatchRepo(idx)` to resolve the repo before dispatching
+
+Quick dispatch is the same code path as normal dispatch — the difference is the task is created with defaults and skips the creation dialog entirely.
+
+## Code Conventions
+
+### `FieldUpdate` — nullable string fields
+
+`FieldUpdate` (`src/service.rs`) replaces the `Option<String>` + empty-string sentinel anti-pattern for fields that need three states: "don't touch", "set to value", "clear to NULL":
+
+```rust
+pub enum FieldUpdate {
+    Set(String),  // set the field to this value
+    Clear,        // set the field to NULL
+}
+```
+
+Used in `UpdateTaskParams` for `pr_url`, `worktree`, and `tmux_window`. When adding a new nullable field to `UpdateTaskParams`, use `Option<FieldUpdate>` rather than `Option<Option<String>>`.
+
+### Inline-mutation boundary
+
+Key handlers in `src/tui/input.rs` follow two different patterns:
+
+- **Mutate inline, return `vec![]`** — for UI-only state with no side effects (cursor position, `input.mode`, selected index, text buffer). These changes don't need to be auditable and touching the DB/processes isn't required.
+- **Return a `Command`** — for anything that needs a side effect: DB write, process spawn, network call, or waking the runtime.
+
+The rule: if you're only changing what the screen looks like without touching external state, mutate inline. If the change needs to outlast the current render cycle or involve I/O, return a `Command`.
+
+### Intentional `let _ =`
+
+`let _ = expr` silences the `#[must_use]` warning on a result or value. In this codebase it appears in two patterns — neither is a bug:
+
+- **Fire-and-forget channel sends** — `let _ = tx.send(McpEvent::Refresh)` in `src/mcp/mod.rs`: the send can only fail if the receiver has dropped (TUI exited), which is fine to ignore
+- **Non-critical side-effect patches** — `let _ = self.db.patch_epic(...)` where the caller cannot usefully recover from a transient DB error on a non-primary write
+
+If you see `let _ =` and are unsure whether it's intentional, check the surrounding comment or commit message. Add a comment when adding a new one.
+
+### `#[allow(dead_code)]`
+
+Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If a type or function is unused today but is part of an in-progress feature, document it with a comment pointing at the relevant issue/task rather than silencing the warning.
 
 ## How-To Guides
 

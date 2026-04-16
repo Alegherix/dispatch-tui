@@ -5,8 +5,35 @@ use ratatui::widgets::ListState;
 
 use crate::models::{
     AlertKind, AlertSeverity, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision,
-    SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, DEFAULT_BASE_BRANCH,
+    SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
+    DEFAULT_BASE_BRANCH,
 };
+
+// ---------------------------------------------------------------------------
+// TipsOverlayState
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct TipsOverlayState {
+    pub tips: Vec<crate::tips::Tip>,
+    pub index: usize,
+    /// Highest tip id that was already seen before this session started.
+    /// Used to show the NEW badge on unseen tips.
+    pub max_seen_id: u32,
+    pub show_mode: TipsShowMode,
+}
+
+impl TipsOverlayState {
+    pub fn current_tip(&self) -> Option<&crate::tips::Tip> {
+        self.tips.get(self.index)
+    }
+
+    pub fn is_new(&self) -> bool {
+        self.current_tip()
+            .map(|t| t.id > self.max_seen_id)
+            .unwrap_or(false)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // MoveDirection
@@ -410,6 +437,17 @@ pub enum Message {
     ConfirmApproveBotPr,
     ConfirmMergeBotPr,
     CancelPrOperation,
+    // Tips overlay
+    ShowTips {
+        tips: Vec<crate::tips::Tip>,
+        starting_index: usize,
+        max_seen_id: u32,
+        show_mode: TipsShowMode,
+    },
+    NextTip,
+    PrevTip,
+    SetTipsMode(TipsShowMode),
+    CloseTips,
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +620,11 @@ pub enum Command {
         repo: String,
         number: i64,
         tmux_window: String,
+    },
+    // Tips persistence
+    SaveTipsState {
+        seen_up_to: u32,
+        show_mode: TipsShowMode,
     },
 }
 

@@ -334,6 +334,8 @@ pub trait SettingsStore: Send + Sync {
     fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()>;
     fn delete_filter_preset(&self, name: &str) -> Result<()>;
     fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
+    fn get_tips_state(&self) -> Result<(u32, crate::models::TipsShowMode)>;
+    fn save_tips_state(&self, seen_up_to: u32, show_mode: crate::models::TipsShowMode) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

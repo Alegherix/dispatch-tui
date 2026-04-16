@@ -75,6 +75,7 @@ pub struct App {
     pub(in crate::tui) dispatching_review: HashSet<PrRef>,
     /// Fix agent dispatches in-flight, keyed by repo + alert number + kind.
     pub(in crate::tui) dispatching_fix: HashSet<FixDispatchKey>,
+    pub(in crate::tui) tips: Option<TipsOverlayState>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -139,6 +140,7 @@ impl App {
             dispatching: HashSet::new(),
             dispatching_review: HashSet::new(),
             dispatching_fix: HashSet::new(),
+            tips: None,
         }
     }
 
@@ -984,6 +986,50 @@ impl App {
             | Message::ConfirmApproveBotPr
             | Message::ConfirmMergeBotPr
             | Message::CancelPrOperation) => self.dispatch_security_and_filters(msg),
+            Message::ShowTips { tips, starting_index, max_seen_id, show_mode } => {
+                self.tips = Some(TipsOverlayState {
+                    index: starting_index,
+                    max_seen_id,
+                    show_mode,
+                    tips,
+                });
+                vec![]
+            }
+            Message::NextTip => {
+                if let Some(overlay) = &mut self.tips {
+                    let len = overlay.tips.len();
+                    if len > 0 {
+                        overlay.index = (overlay.index + 1) % len;
+                    }
+                }
+                vec![]
+            }
+            Message::PrevTip => {
+                if let Some(overlay) = &mut self.tips {
+                    let len = overlay.tips.len();
+                    if len > 0 {
+                        overlay.index = (overlay.index + len - 1) % len;
+                    }
+                }
+                vec![]
+            }
+            Message::SetTipsMode(mode) => {
+                if let Some(overlay) = &mut self.tips {
+                    overlay.show_mode = mode;
+                }
+                vec![]
+            }
+            Message::CloseTips => {
+                if let Some(overlay) = self.tips.take() {
+                    let max_id = overlay.tips.iter().map(|t| t.id).max().unwrap_or(0);
+                    vec![Command::SaveTipsState {
+                        seen_up_to: max_id,
+                        show_mode: overlay.show_mode,
+                    }]
+                } else {
+                    vec![]
+                }
+            }
         }
     }
 

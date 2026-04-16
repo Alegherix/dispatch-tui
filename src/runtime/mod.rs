@@ -741,6 +741,11 @@ async fn execute_commands(
             }
             Command::CheckSplitPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
             Command::RespawnSplitPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
+            Command::SaveTipsState { seen_up_to, show_mode } => {
+                if let Err(e) = rt.database.save_tips_state(seen_up_to, show_mode) {
+                    tracing::warn!("Failed to save tips state: {e:#}");
+                }
+            }
         }
     }
 

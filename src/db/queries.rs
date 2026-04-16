@@ -465,6 +465,20 @@ impl super::SettingsStore for Database {
             })
             .collect())
     }
+
+    fn get_tips_state(&self) -> Result<(u32, crate::models::TipsShowMode)> {
+        let conn = self.conn()?;
+        get_tips_state(&conn)
+    }
+
+    fn save_tips_state(
+        &self,
+        seen_up_to: u32,
+        show_mode: crate::models::TipsShowMode,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        save_tips_state(&conn, seen_up_to, show_mode)
+    }
 }
 
 // ---------------------------------------------------------------------------

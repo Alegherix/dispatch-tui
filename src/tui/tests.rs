@@ -16256,3 +16256,111 @@ fn breadcrumb_shows_three_levels() {
         "breadcrumb should show child title"
     );
 }
+
+// --- Tips overlay tests ---
+
+fn make_tips() -> Vec<crate::tips::Tip> {
+    vec![
+        crate::tips::Tip { id: 1, title: "Tip One".into(), body: "Body one".into() },
+        crate::tips::Tip { id: 2, title: "Tip Two".into(), body: "Body two".into() },
+        crate::tips::Tip { id: 3, title: "Tip Three".into(), body: "Body three".into() },
+    ]
+}
+
+#[test]
+fn show_tips_sets_overlay() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let tips = make_tips();
+    app.update(Message::ShowTips {
+        tips: tips.clone(),
+        starting_index: 1,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    let overlay = app.tips.as_ref().expect("tips overlay should be set");
+    assert_eq!(overlay.index, 1);
+    assert_eq!(overlay.tips.len(), 3);
+}
+
+#[test]
+fn next_tip_increments_index() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 0,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    app.update(Message::NextTip);
+    assert_eq!(app.tips.as_ref().unwrap().index, 1);
+}
+
+#[test]
+fn next_tip_wraps_at_end() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 2,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    app.update(Message::NextTip);
+    assert_eq!(app.tips.as_ref().unwrap().index, 0);
+}
+
+#[test]
+fn prev_tip_decrements_index() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 2,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    app.update(Message::PrevTip);
+    assert_eq!(app.tips.as_ref().unwrap().index, 1);
+}
+
+#[test]
+fn prev_tip_wraps_at_start() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 0,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    app.update(Message::PrevTip);
+    assert_eq!(app.tips.as_ref().unwrap().index, 2);
+}
+
+#[test]
+fn set_tips_mode_updates_show_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 0,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    app.update(Message::SetTipsMode(crate::models::TipsShowMode::NewOnly));
+    assert_eq!(
+        app.tips.as_ref().unwrap().show_mode,
+        crate::models::TipsShowMode::NewOnly
+    );
+}
+
+#[test]
+fn close_tips_clears_overlay_and_returns_save_command() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ShowTips {
+        tips: make_tips(),
+        starting_index: 1,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    });
+    let cmds = app.update(Message::CloseTips);
+    assert!(app.tips.is_none());
+    let has_save = cmds.iter().any(|c| matches!(c, Command::SaveTipsState { .. }));
+    assert!(has_save, "CloseTips should return SaveTipsState command");
+}

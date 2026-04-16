@@ -254,20 +254,26 @@ impl TaskService {
             // Recalculate old epic before reassignment
             if let Ok(Some(task)) = self.db.get_task(task_id) {
                 if let Some(old_epic_id) = task.epic_id {
-                    let _ = self.db.recalculate_epic_status(old_epic_id);
+                    if let Err(err) = self.db.recalculate_epic_status(old_epic_id) {
+                        tracing::warn!("failed to recalculate epic status for epic {}: {err}", old_epic_id.0);
+                    }
                 }
             }
             self.db
                 .set_task_epic_id(task_id, Some(EpicId(new_epic_id)))
                 .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
-            let _ = self.db.recalculate_epic_status(EpicId(new_epic_id));
+            if let Err(err) = self.db.recalculate_epic_status(EpicId(new_epic_id)) {
+                tracing::warn!("failed to recalculate epic status for epic {new_epic_id}: {err}");
+            }
         }
 
         // Recalculate parent epic status if subtask status changed
         if params.status.is_some() {
             if let Ok(Some(task)) = self.db.get_task(task_id) {
                 if let Some(epic_id) = task.epic_id {
-                    let _ = self.db.recalculate_epic_status(epic_id);
+                    if let Err(err) = self.db.recalculate_epic_status(epic_id) {
+                        tracing::warn!("failed to recalculate epic status for epic {}: {err}", epic_id.0);
+                    }
                 }
             }
         }
@@ -311,7 +317,9 @@ impl TaskService {
         if updated {
             if let Ok(Some(task)) = self.db.get_task(task_id) {
                 if let Some(epic_id) = task.epic_id {
-                    let _ = self.db.recalculate_epic_status(epic_id);
+                    if let Err(err) = self.db.recalculate_epic_status(epic_id) {
+                        tracing::warn!("failed to recalculate epic status for epic {}: {err}", epic_id.0);
+                    }
                 }
             }
         }
@@ -1314,6 +1322,57 @@ mod tests {
         let (_, done, total) = &list[0];
         assert_eq!(*done, 0);
         assert_eq!(*total, 1);
+    }
+
+    #[test]
+    fn update_task_status_recalculates_epic() {
+        let db = test_db();
+        let task_svc = task_svc(&db);
+        let epic_svc = epic_svc(&db);
+
+        let epic = epic_svc
+            .create_epic(CreateEpicParams {
+                title: "E".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                sort_order: None,
+            })
+            .unwrap();
+
+        let task_id = task_svc
+            .create_task(CreateTaskParams {
+                title: "Sub".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: Some(epic.id.0),
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+
+        task_svc
+            .update_task(UpdateTaskParams {
+                task_id: task_id.0,
+                status: Some(TaskStatus::Done),
+                plan_path: None,
+                title: None,
+                description: None,
+                repo_path: None,
+                sort_order: None,
+                pr_url: None,
+                tag: None,
+                sub_status: None,
+                epic_id: None,
+                worktree: None,
+                tmux_window: None,
+                base_branch: None,
+            })
+            .unwrap();
+
+        let updated_epic = epic_svc.get_epic(epic.id.0).unwrap();
+        assert_eq!(updated_epic.status, TaskStatus::Done);
     }
 
     #[test]

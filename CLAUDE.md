@@ -68,6 +68,7 @@ Key patterns that aren't obvious from reading the code:
 - **TaskPatch builder**: Selective field updates for the database. `None` = don't change, `Some(None)` = set field to NULL.
 - **MCP server**: Runs on port 3142 (configurable via `DISPATCH_PORT`). Agents call JSON-RPC methods in `src/mcp/handlers/` to update task status.
 - **Integration tests**: Use `Database::open_in_memory()` with a real SQLite instance — no mocking the database layer.
+- **Command queue draining**: `execute_commands` (`src/runtime.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Any handler that produces additional commands (e.g. error-path `app.update()` calls that return extra commands) extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls.
 
 ### Review Board
 
@@ -190,6 +191,8 @@ The `MessageSent` variant additionally triggers `Message::MessageReceived(task_i
 
 Quick dispatch is the same code path as normal dispatch — the difference is the task is created with defaults and skips the creation dialog entirely.
 
+**Command-level shortcut:** `Command::QuickDispatch` bypasses the normal `Command::DispatchAgent` → `Message::Dispatched` round-trip. `exec_quick_dispatch()` calls `create_task()` and immediately dispatches in a single step — there is no intermediate message back through `app.update()`.
+
 ## Code Conventions
 
 ### `FieldUpdate` — nullable string fields
@@ -204,6 +207,22 @@ pub enum FieldUpdate {
 ```
 
 Used in `UpdateTaskParams` for `pr_url`, `worktree`, and `tmux_window`. When adding a new nullable field to `UpdateTaskParams`, use `Option<FieldUpdate>` rather than `Option<Option<String>>`.
+
+### `TaskPatch` / `EpicPatch` — double-Option in the DB layer
+
+`TaskPatch` and `EpicPatch` (`src/db/mod.rs`) use `Option<Option<T>>` for nullable fields — the DB-layer equivalent of `FieldUpdate`:
+
+| Value | Meaning |
+|-------|---------|
+| `None` | Don't touch this field |
+| `Some(None)` | Set the field to NULL |
+| `Some(Some(v))` | Set the field to `v` |
+
+The service layer bridges the two patterns before writing a patch: `FieldUpdate::Set(v)` becomes `Some(Some(v))` and `FieldUpdate::Clear` becomes `Some(None)`. When adding a new nullable field, use `FieldUpdate` in `UpdateTaskParams`/`UpdateEpicParams` and double-Option in the corresponding patch struct.
+
+### `conn()` — safe database access
+
+Always acquire the SQLite connection via `self.conn()?` (`src/db/mod.rs`). This method locks the mutex and propagates a `Result` error if the lock is poisoned, rather than panicking. Never call `self.conn.lock().unwrap()` directly — that pattern was eliminated and any new code that reintroduces it will panic on a poisoned lock.
 
 ### Inline-mutation boundary
 

@@ -117,6 +117,15 @@ impl App {
 
             KeyCode::Char('g') => {
                 if let Some(task) = self.selected_task() {
+                    // If the task's window is pinned in the split pane, it no longer
+                    // exists as a standalone window — focus the pane directly instead.
+                    if self.board.split.active
+                        && self.board.split.pinned_task_id == Some(task.id)
+                    {
+                        if let Some(pane_id) = self.board.split.right_pane_id.clone() {
+                            return vec![Command::FocusSplitPane { pane_id }];
+                        }
+                    }
                     if let Some(window) = &task.tmux_window {
                         vec![Command::JumpToTmux {
                             window: window.clone(),

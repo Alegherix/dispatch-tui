@@ -12942,6 +12942,50 @@ fn g_without_split_mode_emits_jump_command() {
 }
 
 #[test]
+fn g_on_pinned_split_task_emits_focus_split_pane() {
+    // When the selected task IS the pinned split-pane task, its standalone
+    // window no longer exists — [g] must focus the right pane instead.
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(4));
+    app.selection_mut().set_column(1); // Running column
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::FocusSplitPane { pane_id } if pane_id == "%42"),
+        "expected FocusSplitPane {{pane_id: \"%42\"}}, got {:?}",
+        cmds
+    );
+}
+
+#[test]
+fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
+    // When split is active but the selected task is NOT the pinned one,
+    // [g] should still emit JumpToTmux for the selected task's window.
+    let mut task1 = make_task(3, TaskStatus::Running);
+    task1.tmux_window = Some("task-3".to_string());
+    let mut task2 = make_task(4, TaskStatus::Running);
+    task2.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task1, task2], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(3)); // task3 is pinned, not task4
+    // Navigate to Running column and select task4 (row 1, second in column)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert_eq!(cmds.len(), 1);
+    assert!(
+        matches!(&cmds[0], Command::JumpToTmux { window } if window == "task-4"),
+        "expected JumpToTmux for non-pinned task, got {:?}",
+        cmds
+    );
+}
+
+#[test]
 fn split_pane_opened_updates_state() {
     let mut app = make_app();
     assert!(!app.board.split.active);

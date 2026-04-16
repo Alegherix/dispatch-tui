@@ -252,28 +252,41 @@ pub(super) fn handle_update_task(
         );
     }
 
-    let params = UpdateTaskParams {
-        task_id: parsed.task_id,
-        status: parsed.status,
-        plan_path: parsed.plan_path,
-        title: parsed.title,
-        description: parsed.description,
-        repo_path: parsed.repo_path,
-        sort_order: parsed.sort_order,
-        pr_url: parsed.pr_url.map(|s| {
-            if s.is_empty() {
-                crate::service::FieldUpdate::Clear
-            } else {
-                crate::service::FieldUpdate::Set(s)
-            }
-        }),
-        tag: parsed.tag,
-        sub_status: parsed.sub_status,
-        epic_id: parsed.epic_id,
-        worktree: None,
-        tmux_window: None,
-        base_branch: parsed.base_branch,
-    };
+    let mut params = UpdateTaskParams::for_task(parsed.task_id)
+        .tag(parsed.tag)
+        .base_branch(parsed.base_branch);
+    if let Some(status) = parsed.status {
+        params = params.status(status);
+    }
+    if let Some(plan_path) = parsed.plan_path {
+        params = params.plan_path(Some(plan_path));
+    }
+    if let Some(title) = parsed.title {
+        params = params.title(title);
+    }
+    if let Some(description) = parsed.description {
+        params = params.description(description);
+    }
+    if let Some(repo_path) = parsed.repo_path {
+        params = params.repo_path(repo_path);
+    }
+    if let Some(sort_order) = parsed.sort_order {
+        params = params.sort_order(sort_order);
+    }
+    if let Some(pr_url_str) = parsed.pr_url {
+        let fu = if pr_url_str.is_empty() {
+            crate::service::FieldUpdate::Clear
+        } else {
+            crate::service::FieldUpdate::Set(pr_url_str)
+        };
+        params = params.pr_url(fu);
+    }
+    if let Some(sub_status) = parsed.sub_status {
+        params = params.sub_status(sub_status);
+    }
+    if let Some(epic_id) = parsed.epic_id {
+        params = params.epic_id(epic_id);
+    }
     let field_names = params.updated_field_names();
 
     let svc = TaskService::new(state.db.clone());

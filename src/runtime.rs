@@ -450,22 +450,16 @@ impl TuiRuntime {
 
     fn exec_persist_task(&self, app: &mut App, task: models::Task) {
         use crate::service::UpdateTaskParams;
-        if let Err(e) = self.task_svc.update_task(UpdateTaskParams {
-            task_id: task.id.0,
-            status: Some(task.status),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: task.sort_order,
-            pr_url: Some(option_to_field_update(task.pr_url.clone())),
-            tag: None,
-            sub_status: Some(task.sub_status),
-            epic_id: None,
-            worktree: Some(option_to_field_update(task.worktree.clone())),
-            tmux_window: Some(option_to_field_update(task.tmux_window.clone())),
-            base_branch: None,
-        }) {
+        let mut p = UpdateTaskParams::for_task(task.id.0)
+            .status(task.status)
+            .sub_status(task.sub_status)
+            .pr_url(option_to_field_update(task.pr_url.clone()))
+            .worktree(option_to_field_update(task.worktree.clone()))
+            .tmux_window(option_to_field_update(task.tmux_window.clone()));
+        if let Some(so) = task.sort_order {
+            p = p.sort_order(so);
+        }
+        if let Err(e) = self.task_svc.update_task(p) {
             app.update(Message::Error(Self::db_error("persisting task", e)));
         }
     }
@@ -477,22 +471,10 @@ impl TuiRuntime {
         sub_status: models::SubStatus,
     ) {
         use crate::service::UpdateTaskParams;
-        if let Err(e) = self.task_svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: None,
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: Some(sub_status),
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: None,
-        }) {
+        if let Err(e) = self
+            .task_svc
+            .update_task(UpdateTaskParams::for_task(id.0).sub_status(sub_status))
+        {
             app.update(Message::Error(Self::db_error("patching sub_status", e)));
         }
     }
@@ -672,22 +654,16 @@ impl TuiRuntime {
             Some(fields.base_branch.clone())
         };
 
-        if let Err(e) = self.task_svc.update_task(crate::service::UpdateTaskParams {
-            task_id: task_id.0,
-            status: Some(new_status),
-            plan_path: plan.clone(),
-            title: Some(title.clone()),
-            description: Some(description.clone()),
-            repo_path: Some(repo_path.clone()),
-            sort_order: None,
-            pr_url: None,
-            tag,
-            sub_status: None,
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: base_branch.clone(),
-        }) {
+        if let Err(e) = self.task_svc.update_task(
+            crate::service::UpdateTaskParams::for_task(task_id.0)
+                .status(new_status)
+                .plan_path(plan.clone())
+                .title(title.clone())
+                .description(description.clone())
+                .repo_path(repo_path.clone())
+                .tag(tag)
+                .base_branch(base_branch.clone()),
+        ) {
             app.update(Message::Error(Self::db_error("updating task", e)));
         }
         app.update(Message::TaskEdited(tui::TaskEdit {
@@ -1030,22 +1006,11 @@ impl TuiRuntime {
         if shared {
             // Other active tasks share this worktree — just detach this task
             tracing::info!(task_id = id.0, "worktree shared, detaching only");
-            if let Err(e) = self.task_svc.update_task(crate::service::UpdateTaskParams {
-                task_id: id.0,
-                status: None,
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: None,
-                worktree: Some(FieldUpdate::Clear),
-                tmux_window: Some(FieldUpdate::Clear),
-                base_branch: None,
-            }) {
+            if let Err(e) = self.task_svc.update_task(
+                crate::service::UpdateTaskParams::for_task(id.0)
+                    .worktree(FieldUpdate::Clear)
+                    .tmux_window(FieldUpdate::Clear),
+            ) {
                 let _ = self
                     .msg_tx
                     .send(Message::Error(format!("Detach failed: {e:#}")));
@@ -1085,22 +1050,11 @@ impl TuiRuntime {
                 task_id = id.0,
                 "worktree shared, detaching only (no rebase)"
             );
-            if let Err(e) = self.task_svc.update_task(crate::service::UpdateTaskParams {
-                task_id: id.0,
-                status: None,
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: None,
-                worktree: Some(FieldUpdate::Clear),
-                tmux_window: Some(FieldUpdate::Clear),
-                base_branch: None,
-            }) {
+            if let Err(e) = self.task_svc.update_task(
+                crate::service::UpdateTaskParams::for_task(id.0)
+                    .worktree(FieldUpdate::Clear)
+                    .tmux_window(FieldUpdate::Clear),
+            ) {
                 let _ = self
                     .msg_tx
                     .send(Message::Error(format!("Detach failed: {e:#}")));

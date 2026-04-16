@@ -122,6 +122,91 @@ impl UpdateTaskParams {
         }
         names
     }
+
+    /// Create params with all optional fields unset (no-op except task_id).
+    pub fn for_task(task_id: i64) -> Self {
+        Self {
+            task_id,
+            status: None,
+            plan_path: None,
+            title: None,
+            description: None,
+            repo_path: None,
+            sort_order: None,
+            pr_url: None,
+            tag: None,
+            sub_status: None,
+            epic_id: None,
+            worktree: None,
+            tmux_window: None,
+            base_branch: None,
+        }
+    }
+
+    pub fn status(mut self, status: TaskStatus) -> Self {
+        self.status = Some(status);
+        self
+    }
+
+    pub fn plan_path(mut self, plan_path: Option<String>) -> Self {
+        self.plan_path = plan_path;
+        self
+    }
+
+    pub fn title(mut self, title: String) -> Self {
+        self.title = Some(title);
+        self
+    }
+
+    pub fn description(mut self, description: String) -> Self {
+        self.description = Some(description);
+        self
+    }
+
+    pub fn repo_path(mut self, repo_path: String) -> Self {
+        self.repo_path = Some(repo_path);
+        self
+    }
+
+    pub fn sort_order(mut self, sort_order: i64) -> Self {
+        self.sort_order = Some(sort_order);
+        self
+    }
+
+    pub fn pr_url(mut self, pr_url: FieldUpdate) -> Self {
+        self.pr_url = Some(pr_url);
+        self
+    }
+
+    pub fn tag(mut self, tag: Option<TaskTag>) -> Self {
+        self.tag = tag;
+        self
+    }
+
+    pub fn sub_status(mut self, sub_status: SubStatus) -> Self {
+        self.sub_status = Some(sub_status);
+        self
+    }
+
+    pub fn epic_id(mut self, epic_id: i64) -> Self {
+        self.epic_id = Some(epic_id);
+        self
+    }
+
+    pub fn worktree(mut self, worktree: FieldUpdate) -> Self {
+        self.worktree = Some(worktree);
+        self
+    }
+
+    pub fn tmux_window(mut self, tmux_window: FieldUpdate) -> Self {
+        self.tmux_window = Some(tmux_window);
+        self
+    }
+
+    pub fn base_branch(mut self, base_branch: Option<String>) -> Self {
+        self.base_branch = base_branch;
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -864,23 +949,8 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Running),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: None,
-        })
-        .unwrap();
+        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
         assert_eq!(task.status, TaskStatus::Running);
@@ -908,24 +978,34 @@ mod tests {
             .unwrap();
 
         let err = svc
-            .update_task(UpdateTaskParams {
-                task_id: id.0,
-                status: None,
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: None,
-                worktree: None,
-                tmux_window: None,
-                base_branch: None,
-            })
+            .update_task(UpdateTaskParams::for_task(id.0))
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
+    }
+
+    #[test]
+    fn update_task_params_builder_compiles() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "T".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+
+        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .unwrap();
+
+        let task = svc.get_task(id.0).unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
     }
 
     #[test]
@@ -948,22 +1028,7 @@ mod tests {
 
         // active is not valid for backlog
         let err = svc
-            .update_task(UpdateTaskParams {
-                task_id: id.0,
-                status: None,
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: Some(SubStatus::Active),
-                epic_id: None,
-                worktree: None,
-                tmux_window: None,
-                base_branch: None,
-            })
+            .update_task(UpdateTaskParams::for_task(id.0).sub_status(SubStatus::Active))
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
     }
@@ -1048,23 +1113,8 @@ mod tests {
             .unwrap();
 
         // Move to running first
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Running),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: None,
-        })
-        .unwrap();
+        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
+            .unwrap();
 
         let err = svc
             .claim_task(ClaimTaskParams {
@@ -1166,22 +1216,7 @@ mod tests {
             .unwrap();
 
         task_svc
-            .update_task(UpdateTaskParams {
-                task_id: id.0,
-                status: None,
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: Some(epic.id.0),
-                worktree: None,
-                tmux_window: None,
-                base_branch: None,
-            })
+            .update_task(UpdateTaskParams::for_task(id.0).epic_id(epic.id.0))
             .unwrap();
 
         let task = task_svc.get_task(id.0).unwrap();
@@ -1405,22 +1440,7 @@ mod tests {
 
         // Mark T1 as done
         task_svc
-            .update_task(UpdateTaskParams {
-                task_id: t1.0,
-                status: Some(TaskStatus::Done),
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: None,
-                worktree: None,
-                tmux_window: None,
-                base_branch: None,
-            })
+            .update_task(UpdateTaskParams::for_task(t1.0).status(TaskStatus::Done))
             .unwrap();
 
         let list = epic_svc.list_epics_with_progress().unwrap();
@@ -1462,22 +1482,7 @@ mod tests {
             .unwrap();
 
         task_svc
-            .update_task(UpdateTaskParams {
-                task_id: task_id.0,
-                status: Some(TaskStatus::Done),
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: None,
-                worktree: None,
-                tmux_window: None,
-                base_branch: None,
-            })
+            .update_task(UpdateTaskParams::for_task(task_id.0).status(TaskStatus::Done))
             .unwrap();
 
         let updated_epic = epic_svc.get_epic(epic.id.0).unwrap();
@@ -1594,22 +1599,7 @@ mod tests {
 
         // Move to running
         task_svc
-            .update_task(UpdateTaskParams {
-                task_id: id.0,
-                status: Some(TaskStatus::Running),
-                plan_path: None,
-                title: None,
-                description: None,
-                repo_path: None,
-                sort_order: None,
-                pr_url: None,
-                tag: None,
-                sub_status: None,
-                epic_id: None,
-                worktree: None,
-                tmux_window: None,
-                base_branch: None,
-            })
+            .update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Running))
             .unwrap();
 
         let next = task_svc.next_backlog_task(epic.id.0).unwrap();
@@ -1735,22 +1725,12 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Running),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
-            tmux_window: Some(FieldUpdate::Set("task-1".into())),
-            base_branch: None,
-        })
+        svc.update_task(
+            UpdateTaskParams::for_task(id.0)
+                .status(TaskStatus::Running)
+                .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into()))
+                .tmux_window(FieldUpdate::Set("task-1".into())),
+        )
         .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
@@ -1777,41 +1757,21 @@ mod tests {
             .unwrap();
 
         // Set worktree
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Running),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
-            tmux_window: Some(FieldUpdate::Set("task-1".into())),
-            base_branch: None,
-        })
+        svc.update_task(
+            UpdateTaskParams::for_task(id.0)
+                .status(TaskStatus::Running)
+                .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into()))
+                .tmux_window(FieldUpdate::Set("task-1".into())),
+        )
         .unwrap();
 
         // Clear worktree via FieldUpdate::Clear
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Done),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: Some(FieldUpdate::Clear),
-            tmux_window: Some(FieldUpdate::Clear),
-            base_branch: None,
-        })
+        svc.update_task(
+            UpdateTaskParams::for_task(id.0)
+                .status(TaskStatus::Done)
+                .worktree(FieldUpdate::Clear)
+                .tmux_window(FieldUpdate::Clear),
+        )
         .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
@@ -1839,23 +1799,8 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Done),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: None,
-        })
-        .unwrap();
+        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Done))
+            .unwrap();
 
         let task = svc.get_task(id.0).unwrap();
         assert_eq!(task.status, TaskStatus::Done);
@@ -1921,22 +1866,12 @@ mod tests {
                 base_branch: None,
             })
             .unwrap();
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Running),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: Some(FieldUpdate::Set("/wt".to_string())),
-            tmux_window: Some(FieldUpdate::Set("win".to_string())),
-            base_branch: None,
-        })
+        svc.update_task(
+            UpdateTaskParams::for_task(id.0)
+                .status(TaskStatus::Running)
+                .worktree(FieldUpdate::Set("/wt".to_string()))
+                .tmux_window(FieldUpdate::Set("win".to_string())),
+        )
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
         assert_eq!(task.worktree.as_deref(), Some("/wt"));
@@ -1960,40 +1895,19 @@ mod tests {
             })
             .unwrap();
         // First set a value
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Running),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: Some(FieldUpdate::Set("/wt".to_string())),
-            tmux_window: Some(FieldUpdate::Set("win".to_string())),
-            base_branch: None,
-        })
+        svc.update_task(
+            UpdateTaskParams::for_task(id.0)
+                .status(TaskStatus::Running)
+                .worktree(FieldUpdate::Set("/wt".to_string()))
+                .tmux_window(FieldUpdate::Set("win".to_string())),
+        )
         .unwrap();
         // Then clear it
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: None,
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: Some(FieldUpdate::Clear),
-            tmux_window: Some(FieldUpdate::Clear),
-            base_branch: None,
-        })
+        svc.update_task(
+            UpdateTaskParams::for_task(id.0)
+                .worktree(FieldUpdate::Clear)
+                .tmux_window(FieldUpdate::Clear),
+        )
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
         assert_eq!(task.worktree, None);
@@ -2017,24 +1931,9 @@ mod tests {
             })
             .unwrap();
         // Set PR URL
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: None,
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: Some(FieldUpdate::Set(
-                "https://github.com/org/repo/pull/1".to_string(),
-            )),
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: None,
-        })
+        svc.update_task(UpdateTaskParams::for_task(id.0).pr_url(FieldUpdate::Set(
+            "https://github.com/org/repo/pull/1".to_string(),
+        )))
         .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
         assert_eq!(
@@ -2042,23 +1941,8 @@ mod tests {
             Some("https://github.com/org/repo/pull/1")
         );
         // Clear PR URL
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: None,
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: Some(FieldUpdate::Clear),
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: None,
-        })
-        .unwrap();
+        svc.update_task(UpdateTaskParams::for_task(id.0).pr_url(FieldUpdate::Clear))
+            .unwrap();
         let task = db.get_task(TaskId(id.0)).unwrap().unwrap();
         assert_eq!(task.pr_url, None);
     }
@@ -2132,23 +2016,8 @@ mod tests {
             })
             .unwrap();
 
-        svc.update_task(UpdateTaskParams {
-            task_id: id.0,
-            status: Some(TaskStatus::Archived),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: None,
-            tmux_window: None,
-            base_branch: None,
-        })
-        .unwrap();
+        svc.update_task(UpdateTaskParams::for_task(id.0).status(TaskStatus::Archived))
+            .unwrap();
 
         let tasks = svc
             .list_tasks(ListTasksFilter {
@@ -2228,22 +2097,11 @@ mod tests {
             .unwrap();
 
         // Set worktree but not tmux_window
-        svc.update_task(UpdateTaskParams {
-            task_id: to_id.0,
-            status: Some(TaskStatus::Running),
-            plan_path: None,
-            title: None,
-            description: None,
-            repo_path: None,
-            sort_order: None,
-            pr_url: None,
-            tag: None,
-            sub_status: None,
-            epic_id: None,
-            worktree: Some(FieldUpdate::Set("/repo/.worktrees/feat".into())),
-            tmux_window: None,
-            base_branch: None,
-        })
+        svc.update_task(
+            UpdateTaskParams::for_task(to_id.0)
+                .status(TaskStatus::Running)
+                .worktree(FieldUpdate::Set("/repo/.worktrees/feat".into())),
+        )
         .unwrap();
 
         let err = svc.validate_send_message(from_id.0, to_id.0).unwrap_err();

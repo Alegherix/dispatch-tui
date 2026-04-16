@@ -28,18 +28,12 @@ cargo install --path .
 dispatch setup
 ```
 
-This registers the dispatch MCP server, installs the dispatch plugin (hooks, skills, commands), adds MCP tool permissions, and enables tmux `focus-events` (needed for the split-view focus indicator).
+This registers the dispatch MCP server, installs the dispatch plugin (hooks, skills, commands), adds MCP tool permissions, and enables and persists tmux `focus-events` (needed for the split-view focus indicator).
 
 **3. Open a tmux session** (dispatch must run inside tmux):
 
 ```bash
 tmux new-session -s dev
-```
-
-To persist `focus-events` across tmux server restarts, add to `~/.tmux.conf`:
-
-```
-set -g focus-events on
 ```
 
 **4. Start the TUI:**
@@ -58,7 +52,7 @@ cargo run tui
 | Dispatch | `d` | Agent explores your codebase, writes a plan, and implements it |
 | Agent needs input *(optional)* | `g` | Desktop notification — jump to agent and interact |
 | Split view *(optional)* | `S` | Side-by-side TUI + agent pane — see both at once |
-| Review the work | `g` | Jump to the agent's tmux window (or swap split pane) |
+| Review the work | `g` | Jump to the agent's tmux window |
 | Wrap up | `W` | Commit, rebase, and open a PR. Or use `/wrap-up` from the agent's session |
 
 ### Quick dispatch (`D`)
@@ -93,6 +87,8 @@ There are two ways to wrap up completed work:
 
 **From Claude Code** — type `/wrap-up` in the agent's session. The agent commits any uncommitted changes, then asks you the same rebase-or-PR question.
 
+From the Review Board, press `d` on a PR to dispatch a review agent. Once findings are ready, `/decompose-review` breaks the findings into actionable tasks on the board.
+
 ## Key Concepts
 
 **Tasks** — the unit of work. Each task has a title, description, status, and optionally a plan and a linked git repo.
@@ -116,13 +112,23 @@ There are two ways to wrap up completed work:
 
 **Worktrees** — each dispatched agent gets its own git worktree at `<repo>/.worktrees/<id>-<slug>`, isolating agent work from your main branch. Closing the tmux window does **not** delete the worktree — press `d` again to resume.
 
-**Split view** — press `S` to enter side-by-side mode: the TUI on the left, the selected agent's tmux pane on the right. Press `g` to swap the right pane to a different task, or `G` to jump directly to an agent window (leaving split view). A colored border shows which pane has focus (cyan = TUI, dim = agent). Requires tmux `focus-events` — enabled automatically by `dispatch setup`.
+**Split view** — press `S` to enter side-by-side mode: the TUI on the left, the selected agent's tmux pane on the right. Press `G` to pin a different task in the right pane, or `g` to jump directly to an agent window (leaving split view). A colored border shows which pane has focus (cyan = TUI, dim = agent). Requires tmux `focus-events` — enabled automatically by `dispatch setup`.
 
-**Epics** — a group of related tasks. Press `g` on an epic to see its subtasks. Press `d` on the epic to dispatch the next Backlog subtask automatically.
+**Epics** — a group of related tasks. Press `g` on an epic to see its subtasks. Press `d` on the epic to dispatch the next Backlog subtask automatically. Epics can be nested — an epic subtask can itself be an epic.
 
-**Review Board** — press `Tab` to see GitHub PRs where you are a requested reviewer. Requires `gh` CLI.
+**Review Board** — press `Tab` to see GitHub PRs in two modes — **Reviewer** (PRs awaiting your review) and **Author** (your own PRs) — toggled with `1`/`2`. Requires `gh` CLI.
 
 **Security Board** — press `Tab` again to see dependency vulnerability alerts across your repos.
+
+## Agentic patterns
+
+Dispatch agents can coordinate with each other through the MCP server:
+
+**Spawning subtasks** — an agent can create a new task on the board with `create_task`, useful when it discovers work that should be tracked separately or handed off to another agent.
+
+**Agent-to-agent messaging** — `send_message` delivers a prompt directly into another running agent's tmux window. Fire-and-forget: the sender doesn't wait for a response. Useful for passing context or unblocking a dependent agent.
+
+**Epic as orchestration** — an epic planning agent writes an implementation plan with subtasks, then each subtask is dispatched in sequence. Agents can call `dispatch_next` to trigger the next subtask themselves once their own work is complete.
 
 ## Learn More
 

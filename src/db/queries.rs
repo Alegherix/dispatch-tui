@@ -1300,8 +1300,8 @@ fn parse_datetime(s: &str) -> DateTime<Utc> {
 
 pub(super) fn get_tips_state(
     conn: &rusqlite::Connection,
-) -> Result<(u32, crate::tui::types::TipsShowMode)> {
-    use crate::tui::types::TipsShowMode;
+) -> Result<(u32, crate::models::TipsShowMode)> {
+    use crate::models::TipsShowMode;
     let result = conn.query_row(
         "SELECT seen_up_to, show_mode FROM tips_state WHERE id = 1",
         [],
@@ -1327,12 +1327,16 @@ pub(super) fn get_tips_state(
 pub(super) fn save_tips_state(
     conn: &rusqlite::Connection,
     seen_up_to: u32,
-    show_mode: crate::tui::types::TipsShowMode,
+    show_mode: crate::models::TipsShowMode,
 ) -> Result<()> {
-    conn.execute(
-        "UPDATE tips_state SET seen_up_to = ?1, show_mode = ?2 WHERE id = 1",
-        rusqlite::params![seen_up_to, show_mode.as_str()],
-    )
-    .context("Failed to save tips_state")?;
+    let rows = conn
+        .execute(
+            "UPDATE tips_state SET seen_up_to = ?1, show_mode = ?2 WHERE id = 1",
+            rusqlite::params![seen_up_to, show_mode.as_str()],
+        )
+        .context("Failed to save tips_state")?;
+    if rows != 1 {
+        anyhow::bail!("save_tips_state: expected 1 row updated, got {rows}");
+    }
     Ok(())
 }

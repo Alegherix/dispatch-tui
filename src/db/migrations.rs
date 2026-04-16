@@ -739,20 +739,6 @@ fn migrate_v34_add_parent_epic_id(conn: &Connection) -> Result<()> {
         .context("Failed to add parent_epic_id column to epics")
 }
 
-fn migrate_v36_tips_state(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS tips_state (
-            id         INTEGER PRIMARY KEY DEFAULT 1,
-            seen_up_to INTEGER NOT NULL DEFAULT 0,
-            show_mode  TEXT    NOT NULL DEFAULT 'always',
-            CHECK (id = 1)
-        );
-        INSERT OR IGNORE INTO tips_state (id, seen_up_to, show_mode)
-        VALUES (1, 0, 'always');",
-    )
-    .context("Failed to create tips_state table (migration v36)")
-}
-
 fn migrate_v35_add_self_ref_check(conn: &Connection) -> Result<()> {
     // SQLite does not support ADD CONSTRAINT, so we rebuild the epics table to
     // add CHECK (parent_epic_id != id), which prevents a row from being its
@@ -793,4 +779,18 @@ fn migrate_v35_add_self_ref_check(conn: &Connection) -> Result<()> {
          PRAGMA foreign_keys = ON;",
     )
     .context("Failed to rebuild epics table for migration v35 (self-ref CHECK)")
+}
+
+fn migrate_v36_tips_state(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tips_state (
+            id         INTEGER PRIMARY KEY DEFAULT 1,
+            seen_up_to INTEGER NOT NULL DEFAULT 0,
+            show_mode  TEXT    NOT NULL DEFAULT 'always',
+            CHECK (id = 1)
+        );
+        INSERT OR IGNORE INTO tips_state (id, seen_up_to, show_mode)
+        VALUES (1, 0, 'always');",
+    )
+    .context("Failed to create tips_state table (migration v36)")
 }

@@ -9,9 +9,9 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::models::{
-    Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
+    Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
+    UsageReport,
 };
-use crate::tui::types::TipsShowMode;
 
 // ---------------------------------------------------------------------------
 // TaskPatch — builder for selective field updates

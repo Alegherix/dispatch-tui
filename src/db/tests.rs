@@ -4341,27 +4341,27 @@ fn tips_state_defaults_on_fresh_db() {
     let db = in_memory_db();
     let (seen_up_to, show_mode) = db.get_tips_state().unwrap();
     assert_eq!(seen_up_to, 0);
-    assert_eq!(show_mode, crate::tui::types::TipsShowMode::Always);
+    assert_eq!(show_mode, crate::models::TipsShowMode::Always);
 }
 
 #[test]
 fn tips_state_round_trip() {
     let db = in_memory_db();
-    db.save_tips_state(7, crate::tui::types::TipsShowMode::NewOnly)
+    db.save_tips_state(7, crate::models::TipsShowMode::NewOnly)
         .unwrap();
     let (seen_up_to, show_mode) = db.get_tips_state().unwrap();
     assert_eq!(seen_up_to, 7);
-    assert_eq!(show_mode, crate::tui::types::TipsShowMode::NewOnly);
+    assert_eq!(show_mode, crate::models::TipsShowMode::NewOnly);
 }
 
 #[test]
 fn tips_state_overwrite() {
     let db = in_memory_db();
-    db.save_tips_state(3, crate::tui::types::TipsShowMode::NewOnly)
+    db.save_tips_state(3, crate::models::TipsShowMode::NewOnly)
         .unwrap();
-    db.save_tips_state(5, crate::tui::types::TipsShowMode::Never)
+    db.save_tips_state(5, crate::models::TipsShowMode::Never)
         .unwrap();
     let (seen_up_to, show_mode) = db.get_tips_state().unwrap();
     assert_eq!(seen_up_to, 5);
-    assert_eq!(show_mode, crate::tui::types::TipsShowMode::Never);
+    assert_eq!(show_mode, crate::models::TipsShowMode::Never);
 }

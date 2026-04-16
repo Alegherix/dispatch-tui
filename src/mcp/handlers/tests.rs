@@ -4567,3 +4567,359 @@ async fn create_epic_tool_schema_includes_parent_epic_id() {
         "create_epic schema is missing parent_epic_id property"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fixtures for review/security tests
+// ---------------------------------------------------------------------------
+
+fn insert_review_pr_fixture(state: &Arc<McpState>, number: i64, repo: &str) {
+    use crate::db::PrKind;
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    let pr = ReviewPr {
+        number,
+        title: format!("PR #{number}"),
+        author: "alice".to_string(),
+        repo: repo.to_string(),
+        url: format!("https://github.com/{repo}/pull/{number}"),
+        is_draft: false,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        additions: 10,
+        deletions: 2,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: "feature/branch".to_string(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    state.db.save_prs(PrKind::Review, &[pr]).unwrap();
+}
+
+fn insert_security_alert_fixture(
+    state: &Arc<McpState>,
+    number: i64,
+    repo: &str,
+    kind: crate::models::AlertKind,
+) {
+    use crate::models::{AlertSeverity, SecurityAlert};
+    let alert = SecurityAlert {
+        number,
+        repo: repo.to_string(),
+        severity: AlertSeverity::High,
+        kind,
+        title: format!("Alert #{number}"),
+        package: Some("some-pkg".to_string()),
+        vulnerable_range: Some("< 1.0".to_string()),
+        fixed_version: Some("1.0.0".to_string()),
+        cvss_score: Some(7.5),
+        url: format!("https://github.com/{repo}/security/dependabot/{number}"),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: "A vulnerability".to_string(),
+        tmux_window: None,
+        worktree: None,
+        agent_status: None,
+    };
+    state.db.save_security_alerts(&[alert]).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// list_review_prs tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_review_prs_empty() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_review_prs", "arguments": {}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("No PRs found"));
+}
+
+#[tokio::test]
+async fn list_review_prs_returns_stored_prs() {
+    let state = test_state();
+    insert_review_pr_fixture(&state, 42, "acme/app");
+    insert_review_pr_fixture(&state, 99, "acme/app");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_review_prs", "arguments": {"mode": "reviewer"}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("42"));
+    assert!(text.contains("99"));
+}
+
+#[tokio::test]
+async fn list_review_prs_filters_by_repo() {
+    let state = test_state();
+    insert_review_pr_fixture(&state, 1, "acme/app");
+    insert_review_pr_fixture(&state, 2, "acme/other");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_review_prs", "arguments": {"repo": "acme/app"}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("acme/app"));
+    assert!(!text.contains("acme/other"));
+}
+
+// ---------------------------------------------------------------------------
+// get_review_pr tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_review_pr_found() {
+    let state = test_state();
+    insert_review_pr_fixture(&state, 42, "acme/app");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "get_review_pr", "arguments": {"repo": "acme/app", "number": 42}})),
+    )
+    .await;
+    assert!(resp.error.is_none());
+    let text = extract_response_text(&resp);
+    assert!(text.contains("acme/app"));
+    assert!(text.contains("42"));
+}
+
+#[tokio::test]
+async fn get_review_pr_not_found() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "get_review_pr", "arguments": {"repo": "acme/app", "number": 999}})),
+    )
+    .await;
+    assert_error(&resp, "not found");
+}
+
+// ---------------------------------------------------------------------------
+// list_security_alerts tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_security_alerts_empty() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_security_alerts", "arguments": {}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("No alerts found"));
+}
+
+#[tokio::test]
+async fn list_security_alerts_returns_stored_alerts() {
+    use crate::models::AlertKind;
+    let state = test_state();
+    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot);
+    insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_security_alerts", "arguments": {}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Alert #1"));
+    assert!(text.contains("Alert #2"));
+}
+
+#[tokio::test]
+async fn list_security_alerts_filters_by_kind() {
+    use crate::models::AlertKind;
+    let state = test_state();
+    insert_security_alert_fixture(&state, 1, "acme/api", AlertKind::Dependabot);
+    insert_security_alert_fixture(&state, 2, "acme/api", AlertKind::CodeScanning);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({"name": "list_security_alerts", "arguments": {"kind": "dependabot"}})),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(text.contains("Alert #1"));
+    assert!(!text.contains("Alert #2"));
+}
+
+// ---------------------------------------------------------------------------
+// get_security_alert tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_security_alert_found() {
+    use crate::models::AlertKind;
+    let state = test_state();
+    insert_security_alert_fixture(&state, 7, "acme/api", AlertKind::Dependabot);
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_security_alert",
+            "arguments": {"repo": "acme/api", "number": 7, "kind": "dependabot"}
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none());
+    let text = extract_response_text(&resp);
+    assert!(text.contains("acme/api"));
+    assert!(text.contains("Alert #7"));
+}
+
+#[tokio::test]
+async fn get_security_alert_not_found() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_security_alert",
+            "arguments": {"repo": "acme/api", "number": 999, "kind": "dependabot"}
+        })),
+    )
+    .await;
+    assert_error(&resp, "not found");
+}
+
+// ---------------------------------------------------------------------------
+// dispatch_review_agent tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn dispatch_review_agent_pr_not_found() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_review_agent",
+            "arguments": {"repo": "acme/app", "number": 999, "local_repo": "/tmp/repo"}
+        })),
+    )
+    .await;
+    assert_error(&resp, "not found");
+}
+
+#[tokio::test]
+async fn dispatch_review_agent_already_reviewing() {
+    use crate::db::PrKind;
+    use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
+    let state = test_state();
+    let pr = ReviewPr {
+        number: 42,
+        title: "PR #42".to_string(),
+        author: "alice".to_string(),
+        repo: "acme/app".to_string(),
+        url: "https://github.com/acme/app/pull/42".to_string(),
+        is_draft: false,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        additions: 10,
+        deletions: 2,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: "feature/branch".to_string(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+        tmux_window: Some("review-42".to_string()),
+        worktree: Some("/repo/.worktrees/review-42".to_string()),
+        agent_status: Some(ReviewAgentStatus::Reviewing),
+    };
+    state.db.save_prs(PrKind::Review, &[pr]).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_review_agent",
+            "arguments": {"repo": "acme/app", "number": 42, "local_repo": "/tmp/repo"}
+        })),
+    )
+    .await;
+    assert_error(&resp, "already has an active review agent");
+}
+
+// ---------------------------------------------------------------------------
+// dispatch_fix_agent tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn dispatch_fix_agent_alert_not_found() {
+    let state = test_state();
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_fix_agent",
+            "arguments": {
+                "repo": "acme/api", "number": 999,
+                "kind": "dependabot", "local_repo": "/tmp/repo"
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "not found");
+}
+
+#[tokio::test]
+async fn dispatch_fix_agent_already_reviewing() {
+    use crate::models::{AlertKind, AlertSeverity, ReviewAgentStatus, SecurityAlert};
+    let state = test_state();
+    let alert = SecurityAlert {
+        number: 7,
+        repo: "acme/api".to_string(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-9999".to_string(),
+        package: Some("pkg".to_string()),
+        vulnerable_range: None,
+        fixed_version: Some("1.0.0".to_string()),
+        cvss_score: None,
+        url: "https://example.com".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: "A vuln".to_string(),
+        tmux_window: Some("fix-7".to_string()),
+        worktree: Some("/repo/.worktrees/fix-vuln-7".to_string()),
+        agent_status: Some(ReviewAgentStatus::Reviewing),
+    };
+    state.db.save_security_alerts(&[alert]).unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_fix_agent",
+            "arguments": {
+                "repo": "acme/api", "number": 7,
+                "kind": "dependabot", "local_repo": "/tmp/repo"
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "already has an active fix agent");
+}

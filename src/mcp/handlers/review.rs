@@ -98,13 +98,13 @@ fn format_security_alert(alert: &crate::models::SecurityAlert) -> String {
         .map(|p| format!(" pkg:{p}"))
         .unwrap_or_default();
     format!(
-        "#{} {}{}{}\n  repo: {} | severity: {:?} | kind: {}\n  url: {}",
+        "#{} {}{}{}\n  repo: {} | severity: {} | kind: {}\n  url: {}",
         alert.number,
         alert.title,
         pkg,
         agent,
         alert.repo,
-        alert.severity,
+        alert.severity.as_str(),
         alert.kind.as_db_str(),
         alert.url,
     )

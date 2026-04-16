@@ -36,13 +36,15 @@ entity SecurityAlert {
     package: String?                       -- affected package name (dependabot only)
     vulnerable_range: String?              -- vulnerable version range
     fixed_version: String?                 -- patched version identifier, if available
-    cvss_score: Float?                     -- CVSS v3 score (0.0–10.0)
+    cvss_score: Decimal?                   -- CVSS v3 score (0.0–10.0)
     url: String                            -- full GitHub alert URL
     created_at: Timestamp
-    state: String                          -- alert state from GitHub (e.g. "open")
-    description: String                    -- advisory description text
+    state: String                          -- alert state from GitHub; fetched alerts are always "open"
+    description: String                    -- advisory description text (may be empty)
 
-    -- Fix agent session fields (all three cleared together — see FixAgentSessionUnit)
+    -- Fix agent session fields. On detach, all three are cleared in the in-memory
+    -- state; the persisted row retains tmux_window and worktree (only agent_status
+    -- is cleared at the DB level). See FixAgentSessionUnit for the in-memory rule.
     tmux_window: core/TmuxWindow?
     worktree: core/Worktree?
     agent_status: rb/ReviewAgentStatus?
@@ -60,6 +62,7 @@ entity SecurityAlert {
 config {
     max_graphql_pages: Integer = 3         -- pagination cap for alert fetching
     repos_per_page: Integer = 100          -- repos fetched per GraphQL request
+    alerts_per_repo: Integer = 25          -- open vulnerabilityAlerts pulled per repo
 }
 
 ------------------------------------------------------------
@@ -72,8 +75,10 @@ config {
 --   column 2: medium
 --   column 3: low
 --
--- Within each column, alerts are sorted by CVSS score descending.
--- Alerts with no CVSS score (null) sort last (treated as 0.0).
+-- Within each column, alerts are sorted alphabetically by repo name.
+-- (The fetch pipeline pre-orders alerts globally by severity then CVSS
+-- descending, but the per-column view re-sorts by repo for stable grouping
+-- of alerts from the same repository.)
 
 ------------------------------------------------------------
 -- Rules
@@ -84,14 +89,19 @@ config {
 rule DispatchFixAgent {
     when: DispatchFixAgent(alert)
 
-    requires: alert.tmux_window = null
-    requires: alert.worktree = null
+    -- The TUI deduplicates in-flight dispatches by (github_repo, number, kind)
+    -- rather than gating on the alert's agent fields directly. If tmux window
+    -- {fix-{repo_short}-{number}} already exists, dispatch focuses it instead
+    -- of creating a new session. See DispatchFixAgentViaMcp for the MCP-side
+    -- guard (which checks agent_status != reviewing).
 
     ensures: alert.worktree = core/Worktree.created(
         path: repo_path + "/.worktrees/fix-vuln-" + alert.number,
         branch: "fix/vuln-" + alert.number
     )
-    ensures: alert.tmux_window = core/TmuxWindow.created(name: "fix:" + alert.number)
+    ensures: alert.tmux_window = core/TmuxWindow.created(
+        name: "fix-" + repo_short + "-" + alert.number
+    )
     ensures: alert.agent_status = reviewing
     ensures: FixAgentLaunched(alert: alert)
 
@@ -99,14 +109,17 @@ rule DispatchFixAgent {
         -- Triggered from the Alerts sub-view (d key on a selected alert).
         -- Creates an isolated worktree named fix-vuln-{number} on a new branch
         -- fix/vuln-{number} based on origin/{default_branch}. A tmux window
-        -- named fix:{number} is created in the worktree.
+        -- named fix-{repo_short}-{number} is created in the worktree, where
+        -- repo_short is the final path segment of the local repo path.
         -- The agent receives a kind-specific prompt:
         --   Dependabot: instructions to upgrade the affected package.
         --   CodeScanning: instructions to fix the flagged code at the reported location.
         -- The agent calls update_review_status MCP tool with "findings_ready"
         -- when done, then the user reviews and the agent transitions to "idle".
-        -- The repo_path is resolved via the RepoPathPicker when multiple paths
-        -- are configured for the alert's repo.
+        -- The local repo_path is resolved by matching the alert's github_repo
+        -- short name against known configured repo paths. When no match exists,
+        -- the user is prompted to enter a path manually (InputDispatchRepoPath
+        -- input mode). Only one path is chosen — the first match wins.
 }
 
 -- == Fix Agent Detach ==
@@ -122,8 +135,15 @@ rule DetachFixAgent {
 
     @guidance
         -- Triggered from the Alerts sub-view (T key on a selected alert with
-        -- an active fix agent). Kills the tmux window and clears the worktree
-        -- and agent_status. The cleared state is persisted to the database.
+        -- an active fix agent). Kills the tmux window and clears tmux_window,
+        -- worktree, and agent_status in the in-memory SecurityAlert.
+        -- Database persistence: only agent_status is cleared to NULL in the
+        -- security_alerts row (via update_agent_status, which requires
+        -- tmux_window IS NOT NULL in the DB row to locate the record).
+        -- tmux_window and worktree remain populated in the persisted row;
+        -- subsequent GitHub fetches preserve those DB values by upserting
+        -- only the alert metadata columns. The in-memory view is the source
+        -- of truth for FixAgentSessionUnit.
 }
 
 -- == Fix Agent Re-Review ==
@@ -139,9 +159,12 @@ rule ReReviewAlert {
 
     @guidance
         -- Triggered from the Alerts sub-view (r key on an alert with an idle
-        -- agent). Sends a review command via tmux send-keys to the existing
-        -- tmux session — does NOT create a new worktree. Sets agent_status
-        -- to reviewing. Only available when agent_status == idle.
+        -- agent). Sends the shared "/review-pr {number}" command via
+        -- tmux send-keys to the existing tmux session — does NOT create a
+        -- new worktree. (The same re-review command is used for fix agents
+        -- and review agents; the fix agent treats it as a prompt to re-assess
+        -- its work.) Sets agent_status to reviewing in both memory and DB.
+        -- Only available when agent_status == idle.
 }
 
 ------------------------------------------------------------
@@ -161,19 +184,50 @@ rule ReReviewAlert {
 --   When set, only alerts of the matching kind are shown.
 
 ------------------------------------------------------------
+-- Key bindings (Alerts sub-view)
+------------------------------------------------------------
+
+-- Navigation:
+--   h/Left, l/Right   — change severity column
+--   j/Down, k/Up      — move within the current column
+--   Enter             — toggle the alert detail pane
+--
+-- View switching:
+--   1                 — switch to Dependabot sub-view
+--   2                 — stay on Alerts sub-view
+--   Tab / Esc         — return to the task board
+--   q                 — quit the TUI
+--
+-- Actions on the selected alert:
+--   d                 — dispatch a fix agent (DispatchFixAgent)
+--   r                 — re-trigger review (ReReviewAlert); only when idle
+--   T                 — detach the fix agent (DetachFixAgent)
+--   g                 — jump to the alert's tmux window (if any)
+--   p                 — open the alert URL in the browser
+--   ?                 — toggle the help overlay
+
+------------------------------------------------------------
 -- Data Fetching
 ------------------------------------------------------------
 
 -- @guidance
 --     Alert data is fetched via `gh api graphql` using the viewer's
---     repositories (ordered by most recently pushed). Each page fetches
---     up to config.repos_per_page repositories with their open
---     vulnerabilityAlerts. Pagination continues for up to
---     config.max_graphql_pages requests.
---     Results are sorted by severity (critical first, then high, medium,
---     low), then by CVSS score descending within each severity.
---     Alerts are persisted to SQLite. The board auto-refreshes
---     at config.security_poll_interval.
+--     repositories filtered to [OWNER, ORGANIZATION_MEMBER] affiliations
+--     and ordered by most recently pushed. Each page fetches up to
+--     config.repos_per_page repositories, and for each repo pulls at most
+--     alerts_per_repo open vulnerabilityAlerts. Pagination continues for
+--     up to config.max_graphql_pages requests.
+--     Only Dependabot vulnerabilityAlerts are fetched — CodeScanning
+--     alerts exist in the type system (see AlertKind) but no fetching
+--     path populates them. GitHub severity values map via AlertSeverity.parse,
+--     treating "moderate" as medium.
+--     Results returned from fetch are sorted globally by severity (critical
+--     first, then high, medium, low), then by CVSS score descending within
+--     each severity (null scores treated as 0.0). The per-column view on
+--     the board re-sorts alphabetically by repo (see Column Placement).
+--     Alerts are persisted to SQLite with agent fields (tmux_window,
+--     worktree, agent_status) preserved across fetches. The board
+--     auto-refreshes at config.security_poll_interval.
 
 ------------------------------------------------------------
 -- Visual: KindBadge
@@ -199,23 +253,31 @@ visual KindBadge(kind: AlertKind) -> String {
 ------------------------------------------------------------
 
 @invariant FixAgentSessionUnit
-    -- When a SecurityAlert transitions out of an active fix agent state
-    -- (detach), its tmux_window, worktree, and agent_status are ALL
-    -- cleared together. There is no partial cleanup — all three fields
-    -- are treated as a unit representing "fix agent session active".
+    -- In the in-memory SecurityAlert, the fix agent session fields
+    -- (tmux_window, worktree, agent_status) are treated as a unit
+    -- representing "fix agent session active". DetachFixAgent clears
+    -- all three together in memory, and DispatchFixAgent sets all three
+    -- together (agent_status = reviewing, worktree set, tmux_window set).
+    -- Note: the DB layer may transiently diverge from this invariant on
+    -- detach (only agent_status is NULLed in the security_alerts row);
+    -- the invariant governs the in-memory entity that drives the UI and
+    -- dispatch decisions.
 
 -- == MCP Security Board Tools ==
 
 rule ListSecurityAlertsViaMcp {
     when: McpListSecurityAlerts(repo?, severity?, kind?)
-    -- All params optional; combinable
+    -- All params optional; combinable.
     returns: Vec<SecurityAlert>
     @guidance
-        -- Reads from the security_alerts table.
+        -- Reads from the security_alerts table (persisted alert snapshot).
         -- repo: exact match on SecurityAlert.repo.
         -- severity: one of critical | high | medium | low.
         -- kind: one of dependabot | code_scanning.
-        -- Returns all open alerts matching the given filters.
+        -- Invalid severity or kind strings produce a -32602 error.
+        -- Returns formatted text blocks describing each matching alert.
+        -- When no alerts match, returns a single "No alerts found" line
+        -- rather than an empty list.
 }
 
 rule GetSecurityAlertViaMcp {

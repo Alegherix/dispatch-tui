@@ -48,6 +48,7 @@ impl App {
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
             InputMode::ReviewRepoFilter => self.handle_key_review_repo_filter(key),
+            InputMode::BotPrRepoFilter => self.handle_key_bot_pr_repo_filter(key),
             InputMode::SecurityRepoFilter => self.handle_key_security_repo_filter(key),
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
@@ -972,6 +973,24 @@ impl App {
         }
     }
 
+    fn handle_key_bot_pr_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseBotPrRepoFilter),
+            KeyCode::Tab => self.update(Message::ToggleBotPrRepoFilterMode),
+            KeyCode::Char('a') => self.update(Message::ToggleAllBotPrRepoFilter),
+            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                let idx = (c as usize) - ('1' as usize);
+                if let Some(repo) = self.active_bot_pr_repos().get(idx) {
+                    let repo = repo.clone();
+                    self.update(Message::ToggleBotPrRepoFilter(repo))
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        }
+    }
+
     fn handle_key_security_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseSecurityRepoFilter),
@@ -1076,7 +1095,7 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
+            KeyCode::Char('f') => self.update(Message::StartBotPrRepoFilter),
             KeyCode::Enter => {
                 self.security.dependabot.detail_visible = !self.security.dependabot.detail_visible;
                 vec![]

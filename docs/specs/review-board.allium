@@ -2,57 +2,40 @@
 -- review-board.allium
 --
 -- Scope: Review Board view and review agent lifecycle
--- Includes: ReviewPr entity, review agent dispatch/detach/cleanup rules
--- Excludes: Task lifecycle (see tasks.allium), domain model (see core.allium)
+-- Includes: ReviewPr entity, Reviewer value, review agent dispatch / detach /
+--           cleanup rules, MCP review tools
+-- Excludes: Task lifecycle (see tasks.allium), domain model (see core.allium),
+--           Dependabot sub-view and security alerts (see security-board.allium)
 
 use "./core.allium" as core
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value Reviewer {
+    login: String
+    decision: ReviewDecision?   -- null if this reviewer has not voted yet
+}
 
 ------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
 enum ReviewAgentStatus {
-    idle            -- agent waiting; user can trigger re-review with r key
     reviewing       -- agent is actively analyzing in the review worktree
     findings_ready  -- agent has completed its review and posted findings
+    idle            -- agent is waiting; user can trigger re-review with r key
 }
 
+-- Review board sub-view selector. Only these two modes live on the Review
+-- Board. Dependabot PRs are surfaced from the Security Board (see
+-- security-board spec), not here.
 enum ReviewBoardMode { reviewer | author }
 
-------------------------------------------------------------
--- Entities
-------------------------------------------------------------
-
-entity Reviewer {
-    login: String
-    decision: ReviewDecision?   -- null if this reviewer hasn't voted yet
-}
-
-entity ReviewPr {
-    number: Integer
-    repo: String              -- e.g. "org/repo"
-    url: String               -- full GitHub PR URL
-    title: String
-    author: String
-    is_draft: Boolean
-    review_decision: ReviewDecision
-    ci_status: CiStatus
-    tmux_window: core/TmuxWindow?
-    worktree: core/Worktree?
-    agent_status: ReviewAgentStatus?
-    created_at: Timestamp
-    updated_at: Timestamp
-    additions: Integer        -- lines added
-    deletions: Integer        -- lines removed
-    labels: String[]
-    body: String              -- PR description body
-    head_ref: String          -- source branch name, used when creating review worktree
-    reviewers: Reviewer[]     -- requested reviewers with their decisions
-
-    -- Derived
-    has_agent: agent_status != null
-}
-
+-- The overall review decision, used for column placement and row ordering.
+-- `waiting_for_response` has no direct GitHub wire value — it is derived
+-- client-side from the viewer's last interaction vs. the author's activity.
 enum ReviewDecision {
     review_required
     waiting_for_response
@@ -62,34 +45,114 @@ enum ReviewDecision {
 
 enum CiStatus { none | pending | success | failure }
 
+-- Persistence table a PR row lives in (drives MCP lookups and cleanup writes).
+enum PrKind { review | my | bot }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity ReviewPr {
+    number: Integer
+    repo: String                      -- GitHub slug, e.g. "org/repo"
+    url: String                       -- full GitHub PR URL
+    title: String
+    author: String                    -- GitHub login of the PR author
+    is_draft: Boolean                 -- drafts are filtered out before rows reach the board
+    review_decision: ReviewDecision   -- drives column placement
+    ci_status: CiStatus
+    additions: Integer                -- lines added
+    deletions: Integer                -- lines removed
+    labels: Set<String>
+    body: String                      -- PR description body
+    head_ref: String                  -- source branch name; used when creating the review worktree
+    reviewers: Set<Reviewer>          -- requested reviewers with their decisions (merged from reviews + reviewRequests)
+    tmux_window: core/TmuxWindow?
+    worktree: core/Worktree?
+    agent_status: ReviewAgentStatus?
+    pr_kind: PrKind                   -- which board list this row belongs to
+    created_at: Timestamp
+    updated_at: Timestamp
+
+    -- Derived
+    has_agent: agent_status != null
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+-- The review board refresh cadence is shared with core.allium.
+-- review_refresh_interval = 30.seconds (inherited from core/config).
+
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
--- == Review Agent Dispatch ==
+-- == Review Board Auto-Refresh ==
+
+rule ReviewBoardAutoRefresh {
+    -- On every tick, if either the reviewer or authored PR list is older than
+    -- core/config.review_refresh_interval and is not already loading, it is
+    -- refreshed from GitHub. Refresh runs regardless of which tab is active,
+    -- so switching into the Review Board shows up-to-date data immediately.
+    when: _: core/Tick
+
+    @guidance
+        -- Both ReviewPr lists (reviewer / author) share the same cadence
+        -- (REVIEW_REFRESH_INTERVAL, 30s). Fetches are dispatched via
+        -- Command::FetchPrs(PrListKind::Review) and FetchPrs(PrListKind::Authored).
+        -- Draft PRs are filtered out during parsing. The review_decision field is
+        -- classified client-side: APPROVED / CHANGES_REQUESTED take priority, otherwise
+        -- the client inspects whether the viewer has been re-requested, whether they
+        -- left a comment/review, and whether the author has responded since.
+        -- Results are deduplicated by URL and sorted by updated_at descending.
+        -- Agent fields (tmux_window, worktree, agent_status) from the previous list
+        -- are preserved when the new fetch does not carry them.
+}
+
+-- == Review Agent Dispatch (TUI) ==
 
 rule DispatchReviewAgent {
     when: DispatchReviewAgent(pr)
 
-    requires: pr.tmux_window = null
-    requires: pr.worktree = null
+    -- The UI hides the dispatch hint once agent_status is set, but the input
+    -- handler does not enforce this. If a tmux window already exists for the
+    -- same review-<repo_short>-<number> coordinate, provisioning short-circuits
+    -- and reuses the existing session instead of creating a new one.
+    requires: pr.agent_status != reviewing
 
     ensures: pr.worktree = core/Worktree.created(
         path: repo_path + "/.worktrees/review-" + pr.number,
         branch: "review-" + pr.number
     )
-    ensures: pr.tmux_window = core/TmuxWindow.created(name: "review:" + pr.number)
+    ensures: pr.tmux_window = core/TmuxWindow.created(
+        name: "review-" + repo_short + "-" + pr.number
+    )
     ensures: pr.agent_status = reviewing
     ensures: ReviewAgentLaunched(pr: pr)
 
     @guidance
-        -- Triggered from the Review Board (d key on a selected PR).
-        -- Creates an isolated worktree named review-{number} and a tmux
-        -- window named review:{number}. The agent is launched in the worktree
-        -- with a review-focused prompt. Does NOT modify the associated Task
-        -- record (if any) — review agent state is tracked solely on ReviewPr.
-        -- The repo_path is derived from the PR's repo slug and the configured
-        -- repos list.
+        -- Triggered from the Review Board (`d` key on a selected PR) or via
+        -- the MCP dispatch_review_agent tool. Creates an isolated worktree
+        -- named review-<number> under repo_path/.worktrees and a tmux window
+        -- named review-<repo_short>-<number>. The worktree checks out the
+        -- PR's head_ref (pr.head_ref). The agent is launched with a
+        -- review-focused prompt that runs `/anthropic-review-pr:review-pr
+        -- <number>` and calls update_review_status with "findings_ready"
+        -- when done. Does NOT modify the associated Task record (if any);
+        -- review agent state is tracked solely on ReviewPr.
+        --
+        -- repo_path is resolved from the PR's repo slug against the user's
+        -- configured / known local repo paths. If no match is found, the
+        -- TUI prompts the user to input a path (InputMode::InputDispatchRepoPath).
+        --
+        -- Reentrancy is guarded in two ways:
+        --   1) The TUI tracks in-flight dispatches in a PrRef set so that
+        --      pressing `d` repeatedly before the spawn completes is a no-op.
+        --   2) provision_and_dispatch checks whether the target tmux window
+        --      already exists and, if so, returns the existing window/worktree
+        --      without recreating anything.
 }
 
 -- == Review Agent Detach ==
@@ -104,11 +167,14 @@ rule DetachReviewAgent {
     ensures: pr.agent_status = null
 
     @guidance
-        -- Triggered from the Review Board (T key on a selected PR with an
-        -- active review agent). Kills the tmux window and clears the worktree
-        -- and agent_status on the ReviewPr. The cleared state is persisted to
-        -- the database via UpdateAgentStatus(status: null).
-        -- Available in both Review Board modes (reviewer / author).
+        -- Triggered from the Review Board (`T` key on a selected PR with an
+        -- active review agent). Kills the tmux window via KillTmuxWindow and
+        -- clears worktree and agent_status on the ReviewPr. The cleared state
+        -- is persisted to the database via UpdateAgentStatus(status: null),
+        -- which writes to whichever of review_prs, my_prs, bot_prs or
+        -- security_alerts currently owns the (repo, number) row. Available in
+        -- both Review Board modes (reviewer / author) and on the Dependabot
+        -- sub-view of the Security Board.
 }
 
 -- == Review Agent Re-Review ==
@@ -123,12 +189,14 @@ rule ReReview {
     ensures: ReviewAgentReTriggered(pr: pr)
 
     @guidance
-        -- Triggered from the Review Board (r key on a PR with an idle agent).
-        -- Sends "/review-pr {number}" via tmux send-keys to the existing
-        -- tmux session — does NOT create a new worktree. Sets agent_status
-        -- to reviewing. The agent is expected to call update_review_status
-        -- with "findings_ready" when done, then "idle" when the user has
-        -- finished their review. Only available when agent_status == idle.
+        -- Triggered from the Review Board (`r` key on a PR with an idle agent).
+        -- Sends "/review-pr {number}" via tmux send-keys to the existing tmux
+        -- window — does NOT create a new worktree. Updates agent_status to
+        -- "reviewing" directly in the DB and emits Message::ReviewStatusUpdated
+        -- so the TUI re-renders. The agent is expected to call
+        -- update_review_status with "findings_ready" when done, then "idle"
+        -- when the user has finished their review. Only wired for
+        -- agent_status = idle; other states are ignored by the key handler.
 }
 
 -- == Author Mode Dispatch Filter ==
@@ -136,66 +204,70 @@ rule ReReview {
 rule DispatchFilterToggle {
     when: ToggleDispatchFilter
 
-    -- Only available in ReviewBoardMode::Author.
-    -- Filters the Author mode PR list to show only PRs that have an
-    -- associated dispatched review agent (tmux_window != null).
-    -- Useful for tracking which of the user's own PRs have an active reviewer agent.
+    -- Only wired in ReviewBoardMode::author.
+    -- When enabled, the Author mode PR list is filtered to the user's own PRs
+    -- whose URL matches a currently-dispatching task (dispatch_pr_urls),
+    -- making it easy to watch which of your PRs have active dispatch work.
 
     @guidance
-        -- Triggered from the Review Board Author mode (D key).
+        -- Triggered from the Review Board Author mode (`D` key).
         -- Toggling this filter does not affect Reviewer mode.
-        -- State is not persisted — resets to off when the board is re-entered.
+        -- State is not persisted — it resets to off when the TUI restarts.
+        -- After toggling, review selection is clamped so the cursor remains
+        -- within the now-filtered rows.
 }
 
 -- == PR Merge Cleanup ==
 
 rule PrMergedCleanupReviewBoard {
-    -- Fires as a side effect of PrMerged(task) from tasks.allium.
-    -- When a task's PR is merged, any active review agent for the same
-    -- PR on the Review Board is also cleaned up.
+    -- Fires as a side effect of PrMerged(task) from tasks.allium. When a
+    -- task's PR is merged (either via `M` in the TUI or detected by the
+    -- periodic PR status poll), any active review agent session on the same
+    -- PR is also cleaned up. All three PR lists (reviewer / authored /
+    -- dependabot) are searched.
 
     when: PrMerged(task)
 
-    -- Find the ReviewPr matching the task's PR by (repo, number).
-    -- Extracted from task.pr_url via github_repo_from_pr_url / pr_number_from_url.
-    let pr = ReviewPr.find_by(
-        repo: github_repo_from_pr_url(task.pr_url),
-        number: pr_number_from_url(task.pr_url)
-    )
+    let repo = github_repo_from_pr_url(task.pr_url)
+    let number = pr_number_from_url(task.pr_url)
 
-    -- Only acts if a matching ReviewPr exists with an active agent session
-    requires: pr != null
-    requires: pr.tmux_window != null or pr.worktree != null or pr.agent_status != null
+    -- Matches a ReviewPr across review / authored / dependabot lists.
+    let pr = ReviewPr{repo: repo, number: number}
+
+    requires: exists pr
+    requires: pr.tmux_window != null
+        or pr.worktree != null
+        or pr.agent_status != null
 
     ensures: pr.tmux_window = null
     ensures: pr.worktree = null
     ensures: pr.agent_status = null
 
     @guidance
-        -- The PR is identified by parsing (repo, number) from task.pr_url.
-        -- Both Review Board PR lists are searched (reviewer / author).
-        -- If no matching PR has an active agent, the rule is a
-        -- no-op. The cleared state is persisted via UpdateAgentStatus(status: null).
-        -- This ensures that merging a PR via GitHub (or via the TUI M key)
-        -- never leaves a zombie review agent window open.
+        -- (repo, number) are parsed from task.pr_url via
+        -- github_repo_from_pr_url / pr_number_from_url. If no matching
+        -- ReviewPr has an active agent session the rule is a no-op. The
+        -- cleared state is persisted via UpdateAgentStatus(status: null),
+        -- which updates whichever table currently owns the row. This ensures
+        -- that merging a PR never leaves a zombie review agent window open.
 }
 
 rule BotPrsMergedCleanupReviewBoard {
-    -- Fires after a successful batch merge of bot PRs (Dependabot/Renovate)
-    -- from the Security Board. Distinct from PrMergedCleanupReviewBoard:
-    -- bot PRs have no associated Task record, so PrMerged(task) is never
-    -- emitted for them.
+    -- Fires after a successful batch merge of bot PRs (Dependabot / Renovate)
+    -- from the Security Board. Bot PRs have no associated Task record, so
+    -- PrMerged(task) is never emitted for them — this rule covers that gap.
 
     when: BotPrsMerged(merged_urls)
 
-    -- For each successfully merged URL, find and clean up any active review
-    -- agent on the matching ReviewPr.
     for url in merged_urls:
-        let pr = ReviewPr.find_by(
-            repo: github_repo_from_pr_url(url),
-            number: pr_number_from_url(url)
-        )
-        if pr != null and (pr.tmux_window != null or pr.worktree != null or pr.agent_status != null):
+        let repo = github_repo_from_pr_url(url)
+        let number = pr_number_from_url(url)
+        let pr = ReviewPr{repo: repo, number: number}
+        if exists pr and (
+            pr.tmux_window != null
+            or pr.worktree != null
+            or pr.agent_status != null
+        ):
             ensures: pr.tmux_window = null
             ensures: pr.worktree = null
             ensures: pr.agent_status = null
@@ -203,12 +275,33 @@ rule BotPrsMergedCleanupReviewBoard {
     @guidance
         -- Only URLs that successfully merged appear in merged_urls; failed
         -- merges are excluded. For each URL, (repo, number) is parsed via
-        -- github_repo_from_pr_url / pr_number_from_url. Both Review Board
-        -- PR lists are searched (reviewer / author). If no
-        -- matching ReviewPr has an active agent session, the rule is a no-op
-        -- for that URL. The cleared state is persisted via
-        -- UpdateAgentStatus(status: null). If no PRs merged successfully,
+        -- github_repo_from_pr_url / pr_number_from_url. All three PR lists
+        -- are searched. If no matching ReviewPr has an active agent session,
+        -- the rule is a no-op for that URL. The cleared state is persisted
+        -- via UpdateAgentStatus(status: null). If no PRs merged successfully,
         -- BotPrsMerged is not emitted at all.
+}
+
+-- == Review Status Updates from Agents ==
+
+rule UpdateReviewStatusViaMcp {
+    -- Agents use the update_review_status MCP tool to report their lifecycle.
+    when: McpUpdateReviewStatus(repo, number, status)
+
+    let pr = ReviewPr{repo: repo, number: number}
+
+    requires: exists pr
+    requires: pr.tmux_window != null
+
+    ensures: pr.agent_status = status
+
+    @guidance
+        -- Looks up the PR by (repo, number) across review_prs, my_prs,
+        -- bot_prs and security_alerts (the first table with a row whose
+        -- tmux_window is not null wins). When status becomes findings_ready,
+        -- the TUI flashes the card and fires a desktop notification. Emits
+        -- Message::ReviewStatusUpdated so in-memory state on all PR lists is
+        -- synchronised.
 }
 
 ------------------------------------------------------------
@@ -222,56 +315,112 @@ rule BotPrsMergedCleanupReviewBoard {
     -- detached, and cleaned up without affecting task lifecycle.
 
 @invariant ReviewBoardWindowCleanup
-    -- When a ReviewPr transitions out of an active agent state (detach or
-    -- PR merge), its tmux_window, worktree, and agent_status are ALL cleared
-    -- together. There is no partial cleanup — all three fields are treated as
-    -- a unit representing "review agent session active".
+    -- When a ReviewPr transitions out of an active agent state (detach,
+    -- PR merge, or bot PR batch merge), its tmux_window, worktree, and
+    -- agent_status are ALL cleared together. There is no partial cleanup —
+    -- all three fields are treated as a unit representing "review agent
+    -- session active".
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- The Review Board has 4 columns in both modes. Column placement is driven
+-- solely by pr.review_decision:
+--
+--   # | Label                 | review_decision
+--   --+-----------------------+-------------------
+--   0 | Needs Review          | review_required
+--   1 | Waiting for Response  | waiting_for_response
+--   2 | Changes Requested     | changes_requested
+--   3 | Approved              | approved
+--
+-- Within a column, PRs inherit the fetch-time ordering (updated_at descending).
+-- Auto-refresh runs every core/config.review_refresh_interval (30.seconds)
+-- for both the reviewer and authored lists, regardless of active tab.
+--
+-- Board switching (Tab): task -> review -> security -> task.
+-- Sub-mode switching (1/2) toggles between Reviewer and Author without
+-- leaving the Review Board.
+--
+-- Key bindings (normal mode, Review Board):
+--   h / left                move selection left one column
+--   l / right               move selection right one column
+--   j / down                move selection down one row
+--   k / up                  move selection up one row
+--   Enter                   toggle the PR detail panel
+--   p                       open the selected PR in the browser
+--   d                       dispatch a review agent (when no agent active)
+--   g                       jump to the review agent's tmux window
+--   r                       re-review (only when agent_status = idle)
+--   T                       detach the review agent (kill tmux window + clear fields)
+--   f                       open the repo filter overlay
+--   e                       edit GitHub search queries for the current mode
+--   1                       switch to Reviewer mode
+--   2                       switch to Author mode
+--   D                       toggle dispatch-PR filter (Author mode only)
+--   ?                       toggle help
+--   Tab                     switch to Security Board
+--   Esc                     clear bot-PR selection, else switch to Task Board
+--   q                       quit
 
 -- == MCP Review Board Tools ==
 
 rule ListReviewPrsViaMcp {
     when: McpListReviewPrs(mode?, repo?)
-    -- mode: reviewer (review_prs table) | author (my_prs table) | null = both
-    -- repo: optional GitHub repo filter (e.g. "acme/app")
-    returns: Vec<ReviewPr>
+    -- mode: "reviewer" (review_prs table) | "author" (my_prs table) |
+    --       "all" / null = both (default).
+    -- repo: optional GitHub repo filter (e.g. "acme/app"), matched case-sensitively.
+
     @guidance
-        -- Reads from the DB (review_prs and/or my_prs tables).
-        -- Returns the most recently fetched board state.
-        -- mode=null returns rows from both tables concatenated.
-        -- repo filter is an exact match on ReviewPr.repo.
+        -- Reads from the DB (review_prs and/or my_prs). Returns the most
+        -- recently fetched board state as formatted text, one PR per record
+        -- including number, title, draft flag, agent status, repo, author,
+        -- review decision, ci status and URL. mode is validated against
+        -- {"reviewer", "author", "all"}; any other value returns an
+        -- "Invalid mode" error. The bot_prs table is NOT searched by this
+        -- tool — bot PRs are surfaced via the Security Board's MCP tools.
 }
 
 rule GetReviewPrViaMcp {
     when: McpGetReviewPr(repo, number)
-    returns: ReviewPr
+
     @guidance
         -- Looks up (repo, number) in review_prs first, then my_prs.
-        -- Returns the first match. Returns not_found error if absent
-        -- from both tables.
+        -- Returns the first match. Returns an "invalid params" error if the
+        -- PR is absent from both tables. The bot_prs table is NOT searched.
 }
 
 rule DispatchReviewAgentViaMcp {
     when: McpDispatchReviewAgent(repo, number, local_repo)
 
-    requires: pr = GetReviewPrViaMcp(repo, number)
+    let pr = ReviewPr{repo: repo, number: number}
+
+    requires: exists pr
     -- MCP uses agent_status rather than tmux_window/worktree as the guard.
-    -- This allows re-dispatch when a prior session ended (idle/findings_ready)
+    -- This allows re-dispatch when a prior session ended (idle / findings_ready)
     -- without requiring the agent fields to be cleared first.
     requires: pr.agent_status != reviewing
 
     ensures: pr.agent_status = reviewing
-    ensures: pr.tmux_window set
-    ensures: pr.worktree set
+    ensures: pr.tmux_window != null
+    ensures: pr.worktree != null
 
     @guidance
-        -- local_repo is the filesystem path to the local clone used
-        -- to create the worktree (e.g. "/home/user/Code/work/myrepo").
-        -- Worktree path and branch name follow the same convention as DispatchReviewAgent.
-        -- local_repo is accepted as-is; no validation against configured repos is performed.
-        -- head_ref and is_dependabot are read from the PR record in the DB.
-        -- Returns error if the PR is not found in the DB.
-        -- Returns error if pr.agent_status is already "reviewing" to
-        -- prevent duplicate agent dispatch.
-        -- On success, persists tmux_window, worktree, and agent_status
-        -- to the DB and triggers a TUI refresh.
+        -- local_repo is the filesystem path to the local clone used to
+        -- create the worktree (e.g. "/home/user/Code/work/myrepo"). It is
+        -- accepted as-is; no validation against configured repos is performed.
+        -- Worktree path and branch name follow the same convention as
+        -- DispatchReviewAgent: .worktrees/review-<number> and a tmux window
+        -- review-<repo_short>-<number>. head_ref is read from the PR record.
+        -- is_dependabot is always false for this MCP tool (use the Security
+        -- Board for dependabot flows).
+        --
+        -- Errors:
+        --   * PR not found in either review_prs or my_prs -> invalid params
+        --   * agent_status is already "reviewing" -> invalid params
+        --
+        -- On success, persists tmux_window, worktree and agent_status to
+        -- the DB (the write targets whichever of review_prs / my_prs
+        -- currently owns the row) and triggers a TUI refresh via state.notify().
 }

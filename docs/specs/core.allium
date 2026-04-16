@@ -59,18 +59,19 @@ enum SubStatus {
     approved          -- PR approved, ready to merge
 }
 
--- Valid SubStatus values per parent status (enforced by MCP; bypassed by CLI hooks):
+-- Valid SubStatus values per parent status (enforced in the DB by a CHECK
+-- constraint and in-code via SubStatus.is_valid_for):
 --   backlog   : none
 --   running   : active | needs_input | stale | crashed | conflict
 --   review    : awaiting_review | changes_requested | approved | conflict
 --   done      : none
 --   archived  : none
 --
--- Note: HookNotification sets status=review with sub_status=needs_input via the CLI
--- update path, which bypasses is_valid_for() validation. The UI renders
--- (review, needs_input) as the "Blocked" state. The Blocked visual column is
--- defined as (running, needs_input) in models.rs, but tasks produced by
--- HookNotification appear as (review, needs_input) in practice.
+-- Note: HookNotification only fires when task.status = running, setting
+-- sub_status = needs_input. The resulting (running, needs_input) state
+-- renders as the "Blocked" visual column. Legacy (review, needs_input)
+-- rows from older hook behaviour were normalised to (review, awaiting_review)
+-- by migration v16.
 
 -- Default sub_status when transitioning to a new status:
 --   backlog   -> none
@@ -96,7 +97,7 @@ entity Task {
     pr_url: String?
     tag: TaskTag?
     sort_order: Integer?
-    base_branch: String          -- the branch this task rebases onto / targets for PRs
+    base_branch: String = "main" -- the branch this task rebases onto / targets for PRs
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -117,13 +118,15 @@ entity Task {
 
     -- Derived
     has_plan: plan_path != null
-    is_stale: sub_status == stale
-    is_crashed: sub_status == crashed
+    is_stale: sub_status = stale
+    is_crashed: sub_status = crashed
     is_epic: tag = epic
-    is_detached: worktree != null and tmux_window == null
-                 and (status == running or status == review)
+    is_detached: worktree != null and tmux_window = null
+                 and status in {running, review}
                  and sub_status != conflict
-    pr_number: derived from pr_url  -- extracted at runtime, not persisted
+    -- pr_number is parsed from the trailing numeric segment of pr_url.
+    -- Not persisted; computed on demand.
+    pr_number: pr_number_from_url(pr_url)
 }
 
 entity Epic {
@@ -231,8 +234,17 @@ config {
     pr_poll_interval: Duration = 30.seconds
     review_refresh_interval: Duration = 30.seconds   -- how often the Review Board auto-refreshes PR data
     security_poll_interval: Duration = 5.minutes     -- how often the Security Board polls GitHub for alerts
-    default_branch: String = detect_from_remote("main")
+    mcp_port: Integer = 3142                         -- MCP server port (override via DISPATCH_PORT env var)
+    -- Fallback when the repo has no origin/HEAD symbolic-ref.
+    -- Runtime code inspects `git symbolic-ref refs/remotes/origin/HEAD`
+    -- first and only falls back to this literal when detection fails.
+    default_branch: String = "main"
     tips_show_mode: TipsShowMode = always
+
+    -- Staleness thresholds used by card age rendering and Staleness::from_age.
+    fresh_threshold: Duration = 3.days
+    aging_threshold: Duration = 7.days
+    weeks_threshold: Duration = 14.days
 }
 
 ------------------------------------------------------------
@@ -259,11 +271,6 @@ config {
 -- Navigation (h/l) moves between visual columns.
 -- Parent group boundaries are annotated in the column header.
 -- A task's visual column is determined by (task.status, task.sub_status).
---
--- Note: HookNotification produces (review, needs_input) in practice,
--- which the UI renders as the Blocked state. The VisualColumn model
--- defines Blocked as (running, needs_input), which is the target model
--- for future alignment.
 
 concept VisualColumn {
     label: String

@@ -16,10 +16,12 @@ rule EditEpic {
     when: EditEpic(epic)
 
     -- Opens $EDITOR with a structured file containing the epic's
-    -- title, description, and repo_path.
+    -- title, description, and repo_path. The file uses "--- SECTION ---"
+    -- delimiters (TITLE, DESCRIPTION, REPO_PATH).
     -- The user edits the file; on save, fields are parsed back.
     -- Empty fields retain their previous values.
-    -- Status is not editable via the epic editor.
+    -- Status, plan_path, sort_order and auto_dispatch are not editable
+    -- via the epic editor.
 
     ensures:
         let edited = EditorSession(epic)
@@ -28,13 +30,14 @@ rule EditEpic {
         if edited.description != "": epic.description = edited.description
     ensures:
         if edited.repo_path != "": epic.repo_path = edited.repo_path
-    ensures: epic.updated_at = now
 
     @guidance
         -- Unlike EditTask, the epic editor does not expose status.
         -- Epic status is derived from subtask states via the
         -- EpicStatusRecalculation invariant and is not directly
         -- editable by the user.
+        -- updated_at is touched automatically by the database layer on
+        -- any patch_epic call, so the rule does not assert it directly.
         -- The TUI is suspended while the editor is open and resumes
         -- on editor exit. If the editor exits with a non-zero status,
         -- no changes are applied.
@@ -64,7 +67,7 @@ rule CreateEpic {
 }
 
 rule RecordRepoPathFromEpic {
-    when: core/Epic.created(repo_path: path)
+    when: CreateEpic(_, _, repo_path: path, _, _)
 
     ensures: core/SavedRepoPath.created_or_updated(
         path: path,
@@ -72,17 +75,20 @@ rule RecordRepoPathFromEpic {
     )
 
     @guidance
-        -- Mirrors RecordRepoPath in tasks.allium but fires on epic
-        -- creation. Same upsert semantics: update last_used if the
-        -- path exists, create if not.
+        -- Mirrors RecordRepoPath in tasks.allium but fires on the
+        -- TUI-driven CreateEpic trigger. Same upsert semantics: update
+        -- last_used if the path exists, create if not.
+        -- Note: MCP-created epics (via the create_epic tool) do not
+        -- record the repo path. Only the TUI's epic creation flow
+        -- emits the save.
 }
 
 rule DispatchEpicPlanning {
     when: DispatchEpic(epic)
 
     requires: epic.status = backlog
-    requires: !epic.has_plan
-    requires: epic.active_children.count = 0
+    requires: not epic.has_plan
+    requires: epic.active_subtasks.count = 0
 
     -- Creates a planning subtask and dispatches a planning agent.
     -- The planning agent brainstorms and writes an implementation plan
@@ -106,10 +112,13 @@ rule DispatchEpicPlanning {
         -- because the planning task has no plan — the agent's job is
         -- to create one. The dispatch provisions a worktree and tmux
         -- window and transitions the task to Running.
+        -- The "no active children" guard in the TUI looks only at
+        -- non-archived subtasks (tasks), not sub-epics. Sub-epics of
+        -- an unplanned epic do not currently block planning dispatch.
         -- When an epic has no plan but already has active subtasks,
         -- neither this rule nor DispatchEpicSubtask applies. The TUI
-        -- handles this gracefully by showing "Epic has subtasks but
-        -- no plan" without taking any action.
+        -- shows "Epic has subtasks but no plan" without taking any
+        -- action.
 }
 
 rule DispatchEpicSubtask {
@@ -118,15 +127,14 @@ rule DispatchEpicSubtask {
     requires: epic.status = backlog
     requires: epic.has_plan
 
-    -- Dispatches the next backlog child of this epic (task or sub-epic),
-    -- ordered by sort_order ascending (nulls treated as ID, tie-broken by id ascending).
+    -- Dispatches the next backlog subtask of this epic, ordered by
+    -- sort_order ascending (nulls treated as the task id, tie-broken
+    -- by id ascending).
     ensures:
-        let candidates = epic.active_children where status = backlog
+        let candidates = epic.active_subtasks where status = backlog
         let next = sort_by_order(candidates).first
         if next != null:
-            if next is Epic:
-                DispatchEpic(next)
-            else if next.has_plan:
+            if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
             else if next.tag = epic:
                 AgentLaunched(task: next, mode: brainstorm)
@@ -136,10 +144,11 @@ rule DispatchEpicSubtask {
                 AgentLaunched(task: next, mode: standard)
 
     @guidance
-        -- active_children is the union of active_subtasks (Task) and
-        -- active_sub_epics (Epic). When the next child is a sub-epic,
-        -- DispatchEpic is called recursively so that the sub-epic's own
-        -- planning or dispatch logic applies.
+        -- The TUI considers only active subtasks (Task) as dispatch
+        -- candidates; sub-epics are not auto-dispatched as children of
+        -- a parent epic. Dispatching a sub-epic is an explicit user
+        -- action (selecting the sub-epic and pressing Enter on it, or
+        -- opening it and pressing Enter from within).
         --
         -- The TUI requires epic.status = backlog so that all children
         -- are dispatched in a batch before any start running. Once the
@@ -149,12 +158,20 @@ rule DispatchEpicSubtask {
         -- stricter than DispatchNextViaMcp, which omits the backlog
         -- guard so that running agents can chain-dispatch siblings.
         --
-        -- Task routing (when next is a Task):
+        -- The TUI also excludes tasks currently in the in-flight
+        -- `dispatching` set to avoid racing a second dispatch while the
+        -- first is still provisioning its worktree.
+        --
+        -- Task routing (mirrors DispatchMode.for_task):
         --   has_plan        → implementation mode
         --   tag = epic      → brainstorm mode
         --   tag = feature   → plan mode
         --   other           → standard mode (dispatch without plan)
-        -- When no backlog children remain, the TUI shows a status
+        -- Implementation note: the code's DispatchMode enum collapses
+        -- "implementation" and "standard" into a single Dispatch
+        -- variant; the distinction is preserved at the spec level for
+        -- clarity but both share the same dispatch_agent code path.
+        -- When no backlog subtasks remain, the TUI shows a status
         -- message instead of dispatching.
 }
 
@@ -176,12 +193,17 @@ rule EpicBatchWrapUp {
 
     @guidance
         -- Sequences rebase or PR creation across all review tasks in an
-        -- epic that have a worktree. Tasks are processed one at a time in
-        -- sort_order. On success, the next task is processed automatically.
-        -- On conflict or failure, the queue pauses and reports the failing
-        -- task — the user can resolve the conflict and resume or cancel.
+        -- epic that have a worktree. Tasks are processed one at a time
+        -- in sort_order (sort_order ascending, nulls treated as the task
+        -- id; no secondary id tie-break). On success, the next task is
+        -- processed automatically. On conflict or failure, the queue
+        -- pauses and reports the failing task — the user can resolve
+        -- the conflict and resume or cancel.
         -- The MergeQueue tracks progress (completed count, current task,
         -- failed task) and can be cancelled at any time (Esc).
+        -- A task is skipped if it is no longer eligible when reached
+        -- (e.g. status changed off review, worktree cleared, or no
+        -- branch can be derived from the worktree path).
 }
 
 rule MoveEpicForward {
@@ -228,10 +250,31 @@ rule ConfirmArchiveEpic {
     when: ConfirmArchiveEpic(epic)
 
     requires:
-        epic.active_children.count = 0
-        or epic.active_children.all(c => c.status = done)
+        epic.active_subtasks.count = 0
+        or epic.active_subtasks.all(t => t.status = done)
 
     ensures: ConfirmationShown(epic, "Archive epic and all subtasks?")
+
+    @guidance
+        -- The guard looks only at active subtasks (Task). Active
+        -- sub-epics do not block archiving the parent. When the user
+        -- confirms, the TUI also passes the archive request through a
+        -- batch skip-check that skips any individual epic whose active
+        -- subtasks are not all done, reporting "Skipped N epics with
+        -- non-done subtasks".
+}
+
+rule ConfirmDeleteEpic {
+    when: ConfirmDeleteEpic(epic)
+
+    -- Prompts the user with "Delete epic <title> and subtasks? [y/n]".
+    -- Pressing y emits DeleteEpic(epic); any other key cancels.
+
+    ensures: ConfirmationShown(epic, "Delete epic and subtasks?")
+
+    @guidance
+        -- This confirmation step has no other guard: deletion is
+        -- allowed regardless of subtask or sub-epic state.
 }
 
 rule ArchiveEpic {
@@ -240,15 +283,18 @@ rule ArchiveEpic {
     ensures:
         for task in epic.active_subtasks:
             ArchiveTask(task)
-    ensures:
-        for sub_epic in epic.active_sub_epics:
-            ArchiveEpic(sub_epic)
     ensures: not exists epic
 
     @guidance
-        -- Recursively archives all sub-epics before archiving the parent.
-        -- Each sub-epic's ArchiveEpic rule runs in turn, ensuring tasks
-        -- at every depth are archived.
+        -- The TUI archives direct subtasks (by moving each to status =
+        -- archived through ArchiveTask) and then deletes the epic row
+        -- via DeleteEpic. The database's delete cascade hard-deletes
+        -- any sub-epics and their tasks, so nested epic trees are
+        -- collapsed in one shot rather than being archived per level.
+        -- This is a deliberate simplification: archiving an epic with
+        -- nested sub-epics effectively hard-deletes the nested tree.
+        -- If the currently active view is on the archived epic, the
+        -- TUI exits back to the parent view.
 }
 
 rule DeleteEpic {
@@ -264,9 +310,15 @@ rule DeleteEpic {
     ensures: not exists epic
 
     @guidance
-        -- Worktrees and tmux windows are cleaned up best-effort for
-        -- subtasks that have them before deletion. Sub-epics are deleted
-        -- recursively before the parent is removed.
+        -- Deletion is performed in a single database transaction that
+        -- walks parent_epic_id pointers depth-first, deleting each
+        -- epic's tasks then the epic row itself. Worktrees and tmux
+        -- windows are cleaned up best-effort for the directly-owned
+        -- subtasks before the DB call; cleanup for nested sub-epic
+        -- descendants is not performed by the TUI (those rows are
+        -- dropped purely at the database level).
+        -- If the currently active view is on the deleted epic, the TUI
+        -- exits back to the parent view.
 }
 
 -- == MCP Epic Tools ==
@@ -277,7 +329,9 @@ rule UpdateEpicViaMcp {
     requires: title != null or description != null or status != null
               or plan != null or sort_order != null or repo_path != null
 
-    -- Cannot set status to archived via MCP
+    -- Cannot set status to archived via MCP. The agent receives a
+    -- validation error instructing them to ask the human operator to
+    -- archive from the TUI.
     requires: status != archived
 
     ensures:
@@ -292,13 +346,21 @@ rule UpdateEpicViaMcp {
         if sort_order != null: epic.sort_order = sort_order
     ensures:
         if repo_path != null: epic.repo_path = repo_path
-    ensures: epic.updated_at = now
+
+    @guidance
+        -- updated_at is refreshed automatically by the database layer
+        -- on any patch_epic call, so the rule does not assert it
+        -- explicitly.
+        -- The auto_dispatch flag is not exposed via the MCP update
+        -- tool; it is toggled only from the TUI through ToggleAutoDispatch.
+        -- repo_path is expanded through expand_tilde before being
+        -- stored (so "~/proj" becomes "$HOME/proj").
 }
 
 rule DispatchNextViaMcp {
     when: McpDispatchNext(epic)
 
-    guard: epic.auto_dispatch = true
+    requires: epic.auto_dispatch = true
 
     -- Intentionally looser than the TUI DispatchEpicSubtask rule:
     -- does not require epic.status = backlog. The TUI dispatches
@@ -307,12 +369,10 @@ rule DispatchNextViaMcp {
     -- will already be running.
 
     ensures:
-        let candidates = epic.active_children where status = backlog
+        let candidates = epic.active_subtasks where status = backlog
         let next = sort_by_order(candidates).first
         if next != null:
-            if next is Epic:
-                DispatchEpic(next)
-            else if next.has_plan:
+            if next.has_plan:
                 AgentLaunched(task: next, mode: implementation)
             else if next.tag = epic:
                 AgentLaunched(task: next, mode: brainstorm)
@@ -322,26 +382,35 @@ rule DispatchNextViaMcp {
                 AgentLaunched(task: next, mode: standard)
 
     @guidance
-        -- MCP tool for agents to dispatch the next backlog child of
-        -- their epic (task or sub-epic). Uses the same dispatch mode
-        -- routing as the TUI's DispatchEpicSubtask (plan/tag based).
-        -- When the next child is a sub-epic, DispatchEpic is called
-        -- recursively. The task is transitioned to running with a
-        -- provisioned worktree and tmux window.
-        -- When no backlog children remain, returns an informational
+        -- MCP tool for agents to dispatch the next backlog subtask of
+        -- their epic. Uses the same dispatch mode routing as the TUI's
+        -- DispatchEpicSubtask (plan/tag based). The task is
+        -- transitioned to running with a provisioned worktree and tmux
+        -- window; the parent epic's status is recalculated after the
+        -- dispatch completes.
+        -- Sub-epics are not auto-dispatched by this tool: only direct
+        -- Task children with status = backlog are considered. If an
+        -- epic's remaining work is nested inside a sub-epic, the human
+        -- operator must dispatch the sub-epic explicitly from the TUI.
+        -- When no backlog subtasks remain, returns an informational
         -- message without error.
         -- When auto_dispatch = false, returns an informational message
         -- ("auto dispatch is disabled") without dispatching.
+        -- The response is returned immediately; the dispatch itself
+        -- runs on a background task, and a refresh notification is
+        -- sent to the TUI when it completes.
 }
 
 rule ToggleAutoDispatch {
     when: UserTogglesAutoDispatch(epic)
 
     ensures:
-        epic.auto_dispatch = !epic.auto_dispatch
+        epic.auto_dispatch = not epic.auto_dispatch
 
     @guidance
-        -- Triggered by pressing U in the epic detail view.
+        -- Triggered by pressing U in the epic detail view (i.e. while
+        -- ViewMode::Epic is active). The key is a no-op outside that
+        -- view.
         -- Flips the auto_dispatch flag. When false, the MCP
         -- dispatch_next tool returns an informational message
         -- instead of dispatching the next backlog subtask.

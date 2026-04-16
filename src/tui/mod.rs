@@ -961,6 +961,11 @@ impl App {
             | Message::ToggleSecurityRepoFilter(_)
             | Message::ToggleAllSecurityRepoFilter
             | Message::ToggleSecurityRepoFilterMode
+            | Message::StartBotPrRepoFilter
+            | Message::CloseBotPrRepoFilter
+            | Message::ToggleBotPrRepoFilter(_)
+            | Message::ToggleAllBotPrRepoFilter
+            | Message::ToggleBotPrRepoFilterMode
             | Message::DispatchFixAgent { .. }
             | Message::FixAgentDispatched { .. }
             | Message::FixAgentFailed { .. }
@@ -1264,6 +1269,11 @@ impl App {
             }
             Message::ToggleAllSecurityRepoFilter => self.handle_toggle_all_security_repo_filter(),
             Message::ToggleSecurityRepoFilterMode => self.handle_toggle_security_repo_filter_mode(),
+            Message::StartBotPrRepoFilter => self.handle_start_bot_pr_repo_filter(),
+            Message::CloseBotPrRepoFilter => self.handle_close_bot_pr_repo_filter(),
+            Message::ToggleBotPrRepoFilter(repo) => self.handle_toggle_bot_pr_repo_filter(repo),
+            Message::ToggleAllBotPrRepoFilter => self.handle_toggle_all_bot_pr_repo_filter(),
+            Message::ToggleBotPrRepoFilterMode => self.handle_toggle_bot_pr_repo_filter_mode(),
             Message::DispatchFixAgent(req) => self.handle_dispatch_fix_agent(req),
             Message::FixAgentDispatched {
                 github_repo,
@@ -4524,6 +4534,46 @@ impl App {
         };
         self.clamp_security_selection();
         vec![]
+    }
+
+    fn handle_start_bot_pr_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::BotPrRepoFilter;
+        vec![]
+    }
+
+    fn handle_close_bot_pr_repo_filter(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        vec![]
+    }
+
+    fn handle_toggle_bot_pr_repo_filter(&mut self, repo: String) -> Vec<Command> {
+        if !self.security.dependabot.prs.repo_filter.remove(&repo) {
+            self.security.dependabot.prs.repo_filter.insert(repo);
+        }
+        vec![]
+    }
+
+    fn handle_toggle_all_bot_pr_repo_filter(&mut self) -> Vec<Command> {
+        let all_repos = self.security.dependabot.prs.repos.clone();
+        if self.security.dependabot.prs.repo_filter.len() == all_repos.len() {
+            self.security.dependabot.prs.repo_filter.clear();
+        } else {
+            self.security.dependabot.prs.repo_filter = all_repos.into_iter().collect();
+        }
+        vec![]
+    }
+
+    fn handle_toggle_bot_pr_repo_filter_mode(&mut self) -> Vec<Command> {
+        self.security.dependabot.prs.repo_filter_mode =
+            match self.security.dependabot.prs.repo_filter_mode {
+                RepoFilterMode::Include => RepoFilterMode::Exclude,
+                RepoFilterMode::Exclude => RepoFilterMode::Include,
+            };
+        vec![]
+    }
+
+    pub fn active_bot_pr_repos(&self) -> &[String] {
+        &self.security.dependabot.prs.repos
     }
 
     fn handle_dispatch_fix_agent(&mut self, mut req: FixAgentRequest) -> Vec<Command> {

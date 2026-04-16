@@ -49,18 +49,31 @@ rule CreateQuickTask {
             status: backlog,
             sub_status: core/SubStatus.default_for(backlog),
             epic: if epic_id != null then core/Epic.find(epic_id) else null,
+            base_branch: config.default_branch,
             created_at: now,
             updated_at: now
         )
-        AgentDispatched(task: task, mode: quick)
+        AgentLaunched(task: task, mode: quick)
 
     @guidance
+        -- Triggered by the Shift+D (capital D) TUI key. When no saved
+        -- repo paths exist, the key is a no-op. When exactly one saved
+        -- repo path exists, it is used directly. When multiple saved
+        -- paths exist, a picker (InputMode::QuickDispatch) is shown.
         -- When invoked from the epic view, epic_id is set to the
         -- current epic, linking the quick task as a subtask.
+        -- The task title defaults to "Quick task"; the agent is expected
+        -- to rename the task via update_task once the user describes the
+        -- goal. The quick-dispatch agent uses a dedicated prompt that
+        -- asks the user what they want to achieve, then instructs the
+        -- agent to write a plan in docs/plans/ and attach it.
+        -- AgentLaunched fires immediately after creation; the task
+        -- transitions through the same dispatch path as DispatchTask
+        -- (Backlog -> Running, worktree and tmux window provisioned).
 }
 
 rule RecordRepoPath {
-    when: core/Task.created(repo_path: path)
+    when: RepoPathUsed(path)
 
     ensures: core/SavedRepoPath.created_or_updated(
         path: path,
@@ -68,11 +81,18 @@ rule RecordRepoPath {
     )
 
     @guidance
-        -- Fires after any task creation (CreateTask, CreateQuickTask).
-        -- If a SavedRepoPath with the same path already exists, only
-        -- last_used is updated. If it does not exist, a new record is
-        -- created. Cap enforcement (maximum stored paths) is an
-        -- implementation detail and not specified here.
+        -- Fires whenever a repo path is used to create a task or epic
+        -- through the TUI:
+        --   - TUI task creation (after InputBaseBranch submission)
+        --   - TUI quick-dispatch (Shift+D)
+        --   - TUI epic creation
+        -- The path is first expand_tilde'd. If a SavedRepoPath with
+        -- the same path already exists, last_used is bumped to now;
+        -- otherwise a new record is created.
+        -- Not fired for MCP task creation (create_task tool) or task
+        -- creation via the CLI `dispatch add` command — those skip
+        -- repo path persistence. Cap enforcement (maximum stored paths)
+        -- is an implementation detail and not specified here.
 }
 
 -- == Dispatch ==
@@ -101,6 +121,12 @@ rule DispatchTask {
         -- Specifically: `git worktree add -b <branch> <path> <base_branch>`.
         -- If the worktree directory already exists on disk (pre-created),
         -- the git worktree add step is skipped.
+        -- The launched Claude command includes a plugin-dir flag so
+        -- the agent discovers dispatch plugin skills (e.g. /wrap-up).
+        -- The agent prompt is prepended with a `git rebase <base>`
+        -- preamble so the agent picks up latest base changes on first
+        -- run. All task dispatches use --permission-mode plan
+        -- (see PlanTask guidance for the full rationale).
 }
 
 rule BrainstormTask {
@@ -136,10 +162,16 @@ rule PlanTask {
     ensures: AgentLaunched(task: task, mode: plan)
 
     @guidance
-        -- Plan mode launches Claude with --permission-mode plan, which
-        -- restricts the agent to writing an implementation plan without
-        -- making code changes. This is the dispatch path for feature-
-        -- tagged tasks that do not yet have a plan.
+        -- Plan mode is selected for feature-tagged tasks that do not
+        -- yet have a plan. The agent is given a planning-oriented
+        -- prompt (build_plan_prompt) that asks it to explore the
+        -- codebase and produce an implementation plan in docs/plans/,
+        -- then attach the plan via update_task before implementation.
+        -- All task-agent dispatches (Dispatch, Brainstorm, Plan, and
+        -- QuickDispatch) launch Claude with --permission-mode plan;
+        -- the prompt content — not the permission flag — differentiates
+        -- the modes. (Review and fix agents on the Review/Security
+        -- boards use --permission-mode acceptEdits instead.)
 }
 
 rule ResumeTask {
@@ -295,7 +327,7 @@ rule ReorderItem {
 -- == Detach Tmux ==
 
 rule DetachTmux {
-    when: DetachTmux(task)
+    when: ConfirmDetachTmux(task)
 
     requires: task.status = review
     requires: task.tmux_window != null
@@ -309,10 +341,14 @@ rule DetachTmux {
         -- Kills the tmux window for a review task while preserving
         -- the worktree. The agent is gone but the branch remains for
         -- PR review or later resume. Clears agent health tracking
-        -- (staleness timer, crash detection). Stale/Crashed sub_status
-        -- is reset to the review default (awaiting_review); other
-        -- sub_statuses (e.g. awaiting_review, approved) are preserved.
-        -- Available via the TUI (d key) on review tasks.
+        -- (staleness timer, crash detection). Only Stale/Crashed
+        -- sub_statuses are reset to the review default (awaiting_review);
+        -- other sub_statuses (awaiting_review, changes_requested,
+        -- approved, conflict) are preserved.
+        -- Triggered via the TUI (T key, uppercase) on review tasks.
+        -- The T key always shows a confirmation prompt
+        -- ("Detach tmux panel? [y/n]") before detaching, whether the
+        -- target is a single task or a batch of multi-selected tasks.
 }
 
 rule BatchDetachTmux {
@@ -328,9 +364,10 @@ rule BatchDetachTmux {
             DetachTmux(task)
 
     @guidance
-        -- Triggered via the TUI (T key) when tasks are multi-selected.
-        -- Shows a confirmation prompt with the count of detachable tasks.
-        -- Tasks that are not in review or lack a tmux window are silently
+        -- Triggered via the TUI (T key, uppercase) when tasks are
+        -- multi-selected. Shows a confirmation prompt with the count
+        -- of detachable tasks ("Detach N tmux panels? [y/n]"). Tasks
+        -- that are not in review or lack a tmux window are silently
         -- filtered out before the prompt.
 }
 
@@ -343,13 +380,19 @@ rule CreatePr {
     requires: task.worktree != null
 
     ensures: task.pr_url != null
+    ensures: task.status = review
+    ensures: task.sub_status = core/SubStatus.default_for(review)
     ensures: task.updated_at = now
+    ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
 
     @guidance
-        -- Pushes the branch to origin and creates a GitHub PR using
-        -- `gh pr create`. The task remains in review.
-        -- PRs are created as drafts (--draft flag) to avoid triggering
-        -- review requests before the agent's work is fully reviewed.
+        -- Low-level PR creation path shared by the TUI wrap-up flow
+        -- and the MCP wrap_up tool (action: pr). Identical to
+        -- WrapUpPr — this rule names the inner transition. See
+        -- WrapUpPr for the command sequence (git push -u origin then
+        -- gh pr create --draft). The task always transitions to review
+        -- with sub_status = awaiting_review regardless of the starting
+        -- status (Running or Review).
 }
 
 rule MergePr {
@@ -362,40 +405,57 @@ rule MergePr {
     ensures: PrMerged(task: task)
 
     @guidance
-        -- Human-initiated merge of an approved PR via the TUI (M key).
-        -- Runs `gh pr merge --merge` on the task's pr_url.
+        -- Human-initiated merge of an approved PR via the TUI.
+        -- Bound to the [P] key (uppercase); [p] opens the PR URL in
+        -- the browser instead. Selecting [P] on an approved review task
+        -- enters the ConfirmMergePr confirmation prompt before the
+        -- actual merge. Pressing [P] on a task that is not in review,
+        -- has no PR URL, or is not approved sets an informational
+        -- status message without prompting.
+        -- Runs `gh pr merge --squash` on the task's pr_url.
         -- On success, fires PrMerged which transitions the task to done.
-        -- On failure, the error is shown in the status bar without
-        -- changing task state.
+        -- On failure, the error is shown in the status bar via
+        -- MergePrFailed without changing task state; sub_status remains
+        -- approved so the user can retry.
 }
 
 rule PollPrStatus {
     when: Tick
 
-    for task in core/Tasks where status = review and pr_url != null
-                           and sub_status != conflict:
+    for task in core/Tasks where status = review and pr_url != null:
 
-        ensures: PrMerged(task: task)
+        -- Branch on GitHub's reported PR state:
+        --   Merged -> fire PrMerged; no sub_status update
+        --   Open   -> refresh sub_status from review_decision
+        --   Closed -> no effect (silently ignored)
         ensures:
-            let decision = PrReviewDecision(task)
-            let new_sub = match decision {
-                approved          => core/SubStatus.approved
-                changes_requested => core/SubStatus.changes_requested
-                _                 => core/SubStatus.awaiting_review
-            }
-            if task.sub_status != new_sub:
-                task.sub_status = new_sub
+            let status = check_pr_status(task.pr_url)
+            if status.state = merged:
+                PrMerged(task: task)
+            else if status.state = open and task.sub_status != conflict:
+                let new_sub =
+                    if status.review_decision = approved:
+                        core/SubStatus.approved
+                    else if status.review_decision = changes_requested:
+                        core/SubStatus.changes_requested
+                    else:
+                        core/SubStatus.awaiting_review
+                if task.sub_status != new_sub:
+                    task.sub_status = new_sub
 
     @guidance
-        -- Runs during each tick for review tasks with a pr_url.
-        -- Polls GitHub every pr_poll_interval (30s) via `gh pr view`
-        -- to check merge status and review decision.
-        -- Fires PrMerged when the PR is merged.
-        -- Updates sub_status to reflect the current review decision:
-        --   approved | changes_requested | awaiting_review.
-        -- PRs closed without merging are silently ignored by the poll
-        -- loop. The task remains in review and requires manual
-        -- intervention (move to done or re-dispatch).
+        -- Runs during each tick for review tasks with a pr_url. Polls
+        -- GitHub every pr_poll_interval (30s) via `gh pr view` to check
+        -- merge status and review decision.
+        -- Merged PRs: fire PrMerged which transitions the task to done.
+        -- Open PRs: update sub_status to reflect the current review
+        -- decision (approved | changes_requested | awaiting_review).
+        -- Tasks currently in sub_status = conflict are NOT overwritten
+        -- by the review-decision update, so conflict state persists
+        -- across polls until the user resolves it.
+        -- Closed-without-merge PRs: silently ignored by the poll loop.
+        -- The task remains in review and requires manual intervention
+        -- (move to done or re-dispatch).
 }
 
 rule PrMerged {
@@ -445,12 +505,19 @@ rule WrapUpRebase {
         -- Optimistically clears conflict sub_status before attempting the
         -- rebase, so the task is no longer visually flagged while the
         -- rebase runs in the background.
-        -- Runs `git fetch origin && git rebase origin/<task.base_branch>`
-        -- in the task's worktree directory, then fast-forwards
-        -- task.base_branch to the rebased branch. Uses the same
-        -- finish_task path as FinishTaskSuccess. The operation runs
-        -- in background via ProcessRunner; the tmux window is killed
-        -- on completion. Available from both the TUI (W then r) and
+        -- Steps (all via finish_task in dispatch.rs):
+        --   1. Verify the repo root is on task.base_branch; abort if not.
+        --   2. If origin remote exists, `git pull origin <base_branch>`
+        --      in the repo root (skipped when no remote is configured).
+        --   3. `git rebase <base_branch>` from the task's worktree.
+        --      On conflict: abort the rebase and emit RebaseConflict.
+        --   4. `git merge --ff-only <branch>` in the repo root to
+        --      fast-forward the base branch to the rebased branch.
+        --   5. Kill the tmux window (if it still exists).
+        -- The worktree is preserved after a successful rebase (cleaned
+        -- up only on archive). Uses the same finish_task path as
+        -- FinishTaskSuccess. The operation runs in background via
+        -- spawn_blocking. Available from both the TUI (W then r) and
         -- MCP (wrap_up tool with action "rebase").
 }
 
@@ -468,19 +535,23 @@ rule WrapUpPr {
     ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
 
     @guidance
-        -- Pushes the branch to origin and creates a GitHub PR as a
-        -- draft (`gh pr create --draft --base task.base_branch`) to
-        -- avoid triggering review requests before the agent's work is
-        -- fully reviewed. The PR base is task.base_branch (not hardcoded
-        -- "main"). The task transitions to review and PR status polling
+        -- Pushes the branch to origin (`git push -u origin <branch>`)
+        -- and creates a GitHub PR as a draft
+        -- (`gh pr create --draft --base task.base_branch --head owner:branch
+        -- --repo owner/repo`) to avoid triggering review requests before
+        -- the agent's work is fully reviewed. The --head uses the owner:branch
+        -- format so `gh` resolves the branch in the same repo as --repo
+        -- (rather than the authenticated user's namespace).
+        -- The PR base is task.base_branch (not hardcoded "main").
+        -- The task transitions to review and PR status polling
         -- (PollPrStatus) takes over from there.
-        -- The operation runs in background via ProcessRunner.
+        -- The operation runs in the background via ProcessRunner
+        -- (spawn_blocking). On failure, PrFailed is fired and the error
+        -- is shown in the status bar without changing task state.
         -- Available from both the TUI (W then p) and MCP (wrap_up
-        -- tool with action "pr").
-        -- When invoked via MCP and the task has an active tmux window,
-        -- a `/code-review {pr_url}` command is injected into the tmux
-        -- session after PR creation, triggering the agent to perform
-        -- a self-review.
+        -- tool with action "pr"). The existing tmux window is NOT
+        -- killed by this flow (it is preserved alongside the worktree,
+        -- so the agent can continue working — e.g., self-review).
 }
 
 -- == Split Pane Lifecycle ==
@@ -621,13 +692,14 @@ rule FinishTaskSuccess {
     ensures: task.updated_at = now
 
     @guidance
-        -- The implementation rebases the task branch onto task.base_branch
-        -- (after pulling latest from origin), then fast-forwards
-        -- the default branch to the rebased branch.
-        -- Worktree is preserved after finish.
-        -- It will be cleaned up when the task is archived.
-        -- If another active task shares the same worktree, the worktree
-        -- is detached from this task but not removed from disk.
+        -- Same finish_task path as WrapUpRebase. The implementation
+        -- rebases the task branch onto task.base_branch (after pulling
+        -- latest from origin), then fast-forwards task.base_branch to
+        -- the rebased branch, then kills the tmux window.
+        -- Worktree is preserved after finish; it will be cleaned up
+        -- when the task is archived. If another active task shares the
+        -- same worktree, the worktree is detached from this task but
+        -- not removed from disk.
 }
 
 rule FinishTaskConflict {
@@ -750,10 +822,14 @@ rule EditTask {
     when: EditTask(task)
 
     -- Opens $EDITOR with a structured file containing the task's
-    -- title, description, repo_path, status, plan, and tag.
+    -- title, description, repo_path, status, plan, tag, and base_branch.
+    -- The sections are delimited by `--- SECTION ---` markers
+    -- (TITLE, DESCRIPTION, REPO_PATH, STATUS, PLAN, TAG, BASE_BRANCH).
     -- The user edits the file; on save, fields are parsed back.
-    -- Empty fields retain their previous values.
-    -- Empty plan or tag clears the field.
+    -- Empty title/description/repo_path retain their previous values.
+    -- Empty plan or tag clears the field. Status parses to the
+    -- previous value on invalid input. Empty base_branch retains the
+    -- previous value.
 
     ensures:
         let edited = EditorSession(task)
@@ -772,6 +848,8 @@ rule EditTask {
     ensures:
         if edited.tag != "": task.tag = edited.tag
         else: task.tag = null
+    ensures:
+        if edited.base_branch != "": task.base_branch = edited.base_branch
     ensures: task.updated_at = now
 
     @guidance
@@ -784,7 +862,8 @@ rule EditTask {
         -- when status changes, per the SubStatusAutoreset invariant.
         -- The TUI is suspended while the editor is open and resumes
         -- on editor exit. If the editor exits with a non-zero status,
-        -- no changes are applied.
+        -- no changes are applied. A confirmation prompt
+        -- (ConfirmEditTask) is shown before the editor is invoked.
 }
 
 -- == Agent Health ==
@@ -968,14 +1047,18 @@ rule RetryFresh {
 
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
-                        repo_path?, sort_order?, pr_url?, tag?, epic_id?)
+                        repo_path?, sort_order?, pr_url?, tag?, epic_id?,
+                        base_branch?)
 
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
               or sort_order != null or epic_id != null
               or pr_url != null or tag != null
+              or base_branch != null
 
-    -- Cannot set status to done or archived via MCP
+    -- Cannot set status to done or archived via MCP. This restriction
+    -- is enforced at the MCP handler boundary, not in the service layer.
+    -- Rationale: agents manage running work, humans mark completion.
     requires: status != done
     requires: status != archived
 
@@ -997,23 +1080,46 @@ rule UpdateTaskViaMcp {
     ensures:
         if description != null: task.description = description
     ensures:
-        if repo_path != null: task.repo_path = repo_path
+        if repo_path != null: task.repo_path = expand_tilde(repo_path)
     ensures:
         if sort_order != null: task.sort_order = sort_order
     ensures:
-        if pr_url != null: task.pr_url = pr_url
+        if pr_url != null:
+            if pr_url = "":
+                task.pr_url = null      -- empty string clears the PR URL
+            else:
+                task.pr_url = pr_url
     ensures:
         if tag != null: task.tag = tag
     ensures:
         if epic_id != null: task.epic = core/Epic.find(epic_id)
+    ensures:
+        if base_branch != null: task.base_branch = base_branch
     ensures: task.updated_at = now
+
+    @guidance
+        -- MCP update_task accepts status, sub_status, plan_path, title,
+        -- description, repo_path, sort_order, pr_url, tag, epic_id,
+        -- and base_branch. It does NOT accept worktree or tmux_window —
+        -- those are owned by the dispatch flow and never set via MCP.
+        -- An empty-string pr_url clears the field (maps to FieldUpdate::Clear);
+        -- any non-empty string sets it.
+        -- When status or epic_id changes, the parent epic's status is
+        -- recalculated (if a parent epic exists). Re-assigning a task
+        -- from one epic to another triggers recalculation on both the
+        -- old and new epic.
 }
 
 rule ClaimTaskViaMcp {
     when: McpClaimTask(task, worktree, tmux_window)
 
     requires: task.status = backlog
-    requires: worktree.path starts_with task.repo_path
+
+    -- Repo root derived from the worktree by stripping the
+    -- `/.worktrees/<slug>` suffix must exactly match task.repo_path.
+    -- This is stricter than a simple starts_with check: worktrees
+    -- pointing at another repository with a similar prefix are rejected.
+    requires: repo_from_worktree(worktree.path) = task.repo_path
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
@@ -1022,10 +1128,11 @@ rule ClaimTaskViaMcp {
     ensures: task.updated_at = now
 
     @guidance
-        -- The implementation derives the repo root from the worktree path
-        -- by stripping the /.worktrees/<slug> suffix. This is stricter than
-        -- a simple starts_with check: the repo root must exactly match
-        -- task.repo_path.
+        -- repo_from_worktree splits on "/.worktrees/" and returns the
+        -- prefix; when the path does not contain "/.worktrees/", the
+        -- full path is returned (so a user's repo root is accepted as-is).
+        -- On mismatch, the service returns a Validation error naming
+        -- the task's repo_path and the caller's derived repo root.
 }
 
 rule ReportUsageViaMcp {
@@ -1048,6 +1155,70 @@ rule ReportUsageViaMcp {
         -- omitted by the caller.
 }
 
+rule DispatchNextViaMcp {
+    when: McpDispatchNext(epic)
+
+    -- Select the first backlog subtask of the epic, ordered by
+    -- sort_order (nulls fall back to id), then by id.
+    let next = epic.subtasks where status = backlog
+        ordered_by (sort_order ?? id, id)
+        .first
+
+    ensures:
+        if not epic.auto_dispatch:
+            UserInformed(about: auto_dispatch_disabled, epic: epic)
+        else if next = null:
+            UserInformed(about: no_backlog_tasks, epic: epic)
+        else:
+            let mode = DispatchMode.for_task(next)
+            if mode = dispatch:
+                DispatchTask(next)
+            else if mode = brainstorm:
+                BrainstormTask(next)
+            else if mode = plan:
+                PlanTask(next)
+
+    @guidance
+        -- When epic.auto_dispatch is false, the call returns an
+        -- informational message without dispatching. Otherwise the
+        -- next backlog subtask is chosen deterministically: sort_order
+        -- ascending with id tiebreaker, nulls using id as fallback.
+        -- If no backlog subtasks remain, the call is a no-op with an
+        -- informational message. A DB error reading auto_dispatch does
+        -- not block dispatch; the flag defaults to treated-as-true on
+        -- read failure (fail-open). Returns success immediately; the
+        -- dispatch runs in the background via spawn_blocking.
+}
+
+rule SwapSplitPane {
+    when: UserAction([G], task)
+    requires: split_pane.active = true
+    requires: task.tmux_window != null
+    requires: split_pane.pinned_task != task  -- no-op when already pinned
+
+    ensures:
+        if split_pane.pinned_task != null:
+            -- Swap: the currently pinned task's pane is returned to a
+            -- standalone window, and the new task's window is joined
+            -- into the split pane.
+            SplitPaneSwapped(
+                new_task: task,
+                old_task: split_pane.pinned_task
+            )
+        else:
+            SplitPanePinned(task: task)
+    ensures: split_pane.pinned_task = task
+    ensures: split_pane.pane = task.tmux_window
+
+    @guidance
+        -- This rule specifies the swap case for [G]; the pin-empty case
+        -- is covered by PinTaskInSplitPane. When the pane already holds
+        -- a different task's window, the old window is swapped out via
+        -- tmux swap-pane and returned to the standalone window list.
+        -- tmux focus is NOT transferred — the TUI pane retains focus
+        -- throughout the swap.
+}
+
 rule SendMessageViaMcp {
     when: McpSendMessage(from_task, to_task, body)
 
@@ -1059,16 +1230,23 @@ rule SendMessageViaMcp {
     ensures: MessageDelivered(
         from: from_task,
         to: to_task,
-        path: to_task.worktree + "/.claude-messages/" + from_task.id + "-" + timestamp() + ".md"
+        path: to_task.worktree + "/.claude-messages/" + from_task.id + "-" + timestamp_ms() + ".md"
     )
     ensures: TmuxNotificationSent(to: to_task, about: message_received)
 
     @guidance
         -- Inter-agent messaging. An agent writes a message file into the
-        -- target agent's worktree under .claude-messages/ and injects a
-        -- tmux notification telling the target to read and delete it.
+        -- target agent's worktree under .claude-messages/, using a
+        -- filename of `<from_task.id>-<unix_epoch_millis>.md`. The file
+        -- contents begin with `[Message from task <id>: "<title>"]`
+        -- followed by the body text.
+        -- After writing the file, a tmux notification is injected via
+        -- `tmux send-keys` telling the target to read and delete the
+        -- file. If send-keys fails, the message file is removed and
+        -- an error is returned to the caller.
         -- The TUI shows a brief envelope flash on the target task's card
-        -- via the message_flash tracking state.
+        -- (message_flash tracking state, cleared after 3 seconds) via
+        -- the MessageSent MCP event and the MessageReceived message.
         -- Both tasks must exist. The target must have an active worktree
         -- and tmux window (i.e. a running agent). The sender has no
         -- such constraint — it only needs to exist.
@@ -1247,9 +1425,10 @@ surface RepoPathPicker {
     -- SubStatus.default_for(new_status). This ensures that no invalid
     -- (status, sub_status) combinations are ever persisted.
     -- Every rule that changes status must also reset sub_status.
-    -- Exception: rules that set status and then immediately set a
-    -- specific sub_status override the default (e.g., HookNotification
-    -- sets status=review then sub_status=needs_input).
+    -- Exception: rules that set a specific sub_status override the
+    -- default (e.g., HookNotification keeps status=running and sets
+    -- sub_status=needs_input; FinishTaskConflict keeps the parent
+    -- status and sets sub_status=conflict).
 
 @invariant SplitPaneStability
     -- When split mode is active, the pane must never be destroyed and

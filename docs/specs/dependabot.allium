@@ -1,10 +1,16 @@
 -- allium: 3
 -- dependabot.allium
 --
--- Scope: Dependabot PR board lifecycle
+-- Scope: Dependabot PR sub-view on the Security Board
 -- Includes: Column placement, sort priority, approve/merge flow, agent lifecycle,
---           visual badges, staleness coloring
--- Excludes: PR fetching (runtime detail), review-board agent dispatch mechanics (see review-board.allium)
+--           visual badges, staleness coloring, multi-select, key bindings
+-- Excludes: PR fetching (runtime detail), security alerts sub-view (see security.allium),
+--           review-board agent dispatch mechanics (see review-board.allium)
+--
+-- Architectural note: The Dependabot "board" is not a top-level board. It is
+-- the default sub-view of the Security Board (SecurityBoardMode::Dependabot),
+-- toggled against the Alerts sub-view with the 1 / 2 keys. Entering the
+-- Security Board (Tab from the task board) starts in the Dependabot sub-view.
 
 use "./review-board.allium" as rb
 
@@ -18,36 +24,63 @@ enum DependabotColumn { backlog | in_review | approved }
 -- Column Placement
 ------------------------------------------------------------
 
--- A DependabotPr is placed in a column according to these rules, evaluated
--- in priority order:
+-- A ReviewPr in the Dependabot sub-view is placed in a column according to
+-- these rules, evaluated in priority order:
 --
---   1. review_decision == approved        -> approved
+--   1. review_decision == approved          -> approved
 --   2. agent_status in {reviewing,
---      findings_ready}                    -> in_review
---   3. otherwise                          -> backlog
+--      findings_ready}                      -> in_review
+--   3. otherwise                            -> backlog
 --
 -- Approved always wins, even if an agent is still running.
 
 -- Column indices: backlog=0, in_review=1, approved=2
-rule DependabotColumnPlacement(pr: ReviewPr) -> DependabotColumn {
+rule DependabotColumnPlacement(pr: rb/ReviewPr) -> DependabotColumn {
     when pr.review_decision == approved    => approved
     when pr.agent_status in
          {reviewing, findings_ready}       => in_review
     otherwise                              => backlog
 }
 
+-- Column header labels are "Backlog", "In Review", "Approved". Each header
+-- shows "<label> (<count>)" where count is the number of PRs currently in that
+-- column after the repo filter has been applied.
+
 ------------------------------------------------------------
--- Sort Priority within In Review
+-- Sort Priority
 ------------------------------------------------------------
 
--- Within the in_review column, FindingsReady items float to the top
--- because they need user action (approve). Reviewing items sit below.
+-- PRs are sorted globally by agent-status priority before being partitioned
+-- into columns. Within any column, FindingsReady items float to the top
+-- because they need user action. The effect is most visible in the in_review
+-- column (which is the only column that contains reviewing / findings_ready
+-- items), but the stable sort is applied to the full filtered list.
+--
+-- The underlying order (for PRs with the same sort priority) is updated_at
+-- descending as delivered by fetch_prs.
 
-rule InReviewSortPriority(pr: ReviewPr) -> Nat {
+rule DependabotSortPriority(pr: rb/ReviewPr) -> Nat {
     when pr.agent_status == findings_ready => 0
     when pr.agent_status == reviewing      => 1
     otherwise                              => 2
 }
+
+-- Within each column, PRs are grouped by repo: a repo header row is emitted
+-- whenever the repo changes between consecutive PRs in sorted order. The
+-- header shows the last path segment of the repo slug (e.g. "app" for "acme/app").
+
+------------------------------------------------------------
+-- Card Layout
+------------------------------------------------------------
+
+-- Each PR card renders two lines:
+--
+--   Line 1: [selection marker] [agent badge] #<number> <title>        [CI dot]
+--   Line 2:   @<author> · <age> · +<additions>/-<deletions>
+--
+-- selection marker:  "* " when the PR is in the multi-select set, "" otherwise
+-- agent badge:       see AgentStatusBadge below
+-- CI dot:            see CiBadge below; right-aligned on line 1
 
 ------------------------------------------------------------
 -- CI Badge (visual)
@@ -56,69 +89,145 @@ rule InReviewSortPriority(pr: ReviewPr) -> Nat {
 -- CI status is displayed as a colored dot on each card.
 -- It does NOT influence column placement.
 --
--- success  -> green  "●"
--- failure  -> red    "●"
--- pending  -> yellow "●"
--- none     -> gray   "●"
+-- success  -> green     "●"
+-- failure  -> red       "●"
+-- pending  -> yellow    "●"
+-- none     -> dark-gray "●"
 
-visual CiBadge(status: CiStatus) -> (Color, String) {
-    success => (green,  "●")
-    failure => (red,    "●")
-    pending => (yellow, "●")
-    none    => (gray,   "●")
+visual CiBadge(status: rb/CiStatus) -> (Color, String) {
+    success => (green,     "●")
+    failure => (red,       "●")
+    pending => (yellow,    "●")
+    none    => (dark_gray, "●")
 }
 
 ------------------------------------------------------------
 -- Approve / Merge Bot PRs
 ------------------------------------------------------------
 
--- The Dependabot board allows approving and merging bot PRs
--- (Dependabot / Renovate). These actions operate on the first selected PR.
+-- The Dependabot sub-view allows approving and merging bot PRs (Dependabot /
+-- Renovate). Both actions operate on the cursor-selected PR, NOT on the
+-- multi-selected set. The multi-select state (Space toggle) is a visual
+-- selection marker only; the approve/merge flow reads the cursor position via
+-- selected_dependabot_pr() and ignores selected_prs. On confirm, selected_prs
+-- is cleared as a side effect.
 
-rule ApproveBotPrs {
-    when: ApproveBotPrs(pr)
+rule ApproveBotPr {
+    when: ApproveBotPr(pr)
 
     requires: pr != null
 
     ensures: pr.review_decision = approved
-    ensures: BotPrsApproved(approved_url: pr.url)
+    ensures: BotPrApproved(approved_url: pr.url)
 
     @guidance
-        -- Triggered from the Dependabot board (a key on a selected PR).
-        -- Runs "gh pr review --approve {url}" on the first selected PR.
-        -- Uses ConfirmApproveBotPr y/n dialog before executing.
-        -- After approval the PR moves to the approved column on the next refresh.
+        -- Triggered from the Dependabot sub-view (a key with a cursor-selected PR).
+        -- Enters InputMode::ConfirmApproveBotPr(url) with a y/N status-bar prompt
+        -- ("Approve PR #<n>? (y/N)"). Pressing y runs
+        -- "gh pr review --approve <url>" on the cursor-selected PR's URL and
+        -- clears the multi-select set. Pressing n (or any other key) cancels.
+        -- On success a RefreshBotPrs message fires and a "Approved PR <url>"
+        -- status is displayed. On the next refresh the PR moves to the
+        -- approved column.
 }
 
-rule MergeBotPrs {
-    when: MergeBotPrs(pr)
+rule MergeBotPr {
+    when: MergeBotPr(pr)
 
     requires: pr != null
 
-    ensures: BotPrsMerged(merged_url: pr.url)
-
     @guidance
-        -- Triggered from the Dependabot board (m key on a selected PR).
-        -- Uses ConfirmMergeBotPr y/n dialog before executing.
-        -- Runs "gh pr merge --merge {url}" on the first selected PR.
-        -- On success BotPrsMergedCleanupReviewBoard fires (see review-board.allium).
+        -- Triggered from the Dependabot sub-view (m key with a cursor-selected PR).
+        -- Enters InputMode::ConfirmMergeBotPr(url) with a y/N status-bar prompt
+        -- ("Merge PR #<n>? (y/N)"). Pressing y runs
+        -- "gh pr merge --squash <url>" on the cursor-selected PR's URL and
+        -- clears the multi-select set. Pressing n (or any other key) cancels.
+        -- On success a RefreshBotPrs message fires and a "Merged PR <url>"
+        -- status is displayed.
+        --
+        -- Note: the runtime does NOT currently emit a BotPrsMerged trigger
+        -- after a successful merge. BotPrsMergedCleanupReviewBoard (see
+        -- review-board.allium) is therefore only exercised via tests. Review
+        -- agent sessions on merged bot PRs are cleaned up opportunistically
+        -- on the next RefreshBotPrs when the PR disappears from the list.
 }
 
 ------------------------------------------------------------
 -- Review Agent Lifecycle (Dependabot sub-view)
 ------------------------------------------------------------
 
--- Review agents can be dispatched from the Dependabot board. Their lifecycle
--- mirrors DispatchReviewAgent / DetachReviewAgent / ReReview in review-board.allium
--- but applies to bot PRs rather than regular PRs.
+-- Review agents can be dispatched from the Dependabot sub-view. Their
+-- lifecycle mirrors DispatchReviewAgent / DetachReviewAgent / ReReview in
+-- review-board.allium but applies to bot PRs. Dispatch passes is_dependabot=true
+-- so the agent receives a dependency-update-oriented prompt.
 --
--- Key bindings:
---   d key: dispatch a review agent for the selected bot PR.
---          Same worktree/tmux logic as DispatchReviewAgent in review-board.allium.
---   T key: detach/kill the review agent. Same as DetachReviewAgent.
---   r key: re-trigger review. Same as ReReview. Only when agent_status == idle.
---   g key: jump to the review agent tmux session.
---   p key: open the bot PR URL in the browser.
+-- Key bindings (when there is a cursor-selected PR):
+--   d : dispatch a review agent for the cursor-selected bot PR
+--       (only when the PR has no active agent; same worktree/tmux logic as
+--       DispatchReviewAgent in review-board.allium).
+--   T : detach/kill the review agent. Same as DetachReviewAgent. Available
+--       only when tmux_window is non-null.
+--   r : re-trigger review. Same as ReReview. Only when agent_status = idle
+--       and tmux_window is non-null.
+--   g : jump to the review agent tmux session. Shows "No active session"
+--       status when tmux_window is null.
+--   p : open the bot PR URL in the browser.
+
+------------------------------------------------------------
+-- Multi-select
+------------------------------------------------------------
+
+-- Space toggles the cursor-selected PR's inclusion in the multi-select set.
+-- The set is rendered as a "* " prefix on matching cards and changes the
+-- status-bar hints (a approve / m merge / Esc clear). Esc on the review board
+-- clears the multi-select set instead of switching view, when the set is
+-- non-empty.
+--
+-- Despite the visual selection, approve and merge act only on the
+-- cursor-selected PR. The multi-select set is cleared when a confirm fires,
+-- when Esc is pressed with a non-empty set, or implicitly when the view
+-- changes.
+
+------------------------------------------------------------
+-- Other Key Bindings
+------------------------------------------------------------
+
+-- Navigation and mode:
+--   h / Left  : previous column (saturating at 0)
+--   l / Right : next column (saturating at col_count - 1 = 2)
+--   j / Down  : next row in the current column
+--   k / Up    : previous row in the current column
+--   1         : switch to Dependabot sub-view (no-op when already here)
+--   2         : switch to Alerts sub-view
+--   Enter     : toggle the bottom detail panel (placeholder; currently empty)
+--   f         : open the Security Board repo filter. NOTE: the filter state
+--               toggled here lives on SecurityBoardState.repo_filter and
+--               affects the Alerts sub-view, not the bot PR list. The bot PR
+--               list has its own repo_filter on DependabotBoardState.prs
+--               which is not toggled by this key in the current implementation.
+--   Tab / Esc : return to the task board (saved selection restored)
+--   ?         : toggle help overlay
+--   q         : quit
+
+------------------------------------------------------------
+-- Auto-refresh
+------------------------------------------------------------
+
+-- When entering the Dependabot sub-view (either via switch_to_security_board
+-- or switch_security_board_mode), a fetch is triggered when the list is stale
+-- relative to review_refresh_interval. A RefreshBotPrs message also fires
+-- after a successful approve or merge. Bot PRs share the same
+-- review_refresh_interval as the Review Board PR lists.
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    review_refresh_interval: Duration = 30.seconds
+    staleness_fresh_max: Duration = 3.days
+    staleness_aging_max: Duration = 7.days
+}
 
 ------------------------------------------------------------
 -- Visual: Agent Status Badge
@@ -127,9 +236,9 @@ rule MergeBotPrs {
 visual AgentStatusBadge(status: rb/ReviewAgentStatus?) -> String {
     -- Note: badge text is concatenated into the card header line and rendered
     -- with the line's inherited color — no per-status color is applied.
-    reviewing      => "◆"   -- agent analyzing
-    findings_ready => "✔"   -- findings ready, user should look
-    idle           => "○"   -- agent waiting for user action
+    reviewing      => "◆ "  -- agent analyzing
+    findings_ready => "✔ "  -- findings ready, user should look
+    idle           => "○ "  -- agent waiting for user action
     null           => ""    -- no agent
 }
 
@@ -137,19 +246,20 @@ visual AgentStatusBadge(status: rb/ReviewAgentStatus?) -> String {
 -- Visual: Staleness Coloring
 ------------------------------------------------------------
 
--- PR age is rendered with a color indicating how stale the PR is.
--- Age is computed from pr.created_at to now.
+-- PR age on line 2 of the card is rendered with a color indicating how stale
+-- the PR is. Age is computed from pr.created_at to now.
 
 visual StalenessColor(age: Duration) -> Color {
-    age < 3.days  => green
-    age < 7.days  => yellow
-    otherwise     => red
+    age < config.staleness_fresh_max => green
+    age < config.staleness_aging_max => yellow
+    otherwise                        => red
 }
 
 ------------------------------------------------------------
 -- Visual: Selection Marker
 ------------------------------------------------------------
 
--- Selected PRs (multi-select) display a "* " prefix on their card.
--- Selection is used for bulk approve/merge operations (ApproveBotPrs, MergeBotPrs).
--- Selection state is cleared when the Dependabot board is exited.
+-- PRs in the multi-select set display a "* " prefix on their card, inserted
+-- before the agent badge and PR number. The set persists across refreshes
+-- within the current session and is cleared on approve/merge confirm or on
+-- Esc when the set is non-empty.

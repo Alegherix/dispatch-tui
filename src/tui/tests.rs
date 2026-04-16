@@ -15663,6 +15663,92 @@ fn merge_returns_to_normal_mode_after_confirm() {
 }
 
 // ---------------------------------------------------------------------------
+// Bot PR repo filter
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dependabot_f_key_enters_bot_pr_repo_filter_mode() {
+    let (mut app, _) = make_security_dependabot_app_with_pr();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_eq!(app.input.mode, InputMode::BotPrRepoFilter);
+}
+
+#[test]
+fn bot_pr_repo_filter_enter_closes() {
+    let (mut app, _) = make_security_dependabot_app_with_pr();
+    app.update(Message::StartBotPrRepoFilter);
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn bot_pr_repo_filter_esc_closes() {
+    let (mut app, _) = make_security_dependabot_app_with_pr();
+    app.update(Message::StartBotPrRepoFilter);
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn bot_pr_repo_filter_tab_toggles_mode() {
+    let (mut app, _) = make_security_dependabot_app_with_pr();
+    app.update(Message::StartBotPrRepoFilter);
+    assert_eq!(
+        app.security.dependabot.prs.repo_filter_mode,
+        RepoFilterMode::Include
+    );
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_eq!(
+        app.security.dependabot.prs.repo_filter_mode,
+        RepoFilterMode::Exclude
+    );
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_eq!(
+        app.security.dependabot.prs.repo_filter_mode,
+        RepoFilterMode::Include
+    );
+}
+
+#[test]
+fn bot_pr_repo_filter_a_toggles_all() {
+    let (mut app, _) = make_security_dependabot_app_with_pr();
+    app.update(Message::StartBotPrRepoFilter);
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(!app.security.dependabot.prs.repo_filter.is_empty());
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(app.security.dependabot.prs.repo_filter.is_empty());
+}
+
+#[test]
+fn bot_pr_repo_filter_digit_toggles_repo() {
+    let (mut app, _) = make_security_dependabot_app_with_pr();
+    app.update(Message::StartBotPrRepoFilter);
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert_eq!(app.security.dependabot.prs.repo_filter.len(), 1);
+    app.handle_key(make_key(KeyCode::Char('1')));
+    assert!(app.security.dependabot.prs.repo_filter.is_empty());
+}
+
+#[test]
+fn bot_pr_repo_filter_filters_prs() {
+    let mut app = make_security_board_app();
+    let mut pr_a = make_review_pr(1, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr_a.repo = "org/repo-a".to_string();
+    let mut pr_b = make_review_pr(2, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr_b.repo = "org/repo-b".to_string();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr_a, pr_b]));
+    app.update(Message::SwitchSecurityBoardMode(
+        SecurityBoardMode::Dependabot,
+    ));
+
+    assert_eq!(app.filtered_bot_prs().len(), 2);
+
+    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
+    assert_eq!(app.filtered_bot_prs().len(), 1);
+    assert_eq!(app.filtered_bot_prs()[0].repo, "org/repo-a");
+}
+
+// ---------------------------------------------------------------------------
 // Security Board Dependabot: dispatch/re-review/browser/tmux/detach keys
 // ---------------------------------------------------------------------------
 

@@ -362,6 +362,12 @@ pub enum Message {
     BotPrsMerged(Vec<String>),
     ToggleSelectBotPr(String),
     ClearBotPrSelection,
+    // Bot PR repo filter
+    StartBotPrRepoFilter,
+    CloseBotPrRepoFilter,
+    ToggleBotPrRepoFilter(String),
+    ToggleAllBotPrRepoFilter,
+    ToggleBotPrRepoFilterMode,
     // Security board
     SwitchToSecurityBoard,
     SecurityAlertsLoaded(Vec<SecurityAlert>),
@@ -658,6 +664,7 @@ pub enum InputMode {
     Help,
     RepoFilter,
     ReviewRepoFilter,
+    BotPrRepoFilter,
     SecurityRepoFilter,
     InputPresetName,
     ConfirmDeletePreset,

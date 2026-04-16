@@ -1899,14 +1899,14 @@ async fn exec_merge_bot_pr_calls_gh_pr_merge() {
 
     rt.exec_merge_bot_pr("https://github.com/acme/app/pull/42".into());
 
-    // RefreshBotPrs then StatusInfo
+    // BotPrsMerged then StatusInfo
     let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg1, Message::RefreshBotPrs),
-        "Expected RefreshBotPrs, got: {msg1:?}"
+        matches!(&msg1, Message::BotPrsMerged(urls) if urls.contains(&"https://github.com/acme/app/pull/42".to_string())),
+        "Expected BotPrsMerged, got: {msg1:?}"
     );
     let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await

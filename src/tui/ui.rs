@@ -2582,6 +2582,11 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
+        InputMode::BotPrRepoFilter => {
+            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [Enter/Esc] close")
+                .style(Style::default().fg(Color::Cyan));
+            frame.render_widget(bar, area);
+        }
         InputMode::SecurityRepoFilter => {
             let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [Enter/Esc] close")
                 .style(Style::default().fg(Color::Cyan));

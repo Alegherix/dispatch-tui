@@ -158,7 +158,7 @@ impl TuiRuntime {
             tracing::info!(url, "merging PR");
             match runner.run("gh", &["pr", "merge", "--squash", &url]) {
                 Ok(output) if output.status.success() => {
-                    let _ = tx.send(Message::RefreshBotPrs);
+                    let _ = tx.send(Message::BotPrsMerged(vec![url.clone()]));
                     let _ = tx.send(Message::StatusInfo(format!("Merged PR {url}")));
                 }
                 Ok(output) => {

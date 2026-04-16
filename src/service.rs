@@ -352,14 +352,14 @@ impl TaskService {
                 .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
         }
         if let Some(so) = params.sort_order {
-            let _ = self
-                .db
-                .patch_task(task_id, &TaskPatch::new().sort_order(Some(so)));
+            self.db
+                .patch_task(task_id, &TaskPatch::new().sort_order(Some(so)))
+                .map_err(|e| ServiceError::Internal(format!("Failed to set sort_order: {e}")))?;
         }
         if let Some(tag) = params.tag {
-            let _ = self
-                .db
-                .patch_task(task_id, &TaskPatch::new().tag(Some(tag)));
+            self.db
+                .patch_task(task_id, &TaskPatch::new().tag(Some(tag)))
+                .map_err(|e| ServiceError::Internal(format!("Failed to set tag: {e}")))?;
         }
 
         self.get_task(task_id.0)
@@ -797,6 +797,28 @@ mod tests {
         let task = svc.get_task(id.0).unwrap();
         assert_eq!(task.tag, Some(TaskTag::Bug));
         assert_eq!(task.sort_order, Some(5));
+    }
+
+    #[test]
+    fn create_task_with_sort_order() {
+        let db = test_db();
+        let svc = task_svc(&db);
+
+        let id = svc
+            .create_task(CreateTaskParams {
+                title: "Sorted".into(),
+                description: "".into(),
+                repo_path: "/repo".into(),
+                plan_path: None,
+                epic_id: None,
+                sort_order: Some(42),
+                tag: None,
+                base_branch: None,
+            })
+            .unwrap();
+
+        let task = svc.get_task(id.0).unwrap();
+        assert_eq!(task.sort_order, Some(42));
     }
 
     #[test]

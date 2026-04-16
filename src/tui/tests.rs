@@ -12889,6 +12889,20 @@ fn G_outside_split_mode_is_noop() {
     assert!(cmds.is_empty(), "G outside split mode must be a no-op");
 }
 
+#[test]
+fn G_in_split_mode_on_task_without_window_shows_status() {
+    let task = make_task(4, TaskStatus::Running); // no tmux_window
+    let mut app = App::new(vec![task], TEST_TIMEOUT);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.selection_mut().set_column(1);
+    let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    assert!(
+        app.status.message.as_deref().unwrap_or("").contains("No agent session"),
+        "G on windowless task must show a status message"
+    );
+}
+
 // [g] tests — always jump to window
 
 #[test]

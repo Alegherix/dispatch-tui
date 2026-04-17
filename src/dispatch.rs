@@ -17,7 +17,6 @@ const DISPATCH_PLUGIN_DIR: &str = "--plugin-dir ~/.claude/plugins/local/dispatch
 pub struct EpicContext {
     pub epic_id: EpicId,
     pub epic_title: String,
-    pub sibling_summaries: Vec<String>,
 }
 
 impl EpicContext {
@@ -25,33 +24,19 @@ impl EpicContext {
     pub fn from_db(task: &Task, db: &dyn db::TaskStore) -> Option<Self> {
         let epic_id = task.epic_id?;
         let epic = db.get_epic(epic_id).ok()??;
-        let siblings = db
-            .list_tasks_for_epic(epic_id)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| t.id != task.id && t.status != TaskStatus::Archived)
-            .map(|t| format!("[{}] {} ({})", t.id, t.title, t.status.as_str()))
-            .collect();
         Some(EpicContext {
             epic_id,
             epic_title: epic.title,
-            sibling_summaries: siblings,
         })
     }
 
     fn prompt_section(&self) -> String {
-        let mut section = format!(
+        format!(
             "\n\nThis task is part of epic #{}: {}\n\
-            To find other tasks in this epic, call list_tasks with epic_id={}.",
+            To find other tasks in this epic, call list_tasks with epic_id={}.\n\
+            To ask questions or send updates to sibling agents, use send_message with their task ID.",
             self.epic_id, self.epic_title, self.epic_id
-        );
-        if !self.sibling_summaries.is_empty() {
-            section.push_str("\n\nSibling tasks:");
-            for s in &self.sibling_summaries {
-                section.push_str(&format!("\n- {s}"));
-            }
-        }
-        section
+        )
     }
 }
 
@@ -1255,7 +1240,6 @@ mod tests {
         let ctx = EpicContext {
             epic_id: EpicId(3),
             epic_title: "Big Epic".to_string(),
-            sibling_summaries: vec![],
         };
         let block = task_block(TaskId(1), "T", "D", Some(&ctx));
         assert!(block.contains("EpicId: 3"));
@@ -1632,14 +1616,13 @@ mod tests {
         let ctx = EpicContext {
             epic_id: EpicId(7),
             epic_title: "My Epic".to_string(),
-            sibling_summaries: vec!["[2] Sibling (running)".to_string()],
         };
         let prompt = build_quick_dispatch_prompt(TaskId(42), "Quick task", "", Some(&ctx));
         assert!(prompt.contains("EpicId: 7"), "should include epic ID");
         assert!(prompt.contains("My Epic"), "should include epic title");
         assert!(
-            prompt.contains("Sibling"),
-            "should include sibling summaries"
+            prompt.contains("send_message"),
+            "should tell agent how to message sibling agents"
         );
     }
 
@@ -1751,12 +1734,12 @@ mod tests {
         let ctx = EpicContext {
             epic_id: EpicId(5),
             epic_title: "Auth Rework".to_string(),
-            sibling_summaries: vec!["[3] Setup DB (done)".to_string()],
         };
         let (id_line, section) = epic_preamble(Some(&ctx));
         assert!(id_line.contains("EpicId: 5"));
         assert!(section.contains("Auth Rework"));
-        assert!(section.contains("Setup DB"));
+        assert!(section.contains("send_message"), "should guide agent to use send_message");
+        assert!(!section.contains("Sibling tasks:"), "should not enumerate sibling tasks");
     }
 
     // --- ProcessRunner-based tests ---

@@ -1944,6 +1944,12 @@ impl App {
             cmds.push(Command::FetchPrs(PrListKind::Authored));
         }
 
+        // Refresh security alerts if stale (> 5m)
+        if self.security.needs_fetch(SECURITY_POLL_INTERVAL) && !self.security.loading {
+            self.security.loading = true;
+            cmds.push(Command::FetchSecurityAlerts);
+        }
+
         // Check if split mode right pane still exists
         if self.board.split.active {
             if let Some(pane_id) = &self.board.split.right_pane_id {

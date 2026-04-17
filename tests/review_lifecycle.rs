@@ -50,3 +50,18 @@ fn tick_triggers_fetch_when_review_list_stale() {
         "Tick should emit FetchPrs(Authored) when list is stale"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Bug: security alerts never auto-refresh on tick
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tick_triggers_security_fetch_when_stale() {
+    let mut app = make_app();
+    // security.last_fetch = None (default) — needs_fetch(SECURITY_POLL_INTERVAL) returns true
+    let cmds = app.update(Message::Tick);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::FetchSecurityAlerts)),
+        "Tick should emit FetchSecurityAlerts when security list is stale"
+    );
+}

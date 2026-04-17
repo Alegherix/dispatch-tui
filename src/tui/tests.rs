@@ -212,14 +212,15 @@ fn tick_produces_capture_for_running_tasks_with_window() {
     task4.tmux_window = Some("main:task-4".to_string());
     let mut app = App::new(vec![task4], TEST_TIMEOUT);
     let cmds = app.update(Message::Tick);
-    // Should have CaptureTmux + FetchReviewPrs + FetchMyPrs + RefreshFromDb
-    assert_eq!(cmds.len(), 4);
+    // Should have CaptureTmux + FetchReviewPrs + FetchMyPrs + FetchSecurityAlerts + RefreshFromDb
+    assert_eq!(cmds.len(), 5);
     assert!(
         matches!(&cmds[0], Command::CaptureTmux { id: TaskId(4), window } if window == "main:task-4")
     );
     assert!(matches!(&cmds[1], Command::FetchPrs(PrListKind::Review)));
     assert!(matches!(&cmds[2], Command::FetchPrs(PrListKind::Authored)));
-    assert!(matches!(&cmds[3], Command::RefreshFromDb));
+    assert!(matches!(&cmds[3], Command::FetchSecurityAlerts));
+    assert!(matches!(&cmds[4], Command::RefreshFromDb));
 }
 
 #[test]

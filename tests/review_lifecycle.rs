@@ -220,3 +220,36 @@ fn pr_approved_updates_review_decision() {
         "PR decision should be updated to Approved after PrsLoaded"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fetch failure: error state set, existing PRs preserved
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pr_fetch_failed_sets_error_state_and_preserves_prs() {
+    let mut app = make_app();
+    // Load some PRs first
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_pr(42, "org/app")],
+    ));
+    assert_eq!(app.review_prs().len(), 1);
+
+    // Simulate fetch failure
+    app.update(Message::PrsFetchFailed(
+        PrListKind::Review,
+        "network timeout".to_string(),
+    ));
+
+    assert_eq!(
+        app.last_review_error(),
+        Some("network timeout"),
+        "Error message should be stored on fetch failure"
+    );
+    assert!(!app.review_board_loading(), "loading flag should be cleared on failure");
+    assert_eq!(
+        app.review_prs().len(),
+        1,
+        "Existing PRs should be preserved on failure — board does not go blank"
+    );
+}

@@ -5,7 +5,7 @@ use super::{
     ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
 };
 use crate::models::{
-    AlertSeverity, DispatchMode, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
+    AlertSeverity, DispatchMode, EpicId, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
     TipsShowMode,
 };
 
@@ -129,27 +129,18 @@ impl App {
             KeyCode::Char('E') => self.update(Message::StartNewEpic),
             KeyCode::Char('d') => self.handle_key_dispatch(),
             KeyCode::Char('f') => self.update(Message::StartRepoFilter),
-            KeyCode::Char('W') => match self.selected_column_item() {
-                Some(ColumnItem::Task(task)) => {
-                    let id = task.id;
-                    self.update(Message::StartWrapUp(id))
-                }
-                Some(ColumnItem::Epic(epic)) => {
-                    let id = epic.id;
-                    self.update(Message::StartEpicWrapUp(id))
-                }
-                None => vec![],
-            },
+            KeyCode::Char('W') => self.dispatch_selection(
+                |s, id| s.update(Message::StartWrapUp(id)),
+                |s, id| s.update(Message::StartEpicWrapUp(id)),
+            ),
             KeyCode::Char('m') => {
-                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-                    let id = epic.id;
+                if let Some(id) = self.selected_epic_id() {
                     return self.update(Message::MoveEpicStatus(id, MoveDirection::Forward));
                 }
                 self.handle_key_move(MoveDirection::Forward)
             }
             KeyCode::Char('M') => {
-                if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-                    let id = epic.id;
+                if let Some(id) = self.selected_epic_id() {
                     return self.update(Message::MoveEpicStatus(id, MoveDirection::Backward));
                 }
                 self.handle_key_move(MoveDirection::Backward)
@@ -171,8 +162,7 @@ impl App {
                     } else {
                         self.update(Message::StatusInfo("No active session".to_string()))
                     }
-                } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-                    let id = epic.id;
+                } else if let Some(id) = self.selected_epic_id() {
                     self.update(Message::EnterEpic(id))
                 } else {
                     vec![]
@@ -187,14 +177,14 @@ impl App {
                     } else {
                         vec![]
                     }
-                } else if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+                } else if let Some(id) = self.selected_epic_id() {
                     // Prefer blocked Running subtasks, then Review, by sort_order
                     let window = self
                         .board
                         .tasks
                         .iter()
                         .filter(|t| {
-                            t.epic_id == Some(epic.id)
+                            t.epic_id == Some(id)
                                 && t.status == TaskStatus::Running
                                 && t.sub_status != SubStatus::Active
                                 && t.tmux_window.is_some()
@@ -205,7 +195,7 @@ impl App {
                                 .tasks
                                 .iter()
                                 .filter(|t| {
-                                    t.epic_id == Some(epic.id)
+                                    t.epic_id == Some(id)
                                         && t.status == TaskStatus::Review
                                         && t.tmux_window.is_some()
                                 })
@@ -235,27 +225,15 @@ impl App {
                 }
             }
             KeyCode::Char('P') => {
-                if let Some(task) = self.selected_task() {
-                    let id = task.id;
-                    self.update(Message::StartMergePr(id))
-                } else {
-                    vec![]
-                }
+                self.with_selected_task(|s, id| s.update(Message::StartMergePr(id)))
             }
 
             KeyCode::Char('a') => self.update(Message::SelectAllColumn),
 
-            KeyCode::Char(' ') => match self.selected_column_item() {
-                Some(ColumnItem::Task(task)) => {
-                    let id = task.id;
-                    self.update(Message::ToggleSelect(id))
-                }
-                Some(ColumnItem::Epic(epic)) => {
-                    let id = epic.id;
-                    self.update(Message::ToggleSelectEpic(id))
-                }
-                None => vec![],
-            },
+            KeyCode::Char(' ') => self.dispatch_selection(
+                |s, id| s.update(Message::ToggleSelect(id)),
+                |s, id| s.update(Message::ToggleSelectEpic(id)),
+            ),
 
             KeyCode::Enter => {
                 if self.selection().on_select_all {
@@ -647,11 +625,8 @@ impl App {
                     cmds.extend(s.update(Message::BatchArchiveEpics(ids)));
                 }
                 cmds
-            } else if let Some(task) = s.selected_task() {
-                let id = task.id;
-                s.update(Message::ArchiveTask(id))
             } else {
-                vec![]
+                s.with_selected_task(|s, id| s.update(Message::ArchiveTask(id)))
             }
         })
     }
@@ -672,8 +647,7 @@ impl App {
 
     fn handle_key_confirm_delete_epic(&mut self, key: KeyEvent) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
-            if let Some(ColumnItem::Epic(epic)) = s.selected_column_item() {
-                let id = epic.id;
+            if let Some(id) = s.selected_epic_id() {
                 s.update(Message::DeleteEpic(id))
             } else {
                 vec![]
@@ -683,8 +657,7 @@ impl App {
 
     fn handle_key_confirm_archive_epic(&mut self, key: KeyEvent) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
-            if let Some(ColumnItem::Epic(epic)) = s.selected_column_item() {
-                let id = epic.id;
+            if let Some(id) = s.selected_epic_id() {
                 s.update(Message::ArchiveEpic(id))
             } else {
                 vec![]
@@ -1348,6 +1321,46 @@ impl App {
                 }
             }
             _ => self.update(Message::CancelPrOperation),
+        }
+    }
+
+    /// Dispatches to `on_task` or `on_epic` based on the current selection, passing only the
+    /// item's ID (which is `Copy`). Returns `vec![]` when nothing is selected.
+    fn dispatch_selection<F, G>(&mut self, on_task: F, on_epic: G) -> Vec<Command>
+    where
+        F: FnOnce(&mut Self, TaskId) -> Vec<Command>,
+        G: FnOnce(&mut Self, EpicId) -> Vec<Command>,
+    {
+        match self.selected_column_item() {
+            Some(ColumnItem::Task(task)) => {
+                let id = task.id;
+                on_task(self, id)
+            }
+            Some(ColumnItem::Epic(epic)) => {
+                let id = epic.id;
+                on_epic(self, id)
+            }
+            None => vec![],
+        }
+    }
+
+    /// Calls `f` with the selected task's ID, or returns `vec![]` if the cursor is not on a task.
+    fn with_selected_task<F>(&mut self, f: F) -> Vec<Command>
+    where
+        F: FnOnce(&mut Self, TaskId) -> Vec<Command>,
+    {
+        if let Some(id) = self.selected_task().map(|t| t.id) {
+            f(self, id)
+        } else {
+            vec![]
+        }
+    }
+
+    /// Returns the ID of the currently selected epic, or `None` if the cursor is not on an epic.
+    fn selected_epic_id(&self) -> Option<EpicId> {
+        match self.selected_column_item() {
+            Some(ColumnItem::Epic(epic)) => Some(epic.id),
+            _ => None,
         }
     }
 }

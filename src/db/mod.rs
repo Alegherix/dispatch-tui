@@ -250,6 +250,8 @@ pub trait TaskCrud: Send + Sync {
     fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
     fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     fn has_other_tasks_with_worktree(&self, worktree: &str, exclude_id: TaskId) -> Result<bool>;
+    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
+    fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
 }
 
 /// Epic CRUD, list, patch, recalculate status.
@@ -360,8 +362,6 @@ pub trait SettingsStore: Send + Sync {
     fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
     /// Seed default GitHub query strings if not already set.
     fn seed_github_query_defaults(&self) -> Result<()>;
-    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
-    fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
     fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()>;
     fn delete_filter_preset(&self, name: &str) -> Result<()>;
     fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;

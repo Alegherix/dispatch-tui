@@ -222,6 +222,75 @@ impl super::TaskCrud for Database {
             .context("Failed to check shared worktree")?;
         Ok(count > 0)
     }
+
+    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO task_usage
+                 (task_id, cost_usd, input_tokens, output_tokens,
+                  cache_read_tokens, cache_write_tokens, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+             ON CONFLICT(task_id) DO UPDATE SET
+                 cost_usd           = cost_usd           + excluded.cost_usd,
+                 input_tokens       = input_tokens       + excluded.input_tokens,
+                 output_tokens      = output_tokens      + excluded.output_tokens,
+                 cache_read_tokens  = cache_read_tokens  + excluded.cache_read_tokens,
+                 cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+                 updated_at         = excluded.updated_at",
+            params![
+                task_id.0,
+                usage.cost_usd,
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_tokens,
+                usage.cache_write_tokens
+            ],
+        )
+        .context("Failed to upsert task_usage")?;
+        Ok(())
+    }
+
+    fn get_all_usage(&self) -> Result<Vec<TaskUsage>> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT task_id, cost_usd, input_tokens, output_tokens,
+                    cache_read_tokens, cache_write_tokens, updated_at
+             FROM task_usage",
+            )
+            .context("Failed to prepare get_all_usage")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .context("Failed to query task_usage")?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (task_id, cost_usd, input, output, cr, cw, updated_at_str) =
+                row.context("Failed to read usage row")?;
+            let updated_at = NaiveDateTime::parse_from_str(&updated_at_str, "%Y-%m-%d %H:%M:%S")
+                .with_context(|| format!("Invalid updated_at in task_usage: {updated_at_str:?}"))?
+                .and_utc();
+            out.push(TaskUsage {
+                task_id: TaskId(task_id),
+                cost_usd,
+                input_tokens: input,
+                output_tokens: output,
+                cache_read_tokens: cr,
+                cache_write_tokens: cw,
+                updated_at,
+            });
+        }
+        Ok(out)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -370,75 +439,6 @@ impl super::SettingsStore for Database {
             )?;
         }
         Ok(())
-    }
-
-    fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()> {
-        let conn = self.conn()?;
-        conn.execute(
-            "INSERT INTO task_usage
-                 (task_id, cost_usd, input_tokens, output_tokens,
-                  cache_read_tokens, cache_write_tokens, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
-             ON CONFLICT(task_id) DO UPDATE SET
-                 cost_usd           = cost_usd           + excluded.cost_usd,
-                 input_tokens       = input_tokens       + excluded.input_tokens,
-                 output_tokens      = output_tokens      + excluded.output_tokens,
-                 cache_read_tokens  = cache_read_tokens  + excluded.cache_read_tokens,
-                 cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
-                 updated_at         = excluded.updated_at",
-            params![
-                task_id.0,
-                usage.cost_usd,
-                usage.input_tokens,
-                usage.output_tokens,
-                usage.cache_read_tokens,
-                usage.cache_write_tokens
-            ],
-        )
-        .context("Failed to upsert task_usage")?;
-        Ok(())
-    }
-
-    fn get_all_usage(&self) -> Result<Vec<TaskUsage>> {
-        let conn = self.conn()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT task_id, cost_usd, input_tokens, output_tokens,
-                    cache_read_tokens, cache_write_tokens, updated_at
-             FROM task_usage",
-            )
-            .context("Failed to prepare get_all_usage")?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, f64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .context("Failed to query task_usage")?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (task_id, cost_usd, input, output, cr, cw, updated_at_str) =
-                row.context("Failed to read usage row")?;
-            let updated_at = NaiveDateTime::parse_from_str(&updated_at_str, "%Y-%m-%d %H:%M:%S")
-                .with_context(|| format!("Invalid updated_at in task_usage: {updated_at_str:?}"))?
-                .and_utc();
-            out.push(TaskUsage {
-                task_id: TaskId(task_id),
-                cost_usd,
-                input_tokens: input,
-                output_tokens: output,
-                cache_read_tokens: cr,
-                cache_write_tokens: cw,
-                updated_at,
-            });
-        }
-        Ok(out)
     }
 
     fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str) -> Result<()> {

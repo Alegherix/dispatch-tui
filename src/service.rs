@@ -238,11 +238,11 @@ pub struct ListTasksFilter {
 // ---------------------------------------------------------------------------
 
 pub struct TaskService {
-    pub db: Arc<dyn db::TaskStore>,
+    pub db: Arc<dyn db::TaskAndEpicStore>,
 }
 
 impl TaskService {
-    pub fn new(db: Arc<dyn db::TaskStore>) -> Self {
+    pub fn new(db: Arc<dyn db::TaskAndEpicStore>) -> Self {
         Self { db }
     }
 
@@ -857,7 +857,8 @@ mod tests {
     }
 
     fn task_svc(db: &Arc<dyn db::TaskStore>) -> TaskService {
-        TaskService::new(db.clone())
+        let d: Arc<dyn db::TaskAndEpicStore> = db.clone();
+        TaskService::new(d)
     }
 
     fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {

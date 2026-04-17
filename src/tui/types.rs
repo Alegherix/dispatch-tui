@@ -1057,13 +1057,14 @@ impl ReviewBoardState {
     }
 
     /// Insert a review agent handle and return the DB table kind for the PR.
+    /// Returns `None` if the PR is not found in any tracked list.
     pub fn find_and_set_pr_agent(
         &mut self,
         github_repo: &str,
         number: i64,
         tmux_window: &str,
         worktree: &str,
-    ) -> crate::db::PrKind {
+    ) -> Option<crate::db::PrKind> {
         let handle = ReviewAgentHandle {
             tmux_window: tmux_window.to_string(),
             worktree: worktree.to_string(),
@@ -1080,10 +1081,10 @@ impl ReviewBoardState {
                 .iter()
                 .any(|pr| pr.repo == github_repo && pr.number == number)
             {
-                return kind.to_pr_kind();
+                return Some(kind.to_pr_kind());
             }
         }
-        crate::db::PrKind::Review
+        None
     }
 }
 
@@ -1694,7 +1695,7 @@ mod tests {
         state.review.set_prs(vec![make_pr(42, "org/app")]);
 
         let kind = state.find_and_set_pr_agent("org/app", 42, "win-42", "/tmp/wt");
-        assert_eq!(kind, crate::db::PrKind::Review);
+        assert_eq!(kind, Some(crate::db::PrKind::Review));
         let key = PrRef::new("org/app".to_string(), 42);
         let handle = state.review_agents.get(&key).unwrap();
         assert_eq!(handle.tmux_window, "win-42");
@@ -1708,17 +1709,17 @@ mod tests {
         state.authored.set_prs(vec![make_pr(99, "org/lib")]);
 
         let kind = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
-        assert_eq!(kind, crate::db::PrKind::My);
+        assert_eq!(kind, Some(crate::db::PrKind::My));
         let key = PrRef::new("org/lib".to_string(), 99);
         let handle = state.review_agents.get(&key).unwrap();
         assert_eq!(handle.tmux_window, "win-99");
     }
 
     #[test]
-    fn find_and_set_pr_agent_defaults_to_review_prs_when_not_found() {
+    fn find_and_set_pr_agent_returns_none_when_not_found() {
         let mut state = ReviewBoardState::default();
         let kind = state.find_and_set_pr_agent("org/unknown", 1, "win", "/wt");
-        assert_eq!(kind, crate::db::PrKind::Review);
+        assert_eq!(kind, None);
     }
 
     #[test]

@@ -3614,7 +3614,7 @@ impl App {
         number: i64,
         tmux_window: &str,
         worktree: &str,
-    ) -> crate::db::PrKind {
+    ) -> Option<crate::db::PrKind> {
         let handle = crate::tui::types::ReviewAgentHandle {
             tmux_window: tmux_window.to_string(),
             worktree: worktree.to_string(),
@@ -3623,26 +3623,23 @@ impl App {
         let key = crate::models::PrRef::new(github_repo.to_string(), number);
         self.review.review_agents.insert(key, handle);
 
-        // Determine which DB table to persist to based on which list contains the PR
+        if self.review.review.prs.iter().any(|pr| pr.repo == github_repo && pr.number == number) {
+            return Some(crate::db::PrKind::Review);
+        }
+        if self.review.authored.prs.iter().any(|pr| pr.repo == github_repo && pr.number == number) {
+            return Some(crate::db::PrKind::My);
+        }
         if self
-            .review
-            .review
+            .security
+            .dependabot
+            .prs
             .prs
             .iter()
             .any(|pr| pr.repo == github_repo && pr.number == number)
         {
-            return crate::db::PrKind::Review;
+            return Some(crate::db::PrKind::Bot);
         }
-        if self
-            .review
-            .authored
-            .prs
-            .iter()
-            .any(|pr| pr.repo == github_repo && pr.number == number)
-        {
-            return crate::db::PrKind::My;
-        }
-        crate::db::PrKind::Review
+        None
     }
 
     /// Collect known local repo paths from saved paths and existing tasks.
@@ -4383,7 +4380,12 @@ impl App {
             .remove(&PrRef::new(github_repo.clone(), number));
         let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
         self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
-        let pr_kind = self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree);
+        let Some(pr_kind) = self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree) else {
+            self.set_status(format!(
+                "No PR record found for {github_repo}#{number} — agent tracking unavailable"
+            ));
+            return vec![];
+        };
         vec![Command::PersistReviewAgent {
             pr_kind,
             github_repo,

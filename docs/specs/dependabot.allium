@@ -192,6 +192,14 @@ rule MergeBotPr {
 --   g : jump to the review agent tmux session. Shows "No active session"
 --       status when tmux_window is null.
 --   p : open the bot PR URL in the browser.
+--
+-- Persistence routing: when the TUI receives ReviewAgentDispatched for a bot
+-- PR, it looks up the PR in the bot PR list (security.dependabot.prs) and
+-- persists agent state to the bot_prs table. If the PR is not found in any
+-- tracked list (review_prs, my_prs, bot_prs), persistence is skipped and an
+-- error status "No PR record found for <repo>#<number> — agent tracking
+-- unavailable" is displayed. The in-memory agent handle is still inserted so
+-- the session can be focused or killed within the current session.
 
 ------------------------------------------------------------
 -- Multi-select

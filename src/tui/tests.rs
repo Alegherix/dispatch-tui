@@ -9192,6 +9192,8 @@ fn dispatch_repo_path_empty_submit_no_paths_stays_in_mode() {
 fn review_agent_dispatched_sets_status() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
+    let pr = make_review_pr_for_repo(99, "alice", ReviewDecision::ReviewRequired, "org/my-repo");
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
     let cmds = app.update(Message::ReviewAgentDispatched {
         github_repo: "org/my-repo".to_string(),
         number: 99,
@@ -16159,17 +16161,56 @@ fn find_and_set_pr_agent_finds_dependabot_pr() {
     let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
 
-    app.find_and_set_pr_agent(
+    let kind = app.find_and_set_pr_agent(
         "acme/app",
         10,
         "win-acme-app-10",
         ".worktrees/review-acme-app-10",
     );
 
+    assert_eq!(kind, Some(crate::db::PrKind::Bot));
     let key = crate::models::PrRef::new("acme/app".to_string(), 10);
     let handle = app.review.review_agents.get(&key).unwrap();
     assert_eq!(handle.tmux_window, "win-acme-app-10");
     assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
+}
+
+#[test]
+fn review_agent_dispatched_for_dependabot_pr_persists_to_bot_table() {
+    let mut app = make_security_board_app();
+    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
+
+    let cmds = app.update(Message::ReviewAgentDispatched {
+        github_repo: "acme/app".to_string(),
+        number: 10,
+        tmux_window: "review-app-10".to_string(),
+        worktree: "/home/user/repo/.worktrees/review-10".to_string(),
+    });
+
+    let persist = cmds.iter().find_map(|c| {
+        if let Command::PersistReviewAgent { pr_kind, .. } = c {
+            Some(*pr_kind)
+        } else {
+            None
+        }
+    });
+    assert_eq!(persist, Some(crate::db::PrKind::Bot));
+}
+
+#[test]
+fn review_agent_dispatched_for_unknown_pr_skips_persist() {
+    let mut app = make_app();
+    app.update(Message::SwitchToReviewBoard);
+
+    let cmds = app.update(Message::ReviewAgentDispatched {
+        github_repo: "acme/app".to_string(),
+        number: 999,
+        tmux_window: "review-app-999".to_string(),
+        worktree: "/home/user/repo/.worktrees/review-999".to_string(),
+    });
+
+    assert!(!cmds.iter().any(|c| matches!(c, Command::PersistReviewAgent { .. })));
 }
 
 // Regression note for: buffered editor keystrokes leaking into repo picker.

@@ -3,9 +3,9 @@
 
 use std::time::Duration;
 
+use chrono::Utc;
 use dispatch_tui::models::{CiStatus, ReviewDecision, ReviewPr};
 use dispatch_tui::tui::{App, Command, Message, PrListKind, ReviewAgentRequest};
-use chrono::Utc;
 
 fn make_app() -> App {
     App::new(vec![], Duration::from_secs(300))
@@ -42,11 +42,13 @@ fn tick_triggers_fetch_when_review_list_stale() {
     // Both lists have last_fetch = None (never fetched) — needs_fetch returns true
     let cmds = app.update(Message::Tick);
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))),
+        cmds.iter()
+            .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))),
         "Tick should emit FetchPrs(Review) when list is stale"
     );
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))),
+        cmds.iter()
+            .any(|c| matches!(c, Command::FetchPrs(PrListKind::Authored))),
         "Tick should emit FetchPrs(Authored) when list is stale"
     );
 }
@@ -61,7 +63,8 @@ fn tick_triggers_security_fetch_when_stale() {
     // security.last_fetch = None (default) — needs_fetch(SECURITY_POLL_INTERVAL) returns true
     let cmds = app.update(Message::Tick);
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::FetchSecurityAlerts)),
+        cmds.iter()
+            .any(|c| matches!(c, Command::FetchSecurityAlerts)),
         "Tick should emit FetchSecurityAlerts when security list is stale"
     );
 }
@@ -74,7 +77,9 @@ fn tick_triggers_security_fetch_when_stale() {
 fn dispatch_review_agent_emits_command() {
     let mut app = make_app();
     // Set a local repo path so resolve_repo_path can match "org/app"
-    app.update(Message::RepoPathsUpdated(vec!["/repos/org/app".to_string()]));
+    app.update(Message::RepoPathsUpdated(
+        vec!["/repos/org/app".to_string()],
+    ));
     app.update(Message::PrsLoaded(
         PrListKind::Review,
         vec![make_pr(42, "org/app")],
@@ -151,6 +156,42 @@ fn review_status_update_reflects_on_handle() {
 }
 
 // ---------------------------------------------------------------------------
+// PR merged: missing PR with active agent triggers cleanup
+// ---------------------------------------------------------------------------
+
+#[test]
+fn prs_loaded_without_tracked_pr_triggers_cleanup() {
+    let mut app = make_app();
+    // Load PR #42 and register a review agent for it
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![make_pr(42, "org/app")],
+    ));
+    app.update(Message::ReviewAgentDispatched {
+        github_repo: "org/app".to_string(),
+        number: 42,
+        tmux_window: "win-42".to_string(),
+        worktree: "/wt/42".to_string(),
+    });
+
+    // PR #42 disappears from next fetch (it was merged)
+    let cmds = app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![], // no PRs
+    ));
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "win-42")),
+        "KillTmuxWindow should be emitted when a tracked PR disappears from the board"
+    );
+    assert!(
+        app.review_agent_handle("org/app", 42).is_none(),
+        "Agent handle should be removed after PR disappears"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // PR approved moves to Approved decision
 // ---------------------------------------------------------------------------
 
@@ -171,10 +212,7 @@ fn pr_approved_updates_review_decision() {
     // Reload with approved decision
     let mut approved_pr = make_pr(42, "org/app");
     approved_pr.review_decision = ReviewDecision::Approved;
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![approved_pr],
-    ));
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![approved_pr]));
 
     assert_eq!(
         app.review_prs()[0].review_decision,

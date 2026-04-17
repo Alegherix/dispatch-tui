@@ -307,11 +307,7 @@ impl App {
     pub fn review_detail_visible(&self) -> bool {
         self.review.detail_visible
     }
-    pub fn review_agent_handle(
-        &self,
-        repo: &str,
-        number: i64,
-    ) -> Option<&ReviewAgentHandle> {
+    pub fn review_agent_handle(&self, repo: &str, number: i64) -> Option<&ReviewAgentHandle> {
         let key = crate::models::PrRef::new(repo.to_string(), number);
         self.review.review_agents.get(&key)
     }
@@ -3435,7 +3431,7 @@ impl App {
         kind: PrListKind,
         prs: Vec<crate::models::ReviewPr>,
     ) -> Vec<Command> {
-        let cmds = vec![Command::PersistPrs(kind, prs.clone())];
+        let mut cmds = vec![Command::PersistPrs(kind, prs.clone())];
         if kind == PrListKind::Bot {
             self.security.dependabot.prs.set_prs(prs);
             self.security.dependabot.prs.loading = false;
@@ -3449,6 +3445,28 @@ impl App {
             list.last_fetch = Some(Instant::now());
             list.last_error = None;
             self.clamp_review_selection();
+
+            // Clean up review agents whose PRs no longer appear in either list
+            let pr_keys: std::collections::HashSet<crate::models::PrRef> = [
+                PrListKind::Review,
+                PrListKind::Authored,
+            ]
+            .iter()
+            .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
+            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
+            .collect();
+
+            let gone: Vec<crate::models::PrRef> = self
+                .review
+                .review_agents
+                .keys()
+                .filter(|k| !pr_keys.contains(*k))
+                .cloned()
+                .collect();
+
+            for key in gone {
+                cmds.extend(self.cleanup_review_board_pr(key.repo().to_string(), key.number()));
+            }
         }
         cmds
     }

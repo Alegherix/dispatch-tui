@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::db::Database;
+use crate::db::{AlertStore, Database, PrStore};
 use crate::process::MockProcessRunner;
 
 #[test]
@@ -2403,4 +2403,251 @@ async fn exec_dispatch_review_agent_failure() {
         matches!(msg, Message::ReviewAgentFailed { number: 42, .. }),
         "Expected ReviewAgentFailed, got: {msg:?}"
     );
+}
+
+// -----------------------------------------------------------------------
+// load_* init helper tests
+// -----------------------------------------------------------------------
+
+fn make_app() -> App {
+    App::new(vec![], Duration::from_secs(300))
+}
+
+#[test]
+fn load_notifications_pref_defaults_to_false_when_not_set() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    load_notifications_pref(&db, &mut app);
+    assert!(!app.notifications_enabled());
+}
+
+#[test]
+fn load_notifications_pref_sets_true_when_enabled() {
+    let db = Database::open_in_memory().unwrap();
+    db.set_setting_bool("notifications_enabled", true).unwrap();
+    let mut app = make_app();
+    load_notifications_pref(&db, &mut app);
+    assert!(app.notifications_enabled());
+}
+
+#[test]
+fn load_repo_filter_mode_defaults_to_include_when_not_set() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    load_repo_filter_mode(&db, &mut app);
+    assert_eq!(app.repo_filter_mode(), RepoFilterMode::Include);
+}
+
+#[test]
+fn load_repo_filter_mode_restores_exclude() {
+    let db = Database::open_in_memory().unwrap();
+    db.set_setting_string("repo_filter_mode", "exclude")
+        .unwrap();
+    let mut app = make_app();
+    load_repo_filter_mode(&db, &mut app);
+    assert_eq!(app.repo_filter_mode(), RepoFilterMode::Exclude);
+}
+
+#[test]
+fn load_repo_filter_no_op_when_not_set() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    load_repo_filter(&db, &mut app);
+    assert!(app.repo_filter().is_empty());
+}
+
+#[test]
+fn load_repo_filter_restores_saved_filter() {
+    let db = Database::open_in_memory().unwrap();
+    db.save_repo_path("/repo/a").unwrap();
+    db.save_repo_path("/repo/b").unwrap();
+    // register paths in app so filter intersection works
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.update(Message::RepoPathsUpdated(vec![
+        "/repo/a".into(),
+        "/repo/b".into(),
+    ]));
+    let filter = serde_json::to_string(&["/repo/a"]).unwrap();
+    db.set_setting_string("repo_filter", &filter).unwrap();
+    load_repo_filter(&db, &mut app);
+    assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
+}
+
+#[test]
+fn load_repo_filter_prunes_stale_paths() {
+    let db = Database::open_in_memory().unwrap();
+    // Only /repo/a is in the app's known paths; /gone is stale
+    let mut app = App::new(vec![], Duration::from_secs(300));
+    app.update(Message::RepoPathsUpdated(vec!["/repo/a".into()]));
+    let filter = serde_json::to_string(&["/repo/a", "/gone"]).unwrap();
+    db.set_setting_string("repo_filter", &filter).unwrap();
+    load_repo_filter(&db, &mut app);
+    assert_eq!(app.repo_filter(), &HashSet::from(["/repo/a".to_string()]));
+}
+
+#[test]
+fn load_filter_presets_returns_none_on_success() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    let result = load_filter_presets(&db, &mut app);
+    assert!(result.is_none());
+}
+
+#[test]
+fn load_filter_presets_loads_saved_presets() {
+    let db = Database::open_in_memory().unwrap();
+    db.save_filter_preset("backend", &["/repo/a".into()], "include")
+        .unwrap();
+    let mut app = make_app();
+    load_filter_presets(&db, &mut app);
+    assert_eq!(app.filter_presets().len(), 1);
+    assert_eq!(app.filter_presets()[0].0, "backend");
+}
+
+#[test]
+fn load_cached_review_prs_returns_none_on_empty_db() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    let result = load_cached_review_prs(&db, &mut app);
+    assert!(result.is_none());
+    assert!(app.review_prs().is_empty());
+}
+
+#[test]
+fn load_cached_review_prs_restores_persisted_prs() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    let pr = ReviewPr {
+        number: 1,
+        title: "Fix".into(),
+        author: "alice".into(),
+        repo: "acme/app".into(),
+        url: "https://github.com/acme/app/pull/1".into(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 5,
+        deletions: 2,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+    };
+    db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
+    let mut app = make_app();
+    let result = load_cached_review_prs(&db, &mut app);
+    assert!(result.is_none());
+    assert_eq!(app.review_prs().len(), 1);
+}
+
+#[test]
+fn load_cached_bot_prs_returns_none_on_empty_db() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    let result = load_cached_bot_prs(&db, &mut app);
+    assert!(result.is_none());
+    assert!(app.bot_prs().is_empty());
+}
+
+#[test]
+fn load_cached_bot_prs_restores_persisted_prs() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    let pr = ReviewPr {
+        number: 99,
+        title: "Bump deps".into(),
+        author: "dependabot[bot]".into(),
+        repo: "acme/app".into(),
+        url: "https://github.com/acme/app/pull/99".into(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 1,
+        deletions: 1,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+    };
+    db.save_prs(crate::db::PrKind::Bot, &[pr]).unwrap();
+    let mut app = make_app();
+    let result = load_cached_bot_prs(&db, &mut app);
+    assert!(result.is_none());
+    assert_eq!(app.bot_prs().len(), 1);
+}
+
+#[test]
+fn load_cached_security_alerts_returns_none_on_empty_db() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    let result = load_cached_security_alerts(&db, &mut app);
+    assert!(result.is_none());
+}
+
+#[test]
+fn load_cached_security_alerts_restores_persisted_alerts() {
+    use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
+    use chrono::Utc;
+
+    let db = Database::open_in_memory().unwrap();
+    let alert = SecurityAlert {
+        number: 1,
+        repo: "acme/app".into(),
+        severity: AlertSeverity::High,
+        kind: AlertKind::Dependabot,
+        title: "CVE-2024-1234".into(),
+        package: Some("lodash".into()),
+        vulnerable_range: Some("< 4.17.21".into()),
+        fixed_version: Some("4.17.21".into()),
+        cvss_score: Some(7.5),
+        url: "https://github.com/acme/app/security/dependabot/1".into(),
+        created_at: Utc::now(),
+        state: "open".into(),
+        description: "Prototype pollution".into(),
+    };
+    db.save_security_alerts(&[alert]).unwrap();
+    let mut app = make_app();
+    let result = load_cached_security_alerts(&db, &mut app);
+    assert!(result.is_none());
+    // One alert in the High column (index 1)
+    assert!(!app.security_alerts_for_column(1).is_empty());
+}
+
+#[test]
+fn load_pr_agent_states_returns_none_on_empty_db() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    let result = load_pr_agent_states(&db, &mut app);
+    assert!(result.is_none());
+    assert!(app.review_agent_handle("acme/app", 1).is_none());
+}
+
+#[test]
+fn load_alert_agent_states_returns_none_on_empty_db() {
+    let db = Database::open_in_memory().unwrap();
+    let mut app = make_app();
+    let result = load_alert_agent_states(&db, &mut app);
+    assert!(result.is_none());
+}
+
+#[test]
+fn apply_tmux_focus_warning_returns_none_when_enabled() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
+    let result = apply_tmux_focus_warning(&mock);
+    assert!(result.is_none());
+}
+
+#[test]
+fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
+    let result = apply_tmux_focus_warning(&mock);
+    assert!(matches!(result, Some(Message::StatusInfo(_))));
 }

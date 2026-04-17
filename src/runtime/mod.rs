@@ -23,7 +23,7 @@ const TICK_INTERVAL: Duration = Duration::from_secs(2);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::{AlertStore, PrStore, SettingsStore, TaskCrud};
+use crate::db::{SettingsStore, TaskCrud};
 use crate::editor::{
     format_description_for_editor, format_editor_content, format_epic_for_editor,
     parse_description_editor_output, parse_editor_content, parse_epic_editor_output,
@@ -85,13 +85,6 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let usage = database.get_all_usage().unwrap_or_default();
     app.update(Message::RefreshUsage(usage));
 
-    // Warn if tmux focus-events is off (needed for split-view focus indicator)
-    if !crate::tmux::focus_events_enabled(&*runner) {
-        app.update(Message::StatusInfo(
-            "tmux focus-events is off \u{2014} split-view focus indicator won't work. Run: tmux set -g focus-events on".to_string(),
-        ));
-    }
-
     // Seed default GitHub query strings (no-op if already set)
     if let Err(e) = database.seed_github_query_defaults() {
         app.update(Message::StatusInfo(format!(
@@ -99,95 +92,22 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         )));
     }
 
-    // Load notification preference
-    let notif_enabled = database
-        .get_setting_bool("notifications_enabled")
-        .unwrap_or(None)
-        .unwrap_or(false);
-    app.set_notifications_enabled(notif_enabled);
-
-    // Load repo filter (intersect with known repo_paths to prune stale entries)
-    if let Some(filter_str) = database.get_setting_string("repo_filter").unwrap_or(None) {
-        if !filter_str.is_empty() {
-            let known: HashSet<&str> = app.repo_paths().iter().map(|s| s.as_str()).collect();
-            let paths: Vec<String> = serde_json::from_str(&filter_str).unwrap_or_default();
-            let filter: HashSet<String> = paths
-                .into_iter()
-                .filter(|s| known.contains(s.as_str()))
-                .collect();
-            app.set_repo_filter(filter);
-        }
-    }
-
-    // Load repo filter mode
-    if let Some(mode_str) = database
-        .get_setting_string("repo_filter_mode")
-        .unwrap_or(None)
+    load_notifications_pref(&*database, &mut app);
+    load_repo_filter(&*database, &mut app);
+    load_repo_filter_mode(&*database, &mut app);
+    for msg in [
+        load_filter_presets(&*database, &mut app),
+        load_cached_review_prs(&*database, &mut app),
+        load_cached_bot_prs(&*database, &mut app),
+        load_cached_security_alerts(&*database, &mut app),
+        load_pr_agent_states(&*database, &mut app),
+        load_alert_agent_states(&*database, &mut app),
+        apply_tmux_focus_warning(&*runner),
+    ]
+    .into_iter()
+    .flatten()
     {
-        let mode = mode_str.parse().unwrap_or_default();
-        app.set_repo_filter_mode(mode);
-    }
-
-    // Load saved filter presets
-    match database.list_filter_presets() {
-        Ok(raw) => {
-            app.update(Message::FilterPresetsLoaded(parse_raw_presets(raw, None)));
-        }
-        Err(e) => {
-            app.update(Message::StatusInfo(format!(
-                "Failed to load filter presets: {e}"
-            )));
-        }
-    }
-
-    // Load cached review PRs from database
-    match database.load_prs(crate::db::PrKind::Review) {
-        Ok(prs) => app.set_review_prs(prs),
-        Err(e) => {
-            app.update(Message::StatusInfo(format!(
-                "Failed to load cached review PRs: {e}"
-            )));
-        }
-    }
-
-    // Load cached bot PRs from database
-    match database.load_prs(crate::db::PrKind::Bot) {
-        Ok(prs) => app.set_bot_prs(prs),
-        Err(e) => {
-            app.update(Message::StatusInfo(format!(
-                "Failed to load cached bot PRs: {e}"
-            )));
-        }
-    }
-
-    // Load cached security alerts from database
-    match database.load_security_alerts() {
-        Ok(alerts) => app.set_security_alerts(alerts),
-        Err(e) => {
-            app.update(Message::StatusInfo(format!(
-                "Failed to load cached security alerts: {e}"
-            )));
-        }
-    }
-
-    // Populate review agent handles from persisted DB state
-    match database.load_pr_agent_states() {
-        Ok(states) => app.set_pr_agent_states(states),
-        Err(e) => {
-            app.update(Message::StatusInfo(format!(
-                "Failed to load PR agent states: {e}"
-            )));
-        }
-    }
-
-    // Populate fix agent handles from persisted DB state
-    match database.load_alert_agent_states() {
-        Ok(states) => app.set_alert_agent_states(states),
-        Err(e) => {
-            app.update(Message::StatusInfo(format!(
-                "Failed to load alert agent states: {e}"
-            )));
-        }
+        app.update(msg);
     }
 
     // Load tips and show popup if appropriate
@@ -470,11 +390,15 @@ impl TuiRuntime {
         let status = std::process::Command::new(&editor).arg(tmp.path()).status();
         drop(_guard);
 
-        // Drain any keystrokes buffered in the OS terminal while the editor was
-        // running. The polling thread checks input_paused every 100ms and then
-        // polls for up to 50ms, so allow 200ms for it to flush OS-buffered events
-        // before we clear the channel. Without this, editor keystrokes (e.g. `:wq`)
-        // arrive in key_rx and get processed by whatever InputMode is active next.
+        // Drain OS-buffered keystrokes that arrived while the editor was open.
+        // The polling thread checks input_paused every 100ms, then polls crossterm
+        // for up to 50ms, so the worst-case lag before it re-checks the pause flag
+        // is ~150ms. We sleep 200ms to guarantee the thread has had at least one
+        // full poll cycle after the guard is dropped and the flag is cleared.
+        // Without this, editor keystrokes (e.g. `:wq`) arrive in key_rx and trigger
+        // whatever InputMode happens to be active next — e.g. confirming a deletion
+        // dialog or dispatching a task. Shortening the sleep below ~150ms risks that
+        // race; increasing it just adds latency on editor close.
         std::thread::sleep(Duration::from_millis(200));
         while key_rx.try_recv().is_ok() {}
 
@@ -783,6 +707,124 @@ async fn execute_commands(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// init load helpers — extracted from run_tui's startup block
+// ---------------------------------------------------------------------------
+
+fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {
+    let enabled = db
+        .get_setting_bool("notifications_enabled")
+        .unwrap_or(None)
+        .unwrap_or(false);
+    app.set_notifications_enabled(enabled);
+}
+
+/// Intersect the saved repo filter with the app's known repo paths to prune
+/// stale entries. No-op when no filter has been saved.
+fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
+    let Some(filter_str) = db.get_setting_string("repo_filter").unwrap_or(None) else {
+        return;
+    };
+    if filter_str.is_empty() {
+        return;
+    }
+    let known: HashSet<&str> = app.repo_paths().iter().map(|s| s.as_str()).collect();
+    let paths: Vec<String> = serde_json::from_str(&filter_str).unwrap_or_default();
+    let filter: HashSet<String> = paths
+        .into_iter()
+        .filter(|s| known.contains(s.as_str()))
+        .collect();
+    app.set_repo_filter(filter);
+}
+
+fn load_repo_filter_mode(db: &dyn db::SettingsStore, app: &mut App) {
+    if let Some(mode_str) = db.get_setting_string("repo_filter_mode").unwrap_or(None) {
+        app.set_repo_filter_mode(mode_str.parse().unwrap_or_default());
+    }
+}
+
+fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
+    match db.list_filter_presets() {
+        Ok(raw) => {
+            let _ = app.update(Message::FilterPresetsLoaded(parse_raw_presets(raw, None)));
+            None
+        }
+        Err(e) => Some(Message::StatusInfo(format!(
+            "Failed to load filter presets: {e}"
+        ))),
+    }
+}
+
+fn load_cached_review_prs(db: &dyn db::PrStore, app: &mut App) -> Option<Message> {
+    match db.load_prs(db::PrKind::Review) {
+        Ok(prs) => {
+            app.set_review_prs(prs);
+            None
+        }
+        Err(e) => Some(Message::StatusInfo(format!(
+            "Failed to load cached review PRs: {e}"
+        ))),
+    }
+}
+
+fn load_cached_bot_prs(db: &dyn db::PrStore, app: &mut App) -> Option<Message> {
+    match db.load_prs(db::PrKind::Bot) {
+        Ok(prs) => {
+            app.set_bot_prs(prs);
+            None
+        }
+        Err(e) => Some(Message::StatusInfo(format!(
+            "Failed to load cached bot PRs: {e}"
+        ))),
+    }
+}
+
+fn load_cached_security_alerts(db: &dyn db::AlertStore, app: &mut App) -> Option<Message> {
+    match db.load_security_alerts() {
+        Ok(alerts) => {
+            app.set_security_alerts(alerts);
+            None
+        }
+        Err(e) => Some(Message::StatusInfo(format!(
+            "Failed to load cached security alerts: {e}"
+        ))),
+    }
+}
+
+fn load_pr_agent_states(db: &dyn db::PrStore, app: &mut App) -> Option<Message> {
+    match db.load_pr_agent_states() {
+        Ok(states) => {
+            app.set_pr_agent_states(states);
+            None
+        }
+        Err(e) => Some(Message::StatusInfo(format!(
+            "Failed to load PR agent states: {e}"
+        ))),
+    }
+}
+
+fn load_alert_agent_states(db: &dyn db::AlertStore, app: &mut App) -> Option<Message> {
+    match db.load_alert_agent_states() {
+        Ok(states) => {
+            app.set_alert_agent_states(states);
+            None
+        }
+        Err(e) => Some(Message::StatusInfo(format!(
+            "Failed to load alert agent states: {e}"
+        ))),
+    }
+}
+
+fn apply_tmux_focus_warning(runner: &dyn ProcessRunner) -> Option<Message> {
+    if !crate::tmux::focus_events_enabled(runner) {
+        Some(Message::StatusInfo(
+            "tmux focus-events is off \u{2014} split-view focus indicator won't work. Run: tmux set -g focus-events on".to_string(),
+        ))
+    } else {
+        None
+    }
 }
 
 /// Convert raw DB preset tuples into typed presets.

@@ -16,6 +16,15 @@ Then call the `wrap_up` MCP tool. If the user cancels or says no, exit without c
 
 **Announce at start:** "I'm using the wrap-up skill to complete this task."
 
+## Argument check
+
+If the skill was invoked with an argument (e.g. `/wrap-up rebase` or `/wrap-up pr`):
+- Treat the argument as the chosen action (`rebase` or `pr`)
+- Skip Step 4 (AskUserQuestion) entirely
+- After completing Steps 1–3, go straight to Step 5 with that action
+
+If the argument is anything other than `rebase` or `pr`, ignore it and proceed normally (Step 4 will ask).
+
 **Precondition:** The task must be in "running" or "review" status. The `wrap_up` MCP tool will reject tasks in any other status.
 
 ## Step 1: Get the task ID from the current branch

@@ -626,13 +626,9 @@ async fn execute_commands(
             } => rt.exec_cleanup(id, repo_path, worktree, tmux_window),
             Command::Resume { task } => rt.exec_resume(task),
             Command::JumpToTmux { window } => rt.exec_jump_to_tmux(app, window),
-            Command::QuickDispatch { draft, epic_id } => rt.exec_quick_dispatch(
-                app,
-                draft.title,
-                draft.description,
-                draft.repo_path,
-                epic_id,
-            ),
+            Command::QuickDispatch { draft, epic_id } => {
+                rt.exec_quick_dispatch(app, draft, epic_id)
+            }
             Command::KillTmuxWindow { window } => rt.exec_kill_tmux_window(window),
             Command::Finish {
                 id,

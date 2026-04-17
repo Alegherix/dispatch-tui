@@ -924,9 +924,13 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
 
     rt.exec_quick_dispatch(
         &mut app,
-        "My Task".into(),
-        "Do stuff".into(),
-        repo.to_string(),
+        tui::TaskDraft {
+            title: "My Task".into(),
+            description: "Do stuff".into(),
+            repo_path: repo.to_string(),
+            tag: None,
+            base_branch: "main".into(),
+        },
         None,
     );
 
@@ -978,9 +982,13 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
 
     rt.exec_quick_dispatch(
         &mut app,
-        "Epic Task".into(),
-        "do stuff".into(),
-        repo.to_string(),
+        tui::TaskDraft {
+            title: "Epic Task".into(),
+            description: "do stuff".into(),
+            repo_path: repo.to_string(),
+            tag: None,
+            base_branch: "main".into(),
+        },
         Some(epic.id),
     );
 
@@ -1012,9 +1020,13 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
     // /nonexistent won't have .worktrees dir, so provision_worktree fails
     rt.exec_quick_dispatch(
         &mut app,
-        "Fail Task".into(),
-        "desc".into(),
-        "/nonexistent".into(),
+        tui::TaskDraft {
+            title: "Fail Task".into(),
+            description: "desc".into(),
+            repo_path: "/nonexistent".into(),
+            tag: None,
+            base_branch: "main".into(),
+        },
         None,
     );
 
@@ -1023,8 +1035,52 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Error(_)),
-        "Expected Error, got: {msg:?}"
+        matches!(msg, Message::DispatchFailed(_) | Message::Error(_)),
+        "Expected DispatchFailed or Error, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "not a git repo",
+    )]));
+    let rt = make_runtime(db.clone(), tx, mock);
+    let tasks = db.list_all().unwrap();
+    let mut app = App::new(tasks, Duration::from_secs(300));
+
+    rt.exec_quick_dispatch(
+        &mut app,
+        tui::TaskDraft {
+            title: "Fail Task".into(),
+            description: String::new(),
+            repo_path: "/nonexistent".into(),
+            tag: None,
+            base_branch: "main".into(),
+        },
+        None,
+    );
+
+    // The task was created synchronously
+    let created_id = app.tasks()[0].id;
+
+    let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg1, Message::DispatchFailed(id) if id == created_id),
+        "Expected DispatchFailed, got: {msg1:?}"
+    );
+    let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg2, Message::Error(_)),
+        "Expected Error, got: {msg2:?}"
     );
 }
 

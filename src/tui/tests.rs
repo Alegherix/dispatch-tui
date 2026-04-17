@@ -12605,6 +12605,28 @@ fn dispatch_different_tasks_both_succeed() {
 }
 
 // ---------------------------------------------------------------------------
+// Quick dispatch guard
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mark_dispatching_sets_guard_and_returns_no_commands() {
+    let mut app = make_app();
+    assert!(!app.is_dispatching(TaskId(99)));
+    let cmds = app.update(Message::MarkDispatching(TaskId(99)));
+    assert!(cmds.is_empty());
+    assert!(app.is_dispatching(TaskId(99)));
+}
+
+#[test]
+fn dispatch_failed_clears_mark_dispatching_guard() {
+    let mut app = make_app();
+    app.update(Message::MarkDispatching(TaskId(99)));
+    assert!(app.is_dispatching(TaskId(99)));
+    app.update(Message::DispatchFailed(TaskId(99)));
+    assert!(!app.is_dispatching(TaskId(99)));
+}
+
+// ---------------------------------------------------------------------------
 // Review agent in-flight dispatch deduplication
 // ---------------------------------------------------------------------------
 

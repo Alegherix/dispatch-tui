@@ -26,17 +26,17 @@ impl TuiRuntime {
     pub(super) fn exec_quick_dispatch(
         &self,
         app: &mut App,
-        title: String,
-        description: String,
-        repo_path: String,
+        draft: tui::TaskDraft,
         epic_id: Option<models::EpicId>,
     ) {
+        use crate::service::CreateTaskParams;
+        let repo_path = draft.repo_path.clone();
         let Some(task) = self.create_task(
             app,
-            crate::service::CreateTaskParams {
-                title: title.clone(),
-                description: description.clone(),
-                repo_path: repo_path.clone(),
+            CreateTaskParams {
+                title: draft.title,
+                description: draft.description,
+                repo_path: draft.repo_path,
                 plan_path: None,
                 epic_id: epic_id.map(|e| e.0),
                 sort_order: None,
@@ -47,6 +47,7 @@ impl TuiRuntime {
             return;
         };
         app.update(Message::TaskCreated { task: task.clone() });
+        app.update(Message::MarkDispatching(task.id));
         let expanded = models::expand_tilde(&repo_path);
         let _ = self.database.save_repo_path(&expanded);
         let paths = self.database.list_repo_paths().unwrap_or_default();
@@ -66,6 +67,7 @@ impl TuiRuntime {
                     });
                 }
                 Err(e) => {
+                    let _ = tx.send(Message::DispatchFailed(id));
                     let _ = tx.send(Message::Error(format!("Quick dispatch failed: {e:#}")));
                 }
             }

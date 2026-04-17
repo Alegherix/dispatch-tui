@@ -251,6 +251,7 @@ pub enum Message {
     },
     Error(String),
     DispatchFailed(TaskId),
+    MarkDispatching(TaskId),
     TaskEdited(TaskEdit),
     RepoPathsUpdated(Vec<String>),
     QuickDispatch {

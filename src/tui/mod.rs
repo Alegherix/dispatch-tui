@@ -912,6 +912,7 @@ impl App {
             | Message::ResumeTask(_)
             | Message::Resumed { .. }
             | Message::DispatchFailed(_)
+            | Message::MarkDispatching(_)
             | Message::TaskEdited(_)
             | Message::StaleAgent(_)
             | Message::AgentCrashed(_)
@@ -1170,6 +1171,7 @@ impl App {
             Message::ResumeTask(id) => self.handle_resume_task(id),
             Message::Resumed { id, tmux_window } => self.handle_resumed(id, tmux_window),
             Message::DispatchFailed(id) => self.handle_dispatch_failed(id),
+            Message::MarkDispatching(id) => self.handle_mark_dispatching(id),
             Message::TaskEdited(edit) => self.handle_task_edited(edit),
             Message::StaleAgent(id) => self.handle_stale_agent(id),
             Message::AgentCrashed(id) => self.handle_agent_crashed(id),
@@ -4375,6 +4377,11 @@ impl App {
 
     fn handle_dispatch_failed(&mut self, id: TaskId) -> Vec<Command> {
         self.dispatching.remove(&id);
+        vec![]
+    }
+
+    fn handle_mark_dispatching(&mut self, id: TaskId) -> Vec<Command> {
+        self.dispatching.insert(id);
         vec![]
     }
 

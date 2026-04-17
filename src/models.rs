@@ -2060,6 +2060,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ci_status_db_roundtrip() {
+        for status in [
+            CiStatus::Pending,
+            CiStatus::Success,
+            CiStatus::Failure,
+            CiStatus::None,
+        ] {
+            let s = status.as_db_str();
+            assert_eq!(CiStatus::from_db_str(s), status, "roundtrip failed for {s}");
+        }
+    }
+
     // --- EpicSubstatus ---
 
     fn test_epic() -> Epic {

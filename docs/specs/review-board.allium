@@ -185,6 +185,16 @@ rule DispatchReviewAgent {
         --   2) provision_and_dispatch checks whether the target tmux window
         --      already exists and, if so, returns the existing window/worktree
         --      without recreating anything.
+        --
+        -- Persistence routing: on receiving ReviewAgentDispatched, the TUI
+        -- looks the PR up in review_prs, my_prs, and bot_prs (in that order)
+        -- to determine which table to write the agent fields to. If the PR is
+        -- not found in any tracked list (e.g. the list was cleared between
+        -- the dispatch request and message arrival), persistence is skipped,
+        -- an error status "No PR record found for <repo>#<number> — agent
+        -- tracking unavailable" is displayed, and no PersistReviewAgent
+        -- command is emitted. The in-memory agent handle is still inserted so
+        -- the session can be focused or killed within the current session.
 }
 
 -- == Review Agent Detach ==

@@ -696,11 +696,11 @@ pub struct CreateEpicParams {
 // ---------------------------------------------------------------------------
 
 pub struct EpicService {
-    pub db: Arc<dyn db::TaskStore>,
+    pub db: Arc<dyn db::EpicCrud>,
 }
 
 impl EpicService {
-    pub fn new(db: Arc<dyn db::TaskStore>) -> Self {
+    pub fn new(db: Arc<dyn db::EpicCrud>) -> Self {
         Self { db }
     }
 
@@ -857,11 +857,12 @@ mod tests {
     }
 
     fn task_svc(db: &Arc<dyn db::TaskStore>) -> TaskService {
-        TaskService::new(Arc::clone(db))
+        TaskService::new(db.clone())
     }
 
     fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {
-        EpicService::new(Arc::clone(db))
+        let d: Arc<dyn db::EpicCrud> = db.clone();
+        EpicService::new(d)
     }
 
     // -- TaskService ----------------------------------------------------------

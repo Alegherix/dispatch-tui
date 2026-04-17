@@ -374,12 +374,20 @@ pub trait SettingsStore: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
+// TaskAndEpicStore — composite for consumers that need tasks + epics only
+// ---------------------------------------------------------------------------
+
+pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
+
+impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
+
+// ---------------------------------------------------------------------------
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
-pub trait TaskStore: TaskCrud + EpicCrud + PrStore + AlertStore + SettingsStore {}
+pub trait TaskStore: TaskAndEpicStore + PrStore + AlertStore + SettingsStore {}
 
-impl<T: TaskCrud + EpicCrud + PrStore + AlertStore + SettingsStore> TaskStore for T {}
+impl<T: TaskAndEpicStore + PrStore + AlertStore + SettingsStore> TaskStore for T {}
 
 // ---------------------------------------------------------------------------
 // Database

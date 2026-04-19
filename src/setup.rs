@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use include_dir::{include_dir, Dir};
 use rusqlite;
 use serde_json::{json, Map, Value};
 use std::fs;
@@ -9,17 +10,9 @@ use std::path::PathBuf;
 use crate::process::RealProcessRunner;
 use crate::tmux;
 
-// Plugin files — embedded in the binary and installed to ~/.claude/plugins/local/dispatch/
-// When adding/removing files here, also update the list in build.rs.
-const PLUGIN_JSON: &str = include_str!("../plugin/.claude-plugin/plugin.json");
-const HOOKS_JSON: &str = include_str!("../plugin/hooks/hooks.json");
-const HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-status-hook");
-const USAGE_HOOK_SCRIPT: &str = include_str!("../plugin/hooks/scripts/task-usage-hook");
-const WRAP_UP_SKILL: &str = include_str!("../plugin/skills/wrap-up/SKILL.md");
-const DECOMPOSE_REVIEW_SKILL: &str = include_str!("../plugin/skills/decompose-review/SKILL.md");
-const DECOMPOSE_REVIEW_PLAN_TEMPLATE: &str =
-    include_str!("../plugin/skills/decompose-review/references/plan-template.md");
-const QUEUE_PLAN_CMD: &str = include_str!("../plugin/commands/queue-plan.md");
+// The entire plugin/ directory is embedded at compile time. Any file added to
+// plugin/ is automatically picked up — no manual registration required.
+static PLUGIN_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/plugin");
 
 // ---------------------------------------------------------------------------
 // MCP config merging
@@ -113,47 +106,38 @@ pub fn merge_permissions(existing: Option<Value>) -> PermissionsMergeResult {
 // Plugin installation
 // ---------------------------------------------------------------------------
 
-fn plugin_files() -> Vec<(&'static str, &'static str, bool)> {
-    // (relative_path, content, executable)
-    vec![
-        (".claude-plugin/plugin.json", PLUGIN_JSON, false),
-        ("hooks/hooks.json", HOOKS_JSON, false),
-        ("hooks/scripts/task-status-hook", HOOK_SCRIPT, true),
-        ("hooks/scripts/task-usage-hook", USAGE_HOOK_SCRIPT, true),
-        ("skills/wrap-up/SKILL.md", WRAP_UP_SKILL, false),
-        (
-            "skills/decompose-review/SKILL.md",
-            DECOMPOSE_REVIEW_SKILL,
-            false,
-        ),
-        (
-            "skills/decompose-review/references/plan-template.md",
-            DECOMPOSE_REVIEW_PLAN_TEMPLATE,
-            false,
-        ),
-        ("commands/queue-plan.md", QUEUE_PLAN_CMD, false),
-    ]
-}
-
 fn plugin_dir() -> Result<PathBuf> {
     let claude_dir = claude_dir()?;
     Ok(claude_dir.join("plugins").join("local").join("dispatch"))
 }
 
+fn is_executable(path: &std::path::Path) -> bool {
+    path.starts_with("hooks/scripts")
+}
+
 pub fn install_plugin() -> Result<bool> {
     let plugin_dir = plugin_dir()?;
     let mut changed = false;
+    install_dir_recursive(&PLUGIN_DIR, &plugin_dir, &mut changed)?;
+    Ok(changed)
+}
 
-    for (rel_path, content, executable) in plugin_files() {
-        let path = plugin_dir.join(rel_path);
+fn install_dir_recursive(dir: &Dir, base: &std::path::Path, changed: &mut bool) -> Result<()> {
+    for file in dir.files() {
+        let path = base.join(file.path());
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
-        changed |= write_file_if_changed(&path, content, executable)?;
+        let content = file
+            .contents_utf8()
+            .with_context(|| format!("Non-UTF-8 plugin file: {}", file.path().display()))?;
+        *changed |= write_file_if_changed(&path, content, is_executable(file.path()))?;
     }
-
-    Ok(changed)
+    for subdir in dir.dirs() {
+        install_dir_recursive(subdir, base, changed)?;
+    }
+    Ok(())
 }
 
 fn write_file_if_changed(path: &std::path::Path, content: &str, executable: bool) -> Result<bool> {
@@ -225,12 +209,22 @@ fn plugin_needs_update() -> Result<bool> {
     plugin_needs_update_in(&plugin_dir()?)
 }
 
-fn plugin_needs_update_in(dir: &std::path::Path) -> Result<bool> {
-    for (rel_path, content, _) in plugin_files() {
-        let path = dir.join(rel_path);
+fn plugin_needs_update_in(base: &std::path::Path) -> Result<bool> {
+    needs_update_recursive(&PLUGIN_DIR, base)
+}
+
+fn needs_update_recursive(dir: &Dir, base: &std::path::Path) -> Result<bool> {
+    for file in dir.files() {
+        let path = base.join(file.path());
+        let content = file.contents_utf8().unwrap_or("");
         match fs::read_to_string(&path) {
             Ok(existing) if existing == content => continue,
             _ => return Ok(true),
+        }
+    }
+    for subdir in dir.dirs() {
+        if needs_update_recursive(subdir, base)? {
+            return Ok(true);
         }
     }
     Ok(false)
@@ -396,8 +390,37 @@ pub fn run_setup(port: u16, yes: bool) -> Result<()> {
         if yes || confirm("Install dispatch plugin (skills, hooks, commands) to ~/.claude/plugins/local/dispatch/?")? {
             install_plugin()?;
             println!("Plugin: installed dispatch plugin to ~/.claude/plugins/local/dispatch/");
-            println!("  → Skills: /wrap-up, /decompose-review");
-            println!("  → Commands: /queue-plan");
+            let skills: Vec<String> = PLUGIN_DIR
+                .get_dir("skills")
+                .map(|d| {
+                    let mut names: Vec<String> = d
+                        .dirs()
+                        .filter_map(|sd| {
+                            sd.path().file_name()?.to_str().map(|n| format!("/{n}"))
+                        })
+                        .collect();
+                    names.sort();
+                    names
+                })
+                .unwrap_or_default();
+            println!("  → Skills: {}", skills.join(", "));
+            let commands: Vec<String> = PLUGIN_DIR
+                .get_dir("commands")
+                .map(|d| {
+                    let mut names: Vec<String> = d
+                        .files()
+                        .filter_map(|f| {
+                            f.path()
+                                .file_stem()?
+                                .to_str()
+                                .map(|n| format!("/{n}"))
+                        })
+                        .collect();
+                    names.sort();
+                    names
+                })
+                .unwrap_or_default();
+            println!("  → Commands: {}", commands.join(", "));
             println!("  → Hooks: task-status, task-usage");
             any_changes = true;
         } else {
@@ -658,23 +681,40 @@ mod tests {
         }
     }
 
+    fn hook_script() -> &'static str {
+        PLUGIN_DIR
+            .get_file("hooks/scripts/task-status-hook")
+            .expect("task-status-hook must be embedded")
+            .contents_utf8()
+            .expect("task-status-hook must be UTF-8")
+    }
+
+    fn usage_hook_script() -> &'static str {
+        PLUGIN_DIR
+            .get_file("hooks/scripts/task-usage-hook")
+            .expect("task-usage-hook must be embedded")
+            .contents_utf8()
+            .expect("task-usage-hook must be UTF-8")
+    }
+
     // -- Hook script --
 
     #[test]
     fn hook_script_is_valid_bash() {
-        assert!(HOOK_SCRIPT.starts_with("#!/usr/bin/env bash"));
+        assert!(hook_script().starts_with("#!/usr/bin/env bash"));
     }
 
     #[test]
     fn usage_hook_script_is_valid_bash() {
-        assert!(USAGE_HOOK_SCRIPT.starts_with("#!/usr/bin/env bash"));
+        assert!(usage_hook_script().starts_with("#!/usr/bin/env bash"));
     }
 
     #[test]
     fn hook_script_handles_all_events() {
-        assert!(HOOK_SCRIPT.contains("PreToolUse)"));
-        assert!(HOOK_SCRIPT.contains("Stop)"));
-        assert!(HOOK_SCRIPT.contains("Notification)"));
+        let s = hook_script();
+        assert!(s.contains("PreToolUse)"));
+        assert!(s.contains("Stop)"));
+        assert!(s.contains("Notification)"));
     }
 
     #[test]
@@ -682,26 +722,22 @@ mod tests {
         // The PreToolUse handler must read tool_name from the JSON input
         // and skip dispatch MCP tool calls to avoid clobbering review status
         // during wrap-up (get_task and wrap_up would otherwise set running).
-        assert!(
-            HOOK_SCRIPT.contains("tool_name"),
-            "hook must extract tool_name from PreToolUse input"
-        );
-        assert!(
-            HOOK_SCRIPT.contains("mcp__dispatch__"),
-            "hook must skip mcp__dispatch__ tools in PreToolUse"
-        );
+        let s = hook_script();
+        assert!(s.contains("tool_name"), "hook must extract tool_name from PreToolUse input");
+        assert!(s.contains("mcp__dispatch__"), "hook must skip mcp__dispatch__ tools in PreToolUse");
     }
 
     #[test]
     fn hook_script_notification_uses_sub_status_needs_input() {
         // Notification must NOT change status to review — it keeps running and
         // sets sub_status=needs_input so the task stays in the Blocked visual column.
+        let s = hook_script();
         assert!(
-            HOOK_SCRIPT.contains("--sub-status needs_input"),
+            s.contains("--sub-status needs_input"),
             "Notification handler must use --sub-status needs_input, not --needs-input"
         );
         assert!(
-            !HOOK_SCRIPT.contains("--needs-input"),
+            !s.contains("--needs-input"),
             "Deprecated --needs-input flag must not appear in the hook script"
         );
     }
@@ -710,39 +746,60 @@ mod tests {
 
     #[test]
     fn plugin_json_is_valid() {
-        let value: Value = serde_json::from_str(PLUGIN_JSON).expect("PLUGIN_JSON is invalid JSON");
+        let content = PLUGIN_DIR
+            .get_file(".claude-plugin/plugin.json")
+            .expect("plugin.json must be embedded")
+            .contents_utf8()
+            .expect("plugin.json must be UTF-8");
+        let value: Value = serde_json::from_str(content).expect("plugin.json is invalid JSON");
         assert_eq!(value["name"], "dispatch");
     }
 
     #[test]
     fn hooks_json_is_valid() {
-        let value: Value = serde_json::from_str(HOOKS_JSON).expect("HOOKS_JSON is invalid JSON");
+        let content = PLUGIN_DIR
+            .get_file("hooks/hooks.json")
+            .expect("hooks.json must be embedded")
+            .contents_utf8()
+            .expect("hooks.json must be UTF-8");
+        let value: Value = serde_json::from_str(content).expect("hooks.json is invalid JSON");
         assert!(value["PreToolUse"].is_array(), "missing PreToolUse");
         assert!(value["Stop"].is_array(), "missing Stop");
         assert!(value["Notification"].is_array(), "missing Notification");
     }
 
     #[test]
-    fn plugin_files_list_covers_all_components() {
-        let files = plugin_files();
-        let paths: Vec<&str> = files.iter().map(|(p, _, _)| *p).collect();
-        assert!(paths.contains(&".claude-plugin/plugin.json"));
-        assert!(paths.contains(&"hooks/hooks.json"));
-        assert!(paths.contains(&"hooks/scripts/task-status-hook"));
-        assert!(paths.contains(&"hooks/scripts/task-usage-hook"));
-        assert!(paths.contains(&"skills/wrap-up/SKILL.md"));
-        assert!(paths.contains(&"skills/decompose-review/SKILL.md"));
-        assert!(paths.contains(&"skills/decompose-review/references/plan-template.md"));
-        assert!(paths.contains(&"commands/queue-plan.md"));
+    fn plugin_embeds_required_files() {
+        let required = [
+            ".claude-plugin/plugin.json",
+            "hooks/hooks.json",
+            "hooks/scripts/task-status-hook",
+            "hooks/scripts/task-usage-hook",
+            "skills/wrap-up/SKILL.md",
+            "skills/decompose-review/SKILL.md",
+            "skills/decompose-review/references/plan-template.md",
+            "skills/alert-monitor/SKILL.md",
+            "commands/queue-plan.md",
+        ];
+        for path in required {
+            assert!(
+                PLUGIN_DIR.get_file(path).is_some(),
+                "{path} must be embedded in PLUGIN_DIR"
+            );
+        }
     }
 
     #[test]
     fn plugin_hook_scripts_are_executable() {
-        let files = plugin_files();
-        for (path, _, executable) in &files {
-            if path.contains("scripts/") {
-                assert!(executable, "{path} should be executable");
-            }
+        let hooks_scripts = PLUGIN_DIR
+            .get_dir("hooks/scripts")
+            .expect("hooks/scripts dir must exist");
+        for file in hooks_scripts.files() {
+            assert!(
+                is_executable(file.path()),
+                "{} should be marked executable",
+                file.path().display()
+            );
         }
     }
 
@@ -1007,28 +1064,33 @@ mod tests {
         assert!(plugin_needs_update_in(dir.path()).unwrap());
     }
 
+    fn write_all_plugin_files(base: &std::path::Path) {
+        fn write_dir(dir: &Dir, base: &std::path::Path) {
+            for file in dir.files() {
+                let path = base.join(file.path());
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(&path, file.contents_utf8().unwrap_or("")).unwrap();
+            }
+            for subdir in dir.dirs() {
+                write_dir(subdir, base);
+            }
+        }
+        write_dir(&PLUGIN_DIR, base);
+    }
+
     #[test]
     fn plugin_needs_update_false_when_all_match() {
         let dir = tempfile::tempdir().unwrap();
-        for (rel_path, content, _) in plugin_files() {
-            let path = dir.path().join(rel_path);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(&path, content).unwrap();
-        }
+        write_all_plugin_files(dir.path());
         assert!(!plugin_needs_update_in(dir.path()).unwrap());
     }
 
     #[test]
     fn plugin_needs_update_true_when_one_file_differs() {
         let dir = tempfile::tempdir().unwrap();
-        for (rel_path, content, _) in plugin_files() {
-            let path = dir.path().join(rel_path);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(&path, content).unwrap();
-        }
+        write_all_plugin_files(dir.path());
         // Corrupt one file
-        let first = plugin_files()[0].0;
-        fs::write(dir.path().join(first), "corrupted").unwrap();
+        fs::write(dir.path().join(".claude-plugin/plugin.json"), "corrupted").unwrap();
         assert!(plugin_needs_update_in(dir.path()).unwrap());
     }
 }

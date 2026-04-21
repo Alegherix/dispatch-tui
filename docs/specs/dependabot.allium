@@ -228,14 +228,35 @@ rule MergeBotPr {
 --   1         : switch to Dependabot sub-view (no-op when already here)
 --   2         : switch to Alerts sub-view
 --   Enter     : toggle the bottom detail panel (placeholder; currently empty)
---   f         : open the Security Board repo filter. NOTE: the filter state
---               toggled here lives on SecurityBoardState.repo_filter and
---               affects the Alerts sub-view, not the bot PR list. The bot PR
---               list has its own repo_filter on DependabotBoardState.prs
---               which is not toggled by this key in the current implementation.
+--   f         : open the Dependabot repo filter overlay. The filter state
+--               lives on DependabotBoardState.prs.repo_filter and affects
+--               only the bot-PR list. Each repo can be toggled by its digit
+--               (1-9); [a] toggles all; [Tab] cycles include/exclude mode;
+--               [Enter/Esc] closes the overlay. The Alerts sub-view has its
+--               own separate repo filter (also toggled by f when on the Alerts
+--               sub-view, stored on SecurityBoardState.repo_filter).
 --   Tab / Esc : return to the task board (saved selection restored)
 --   ?         : toggle help overlay
 --   q         : quit
+
+------------------------------------------------------------
+-- Filtering
+------------------------------------------------------------
+
+-- Repo filter (f key):
+--   Opens an overlay listing all repos that have bot PRs.
+--   Each repo can be toggled on/off by pressing its digit (1-9).
+--   a key toggles all repos at once.
+--   Tab toggles between include and exclude mode.
+--     include mode: only show PRs from selected repos.
+--     exclude mode: hide PRs from selected repos, show all others.
+--   Enter or Esc closes the overlay.
+--   The filter applies to the displayed PR list immediately.
+--   An empty filter (default) shows all repos regardless of mode.
+--   The cursor is clamped after each filter change so it never
+--   points past the end of the visible list.
+--
+--   Note: this filter is independent of the Alerts sub-view's repo filter.
 
 ------------------------------------------------------------
 -- Auto-refresh

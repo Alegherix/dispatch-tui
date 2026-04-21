@@ -17194,6 +17194,7 @@ fn refresh_status_red_at_4x_interval() {
 // Bug fix: clamp_dependabot_selection after bot-PR filter changes
 // ---------------------------------------------------------------------------
 
+/// Helper: put app into Dependabot PR sub-view with two bot PRs from distinct repos.
 fn make_two_bot_pr_app() -> App {
     let mut app = make_security_board_app();
     let mut pr_a = make_review_pr(1, "dependabot[bot]", ReviewDecision::ReviewRequired);
@@ -17221,7 +17222,7 @@ fn get_dependabot_row(app: &App, col: usize) -> usize {
             dependabot_selection,
             ..
         } => dependabot_selection.selected_row[col],
-        _ => 0,
+        _ => panic!("get_dependabot_row called while not in SecurityBoard view mode"),
     }
 }
 

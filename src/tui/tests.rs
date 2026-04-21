@@ -17189,3 +17189,87 @@ fn refresh_status_red_at_4x_interval() {
     let (_, color) = ui::refresh_status(Some(last), false, interval);
     assert_eq!(color, Color::Red);
 }
+
+// ---------------------------------------------------------------------------
+// Bug fix: clamp_dependabot_selection after bot-PR filter changes
+// ---------------------------------------------------------------------------
+
+fn make_two_bot_pr_app() -> App {
+    let mut app = make_security_board_app();
+    let mut pr_a = make_review_pr(1, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr_a.repo = "org/repo-a".to_string();
+    let mut pr_b = make_review_pr(2, "dependabot[bot]", ReviewDecision::ReviewRequired);
+    pr_b.repo = "org/repo-b".to_string();
+    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr_a, pr_b]));
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    app
+}
+
+fn set_dependabot_row(app: &mut App, col: usize, row: usize) {
+    if let ViewMode::SecurityBoard {
+        dependabot_selection,
+        ..
+    } = &mut app.board.view_mode
+    {
+        dependabot_selection.selected_row[col] = row;
+    }
+}
+
+fn get_dependabot_row(app: &App, col: usize) -> usize {
+    match app.view_mode() {
+        ViewMode::SecurityBoard {
+            dependabot_selection,
+            ..
+        } => dependabot_selection.selected_row[col],
+        _ => 0,
+    }
+}
+
+#[test]
+fn toggle_bot_pr_repo_filter_clamps_selection() {
+    let mut app = make_two_bot_pr_app();
+    set_dependabot_row(&mut app, 0, 1); // cursor at row 1 (2 PRs visible in backlog)
+    // Include only repo-a → 1 PR visible, cursor must clamp to 0
+    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
+    assert_eq!(app.filtered_bot_prs().len(), 1);
+    assert_eq!(get_dependabot_row(&app, 0), 0);
+}
+
+#[test]
+fn close_bot_pr_filter_clamps_selection() {
+    let mut app = make_two_bot_pr_app();
+    // Include only repo-a
+    app.update(Message::StartBotPrRepoFilter);
+    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
+    // Manually move cursor past end of filtered list
+    set_dependabot_row(&mut app, 0, 5);
+    // Close filter — must clamp
+    app.update(Message::CloseBotPrRepoFilter);
+    assert_eq!(get_dependabot_row(&app, 0), 0);
+}
+
+#[test]
+fn toggle_all_bot_pr_repo_filter_clamps_selection() {
+    let mut app = make_two_bot_pr_app();
+    set_dependabot_row(&mut app, 0, 1); // cursor at row 1 (2 PRs)
+    // Switch to exclude mode, then toggle-all selects all repos →
+    // exclude all repos → 0 PRs visible → cursor must clamp to 0
+    app.update(Message::ToggleBotPrRepoFilterMode); // switch to exclude
+    app.update(Message::ToggleAllBotPrRepoFilter);  // select all repos → exclude all
+    assert_eq!(app.filtered_bot_prs().len(), 0);
+    assert_eq!(get_dependabot_row(&app, 0), 0);
+}
+
+#[test]
+fn toggle_bot_pr_filter_mode_clamps_selection() {
+    let mut app = make_two_bot_pr_app();
+    // Include both repos → 2 PRs; cursor at row 1
+    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
+    app.update(Message::ToggleBotPrRepoFilter("org/repo-b".to_string()));
+    set_dependabot_row(&mut app, 0, 1);
+    assert_eq!(app.filtered_bot_prs().len(), 2);
+    // Toggle to exclude mode: exclude {repo-a, repo-b} → 0 PRs → cursor must clamp to 0
+    app.update(Message::ToggleBotPrRepoFilterMode);
+    assert_eq!(app.filtered_bot_prs().len(), 0);
+    assert_eq!(get_dependabot_row(&app, 0), 0);
+}

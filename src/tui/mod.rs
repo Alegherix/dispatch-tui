@@ -4661,6 +4661,7 @@ impl App {
 
     fn handle_close_bot_pr_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
+        self.clamp_dependabot_selection();
         vec![]
     }
 
@@ -4668,6 +4669,7 @@ impl App {
         if !self.security.dependabot.prs.repo_filter.remove(&repo) {
             self.security.dependabot.prs.repo_filter.insert(repo);
         }
+        self.clamp_dependabot_selection();
         vec![]
     }
 
@@ -4678,6 +4680,7 @@ impl App {
         } else {
             self.security.dependabot.prs.repo_filter = all_repos.into_iter().collect();
         }
+        self.clamp_dependabot_selection();
         vec![]
     }
 
@@ -4687,6 +4690,7 @@ impl App {
                 RepoFilterMode::Include => RepoFilterMode::Exclude,
                 RepoFilterMode::Exclude => RepoFilterMode::Include,
             };
+        self.clamp_dependabot_selection();
         vec![]
     }
 

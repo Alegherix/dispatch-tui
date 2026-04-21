@@ -647,9 +647,20 @@ fn build_task_list_item<'a>(
 
     let line1 = Line::from(line1_spans);
 
-    let line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
+    let mut line2 = render_card_indicator(classify_card_indicator(task, status, app, now));
 
-    // Build two-line ListItem
+    // When flattened, append the task's epic id to line 2 (purple) so epic
+    // membership remains visible on the card.
+    if app.board.flattened {
+        if let Some(eid) = task.epic_id {
+            line2.spans.push(Span::raw("  "));
+            line2.spans.push(Span::styled(
+                format!("#{}", eid.0),
+                Style::default().fg(PURPLE),
+            ));
+        }
+    }
+
     let mut item = ListItem::new(vec![line1, line2]);
 
     // Flash bg takes priority over cursor — it's transient (3s) and meant to grab attention
@@ -2463,6 +2474,14 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 prefix.append(&mut spans);
                 spans = prefix;
             }
+            if app.board.flattened {
+                let mut prefix = vec![Span::styled(
+                    "[flat] ",
+                    Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+                )];
+                prefix.append(&mut spans);
+                spans = prefix;
+            }
             let bar = Paragraph::new(Line::from(spans));
             frame.render_widget(bar, area);
         }
@@ -2764,6 +2783,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     push_hint("E", "epic");
     push_hint("D", "quick");
     push_hint("S", "split");
+    push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("H", "history");
     push_hint("?", "help");
@@ -2801,6 +2821,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("n", "new");
     push_hint("E", "epic");
     push_hint("D", "quick");
+    push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("H", "history");
     push_hint("?", "help");
@@ -2827,6 +2848,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
     }
     push_hint("x", "archive");
     push_hint("a", "select all");
+    push_hint("F", "flat");
     push_hint("Space", "toggle");
     push_hint("Esc", "clear");
     spans

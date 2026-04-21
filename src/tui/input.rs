@@ -313,6 +313,8 @@ impl App {
 
             KeyCode::Char('H') => self.update(Message::ToggleArchive),
 
+            KeyCode::Char('F') => self.update(Message::ToggleFlattened),
+
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
             KeyCode::Char('S') => self.update(Message::ToggleSplitMode),

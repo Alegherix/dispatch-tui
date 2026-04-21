@@ -131,6 +131,7 @@ impl App {
                 repo_paths: Vec::new(),
                 usage: HashMap::new(),
                 split: SplitState::default(),
+                flattened: false,
             },
             status: StatusState::default(),
             should_quit: false,
@@ -558,16 +559,35 @@ impl App {
                 .board
                 .tasks
                 .iter()
-                .filter(|t| t.epic_id.is_none() && t.status != TaskStatus::Archived)
+                .filter(|t| {
+                    t.status != TaskStatus::Archived
+                        && (self.board.flattened || t.epic_id.is_none())
+                })
                 .filter(repo_match)
                 .collect(),
-            ViewMode::Epic { epic_id, .. } => self
-                .board
-                .tasks
-                .iter()
-                .filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived)
-                .filter(repo_match)
-                .collect(),
+            ViewMode::Epic { epic_id, .. } => {
+                let current = *epic_id;
+                if self.board.flattened {
+                    let subtree = crate::models::descendant_task_ids(
+                        current,
+                        &self.board.epics,
+                        &self.board.tasks,
+                    );
+                    self.board
+                        .tasks
+                        .iter()
+                        .filter(|t| subtree.contains(&t.id) && t.status != TaskStatus::Archived)
+                        .filter(repo_match)
+                        .collect()
+                } else {
+                    self.board
+                        .tasks
+                        .iter()
+                        .filter(|t| t.epic_id == Some(current) && t.status != TaskStatus::Archived)
+                        .filter(repo_match)
+                        .collect()
+                }
+            }
             ViewMode::ReviewBoard { .. } | ViewMode::SecurityBoard { .. } => vec![],
         }
     }
@@ -625,34 +645,36 @@ impl App {
         let tasks = self.tasks_by_status(status);
         let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
 
-        match &self.board.view_mode {
-            ViewMode::Board(_) => {
-                // Main board: show only root epics (no parent)
-                for epic in &self.board.epics {
-                    if epic.parent_epic_id.is_some() {
-                        continue;
-                    }
-                    if !self.repo_matches(&epic.repo_path) {
-                        continue;
-                    }
-                    if epic.status == status {
-                        items.push(ColumnItem::Epic(epic));
-                    }
-                }
-            }
-            ViewMode::Epic { epic_id, .. } => {
-                // Inside an epic: show sub-epics whose parent_epic_id matches
-                let current = *epic_id;
-                for epic in &self.board.epics {
-                    if epic.parent_epic_id != Some(current) {
-                        continue;
-                    }
-                    if epic.status == status {
-                        items.push(ColumnItem::Epic(epic));
+        if !self.board.flattened {
+            match &self.board.view_mode {
+                ViewMode::Board(_) => {
+                    // Main board: show only root epics (no parent)
+                    for epic in &self.board.epics {
+                        if epic.parent_epic_id.is_some() {
+                            continue;
+                        }
+                        if !self.repo_matches(&epic.repo_path) {
+                            continue;
+                        }
+                        if epic.status == status {
+                            items.push(ColumnItem::Epic(epic));
+                        }
                     }
                 }
+                ViewMode::Epic { epic_id, .. } => {
+                    // Inside an epic: show sub-epics whose parent_epic_id matches
+                    let current = *epic_id;
+                    for epic in &self.board.epics {
+                        if epic.parent_epic_id != Some(current) {
+                            continue;
+                        }
+                        if epic.status == status {
+                            items.push(ColumnItem::Epic(epic));
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
 
         items.sort_by_key(|item| match item {
@@ -686,6 +708,9 @@ impl App {
     /// Used by `clamp_selection()` which only needs counts, not the sorted items.
     fn column_item_count(&self, status: TaskStatus) -> usize {
         let task_count = self.tasks_by_status(status).len();
+        if self.board.flattened {
+            return task_count;
+        }
         let epic_count = match &self.board.view_mode {
             ViewMode::Board(_) => self
                 .board
@@ -885,6 +910,7 @@ impl App {
             | Message::MoveTask { .. }
             | Message::ReorderItem(_)
             | Message::ToggleDetail
+            | Message::ToggleFlattened
             | Message::ToggleHelp
             | Message::ToggleNotifications
             | Message::ToggleArchive
@@ -1128,6 +1154,7 @@ impl App {
             Message::MoveTask { id, direction } => self.handle_move_task(id, direction),
             Message::ReorderItem(dir) => self.handle_reorder_item(dir),
             Message::ToggleDetail => self.handle_toggle_detail(),
+            Message::ToggleFlattened => self.handle_toggle_flattened(),
             Message::ToggleHelp => self.handle_toggle_help(),
             Message::ToggleNotifications => self.handle_toggle_notifications(),
             Message::ToggleArchive => self.handle_toggle_archive(),
@@ -1737,6 +1764,15 @@ impl App {
 
     fn handle_toggle_detail(&mut self) -> Vec<Command> {
         self.board.detail_visible = !self.board.detail_visible;
+        vec![]
+    }
+
+    fn handle_toggle_flattened(&mut self) -> Vec<Command> {
+        self.board.flattened = !self.board.flattened;
+        // Column item counts change when toggling (epics hidden / shown, and
+        // tasks from the subtree merged in / split out), so selection row
+        // indices may be out of bounds. Clamp to the nearest valid row.
+        self.clamp_selection();
         vec![]
     }
 

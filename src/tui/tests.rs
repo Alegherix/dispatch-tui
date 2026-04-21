@@ -1150,6 +1150,18 @@ fn toggle_detail_flips_visibility() {
     assert!(!app.board.detail_visible);
 }
 
+// --- Toggle flattened ---
+
+#[test]
+fn toggle_flattened_message_flips_state() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    assert!(!app.board.flattened);
+    app.update(Message::ToggleFlattened);
+    assert!(app.board.flattened);
+    app.update(Message::ToggleFlattened);
+    assert!(!app.board.flattened);
+}
+
 #[test]
 fn stale_agent_detected_after_timeout() {
     let mut app = App::new(vec![make_task(4, TaskStatus::Running)], TEST_TIMEOUT);
@@ -3297,6 +3309,192 @@ fn tasks_for_current_view_epic_shows_only_subtasks() {
     let visible = app.tasks_for_current_view();
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].id, TaskId(2));
+}
+
+// --- Flattened view ---
+
+#[test]
+fn flattened_board_shows_all_tasks_including_subtasks() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let standalone = make_task(1, TaskStatus::Backlog);
+    let mut subtask = make_task(2, TaskStatus::Backlog);
+    subtask.epic_id = Some(EpicId(10));
+    app.board.tasks = vec![standalone, subtask];
+    app.board.epics = vec![make_epic(10)];
+    app.board.flattened = true;
+
+    let visible = app.tasks_for_current_view();
+    let ids: std::collections::HashSet<_> = visible.iter().map(|t| t.id).collect();
+    assert!(ids.contains(&TaskId(1)));
+    assert!(ids.contains(&TaskId(2)));
+}
+
+#[test]
+fn flattened_board_is_recursive_through_nested_epics() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    // Epic tree: root(10) -> child(20)
+    let mut child_epic = make_epic(20);
+    child_epic.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), child_epic];
+
+    let mut t_root = make_task(1, TaskStatus::Backlog);
+    t_root.epic_id = Some(EpicId(10));
+    let mut t_leaf = make_task(2, TaskStatus::Running);
+    t_leaf.epic_id = Some(EpicId(20));
+    app.board.tasks = vec![t_root, t_leaf];
+    app.board.flattened = true;
+
+    let backlog = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(backlog
+        .iter()
+        .any(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(1))));
+
+    let running = app.column_items_for_status(TaskStatus::Running);
+    assert!(running
+        .iter()
+        .any(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(2))));
+}
+
+#[test]
+fn flattened_board_hides_all_epic_cards() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut child = make_epic(20);
+    child.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), child];
+    app.board.flattened = true;
+
+    for status in [
+        TaskStatus::Backlog,
+        TaskStatus::Running,
+        TaskStatus::Review,
+        TaskStatus::Done,
+    ] {
+        let items = app.column_items_for_status(status);
+        assert!(
+            items.iter().all(|i| matches!(i, ColumnItem::Task(_))),
+            "flattened view should emit no epic cards in {status:?} column"
+        );
+    }
+}
+
+#[test]
+fn flattened_epic_view_shows_only_that_subtree() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    // Two root epics with tasks under each
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    let mut a = make_task(1, TaskStatus::Backlog);
+    a.epic_id = Some(EpicId(10));
+    let mut b = make_task(2, TaskStatus::Backlog);
+    b.epic_id = Some(EpicId(20));
+    app.board.tasks = vec![a, b];
+    app.board.flattened = true;
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
+    };
+
+    let visible = app.tasks_for_current_view();
+    let ids: std::collections::HashSet<_> = visible.iter().map(|t| t.id).collect();
+    assert!(ids.contains(&TaskId(1)));
+    assert!(!ids.contains(&TaskId(2)));
+}
+
+#[test]
+fn shift_f_key_toggles_flattened() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    assert!(!app.board.flattened);
+    app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
+    assert!(app.board.flattened);
+    app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
+    assert!(!app.board.flattened);
+}
+
+#[test]
+fn shift_f_toggles_flattened_inside_epic_view() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    app.update(Message::EnterEpic(EpicId(10)));
+    app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
+    assert!(app.board.flattened);
+}
+
+#[test]
+fn toggle_flattened_clamps_selection_when_epic_disappears() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    // Board with one root epic and one subtask inside. No standalone tasks.
+    app.board.epics = vec![make_epic(10)];
+    let mut subtask = make_task(1, TaskStatus::Backlog);
+    subtask.epic_id = Some(EpicId(10));
+    app.board.tasks = vec![subtask];
+
+    // Select the (only) item in the backlog column: the epic card at row 0.
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    // Toggle flatten: epic card disappears, subtask appears in its place.
+    // Count stays 1 so row 0 is still valid, but now points at the task.
+    app.update(Message::ToggleFlattened);
+    assert!(app.board.flattened);
+    assert_eq!(app.selected_row()[0], 0);
+
+    // Toggle again while selection points beyond the end of the column:
+    // put two tasks in backlog, select row 1, then flatten off. After
+    // un-flattening, the column has one epic + whatever standalone tasks
+    // (none). Row must be clamped to 0.
+    app.selection_mut().set_row(0, 5);
+    app.update(Message::ToggleFlattened);
+    assert!(!app.board.flattened);
+    let count = app.column_items_for_status(TaskStatus::Backlog).len();
+    assert!(count > 0);
+    assert!(app.selected_row()[0] < count);
+}
+
+#[test]
+fn flattened_survives_enter_and_exit_epic() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    app.update(Message::ToggleFlattened);
+    assert!(app.board.flattened);
+
+    app.update(Message::EnterEpic(EpicId(10)));
+    assert!(app.board.flattened, "flatten should persist into epic view");
+
+    app.update(Message::ExitEpic);
+    assert!(app.board.flattened, "flatten should persist back to board");
+}
+
+#[test]
+fn flattened_survives_refresh_tasks() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::ToggleFlattened);
+    assert!(app.board.flattened);
+
+    app.update(Message::RefreshTasks(vec![make_task(
+        1,
+        TaskStatus::Backlog,
+    )]));
+    assert!(app.board.flattened);
+}
+
+#[test]
+fn flattened_board_respects_repo_filter() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.epics = vec![make_epic(10)];
+    let mut in_repo = make_task(1, TaskStatus::Backlog);
+    in_repo.epic_id = Some(EpicId(10));
+    in_repo.repo_path = "/included".to_string();
+    let mut out_repo = make_task(2, TaskStatus::Backlog);
+    out_repo.epic_id = Some(EpicId(10));
+    out_repo.repo_path = "/excluded".to_string();
+    app.board.tasks = vec![in_repo, out_repo];
+    app.board.flattened = true;
+    app.filter.repos = vec!["/included".to_string()].into_iter().collect();
+
+    let visible = app.tasks_for_current_view();
+    let ids: std::collections::HashSet<_> = visible.iter().map(|t| t.id).collect();
+    assert!(ids.contains(&TaskId(1)));
+    assert!(!ids.contains(&TaskId(2)));
 }
 
 // --- enter/exit epic ---

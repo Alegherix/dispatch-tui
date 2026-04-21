@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use std::collections::HashSet;
 
 // ---------------------------------------------------------------------------
 // Path utilities
@@ -537,6 +538,41 @@ pub fn epic_substatus(
             }
         }
     }
+}
+
+/// Collect all descendant epic IDs of `root`, inclusive of `root` itself.
+///
+/// Walks `parent_epic_id` links iteratively and is cycle-safe: if two epics
+/// form a malformed cycle, each is visited at most once.
+pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
+    let mut out = HashSet::new();
+    out.insert(root);
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for epic in epics {
+            if let Some(parent) = epic.parent_epic_id {
+                if out.contains(&parent) && !out.contains(&epic.id) {
+                    out.insert(epic.id);
+                    changed = true;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Collect all tasks whose `epic_id` is in the subtree rooted at `root`.
+///
+/// Returns every task directly under `root` or under any of its descendant
+/// sub-epics, recursively. Cycle-safe: malformed epic parent cycles terminate.
+pub fn descendant_task_ids(root: EpicId, epics: &[Epic], tasks: &[Task]) -> HashSet<TaskId> {
+    let epic_ids = descendant_epic_ids(root, epics);
+    tasks
+        .iter()
+        .filter(|t| matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)))
+        .map(|t| t.id)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -2323,6 +2359,97 @@ mod tests {
             DispatchMode::for_task(&make_task_with(Some("a plan"), Some(TaskTag::Feature))),
             DispatchMode::Dispatch
         );
+    }
+
+    // --- descendant_task_ids / descendant_epic_ids ---
+
+    fn epic_with(id: i64, parent: Option<i64>) -> Epic {
+        let now = Utc::now();
+        Epic {
+            id: EpicId(id),
+            title: format!("Epic {id}"),
+            description: String::new(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: false,
+            parent_epic_id: parent.map(EpicId),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn task_under(id: i64, epic: Option<i64>) -> Task {
+        let now = Utc::now();
+        Task {
+            id: TaskId(id),
+            title: format!("Task {id}"),
+            description: String::new(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan_path: None,
+            epic_id: epic.map(EpicId),
+            sub_status: SubStatus::None,
+            pr_url: None,
+            tag: None,
+            sort_order: None,
+            base_branch: "main".to_string(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn descendant_task_ids_includes_direct_children() {
+        let epics = vec![epic_with(1, None)];
+        let tasks = vec![task_under(10, Some(1)), task_under(11, None)];
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(!ids.contains(&TaskId(11)));
+    }
+
+    #[test]
+    fn descendant_task_ids_is_recursive() {
+        // root(1) -> mid(2) -> leaf(3)
+        let epics = vec![
+            epic_with(1, None),
+            epic_with(2, Some(1)),
+            epic_with(3, Some(2)),
+        ];
+        let tasks = vec![
+            task_under(10, Some(1)),
+            task_under(20, Some(2)),
+            task_under(30, Some(3)),
+        ];
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(ids.contains(&TaskId(20)));
+        assert!(ids.contains(&TaskId(30)));
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn descendant_task_ids_excludes_sibling_subtree() {
+        // root_a(1) with child 10; root_b(2) with child 20
+        let epics = vec![epic_with(1, None), epic_with(2, None)];
+        let tasks = vec![task_under(10, Some(1)), task_under(20, Some(2))];
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(!ids.contains(&TaskId(20)));
+    }
+
+    #[test]
+    fn descendant_task_ids_is_cycle_safe() {
+        // Malformed: epic 1 points to epic 2, epic 2 points back to epic 1.
+        let epics = vec![epic_with(1, Some(2)), epic_with(2, Some(1))];
+        let tasks = vec![task_under(10, Some(1)), task_under(20, Some(2))];
+        // Must terminate. From root=1, descendants include {1, 2}, so both tasks.
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(ids.contains(&TaskId(20)));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 -- core.allium
 --
 -- Scope: Shared domain model for the dispatch system
--- Includes: External entities, enumerations, core entities, config, VisualColumn concept
+-- Includes: External entities, enumerations, core entities, config, VisualColumn and FlattenedView concepts
 -- Excludes: Rules, invariants (see tasks.allium, epics.allium)
 
 ------------------------------------------------------------
@@ -280,4 +280,64 @@ concept VisualColumn {
     -- A task belongs to this column when:
     --   task.status = parent_status and task.sub_status in sub_statuses
     contains(task): task.status = parent_status and task.sub_status in sub_statuses
+}
+
+------------------------------------------------------------
+-- FlattenedView
+------------------------------------------------------------
+
+-- The task board has two rendering modes: the default hierarchical mode
+-- and a flattened mode that surfaces every descendant task of the
+-- current scope directly into its visual column, bypassing the
+-- epic/sub-epic grouping.
+--
+-- Intent: when work is spread across nested epics, users often need to
+-- see at a glance which tasks are running, blocked, or awaiting review
+-- without drilling into each epic individually. The flattened mode
+-- answers that need without changing any task data.
+--
+-- Scope: determined by the current view.
+--   - Main board view: scope is every non-archived task that passes the
+--     active repo filter, regardless of epic membership or depth.
+--   - Epic view: scope is every non-archived task whose epic chain
+--     (epic_id, then epic.parent, recursively) roots at the current
+--     epic, plus any task directly under it. The repo filter still
+--     applies.
+--
+-- Rendering:
+--   - Task cards appear in their normal visual column, determined by
+--     (task.status, task.sub_status), exactly as in hierarchical mode.
+--   - Epic cards are not rendered in flattened mode — neither root
+--     epics on the board nor sub-epics inside an epic view.
+--   - Task cards belonging to an epic show the epic's id (rendered
+--     in a distinguishing colour) appended to the card's indicator
+--     line, so epic membership remains visible on the card.
+--
+-- State model:
+--   - Flattened is a single board-level boolean, toggled by the user.
+--   - The value is preserved as the user navigates into sub-epics and
+--     back out: drilling down or exiting an epic does not change it.
+--   - It is session-scoped and does not persist across app restarts.
+--
+-- Interaction:
+--   - Task-card actions (dispatch, go-into-task, expand-description)
+--     behave identically in both modes. A flattened task card always
+--     acts on the task itself, never on its ancestor epic.
+--   - To navigate into an epic, the user first turns flattened mode
+--     off; epic cards then become visible and selectable.
+
+concept FlattenedView {
+    active: Bool
+
+    -- In flattened mode, the board renders only tasks in scope, never
+    -- epics. In hierarchical mode (active = false), rendering follows
+    -- the default rules (root epics on the board, sub-epics and direct
+    -- tasks inside each epic view).
+    renders_epics: not active
+
+    -- A task is in scope for the current view when flattened is active.
+    in_scope(task, view):
+        not task.archived
+        and task.repo_path in view.active_repo_filter
+        and (view.is_board or task.is_descendant_of(view.current_epic))
 }

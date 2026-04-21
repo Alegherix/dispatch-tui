@@ -769,10 +769,19 @@ mod tests {
             .contents_utf8()
             .expect("hooks.json must be UTF-8");
         let value: Value = serde_json::from_str(content).expect("hooks.json is invalid JSON");
-        assert!(value["hooks"].is_object(), "missing top-level hooks wrapper");
-        assert!(value["hooks"]["PreToolUse"].is_array(), "missing PreToolUse");
+        assert!(
+            value["hooks"].is_object(),
+            "missing top-level hooks wrapper"
+        );
+        assert!(
+            value["hooks"]["PreToolUse"].is_array(),
+            "missing PreToolUse"
+        );
         assert!(value["hooks"]["Stop"].is_array(), "missing Stop");
-        assert!(value["hooks"]["Notification"].is_array(), "missing Notification");
+        assert!(
+            value["hooks"]["Notification"].is_array(),
+            "missing Notification"
+        );
     }
 
     #[test]

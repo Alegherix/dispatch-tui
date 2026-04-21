@@ -237,6 +237,7 @@ pub enum Message {
     },
     DeleteTask(TaskId),
     ToggleDetail,
+    ToggleFlattened,
     TmuxOutput {
         id: TaskId,
         output: String,
@@ -753,6 +754,10 @@ pub struct BoardState {
     pub(in crate::tui) repo_paths: Vec<String>,
     pub(in crate::tui) usage: HashMap<TaskId, TaskUsage>,
     pub(in crate::tui) split: SplitState,
+    /// Flattened rendering mode: when true, epic cards are hidden and every
+    /// descendant task of the current view surfaces directly in its status
+    /// column. Preserved across navigation, session-scoped.
+    pub(in crate::tui) flattened: bool,
 }
 
 // ---------------------------------------------------------------------------

@@ -17335,8 +17335,8 @@ fn security_repo_filter_overlay_title_shows_include_mode() {
     app.update(Message::StartSecurityRepoFilter);
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
-        buffer_contains(&buf, "include"),
-        "security repo filter overlay title must show 'include' when in include mode"
+        buffer_contains(&buf, "Filter Repos (include)"),
+        "security repo filter overlay title must contain 'Filter Repos (include)'"
     );
 }
 
@@ -17347,7 +17347,7 @@ fn security_repo_filter_overlay_title_shows_exclude_mode() {
     app.update(Message::ToggleSecurityRepoFilterMode);
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
-        buffer_contains(&buf, "exclude"),
-        "security repo filter overlay title must show 'exclude' after mode toggle"
+        buffer_contains(&buf, "Filter Repos (exclude)"),
+        "security repo filter overlay title must contain 'Filter Repos (exclude)' after mode toggle"
     );
 }

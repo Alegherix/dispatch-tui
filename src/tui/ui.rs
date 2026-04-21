@@ -3605,6 +3605,11 @@ fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
         )));
         frame.render_widget(hints, chunks[6]);
     }
+
+    // Filter overlay
+    if matches!(app.mode(), InputMode::BotPrRepoFilter) {
+        render_bot_pr_repo_filter_overlay(frame, app, area);
+    }
 }
 
 fn render_dependabot_summary_row(frame: &mut Frame, app: &App, area: Rect) {
@@ -4104,6 +4109,65 @@ fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect)
 
     for (i, repo) in repos.iter().enumerate() {
         let is_selected = app.security.repo_filter.contains(repo);
+        let marker = if is_selected { "\u{25c9}" } else { "\u{25cb}" };
+        let num = i + 1;
+        let line = Line::from(vec![
+            Span::styled(
+                format!(" {num}"),
+                Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {marker} {repo}"),
+                if is_selected {
+                    Style::default().fg(FG)
+                } else {
+                    Style::default().fg(MUTED)
+                },
+            ),
+        ]);
+        lines.push(line);
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
+}
+
+fn render_bot_pr_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
+    let repos = app.active_bot_pr_repos();
+    if repos.is_empty() {
+        return;
+    }
+
+    let height = (repos.len() as u16 + 4).min(area.height.saturating_sub(2));
+    let width = 50.min(area.width.saturating_sub(4));
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup_area);
+
+    let mode_str = app.security.dependabot.prs.repo_filter_mode.as_str();
+    let block = Block::default()
+        .title(format!(" Filter Repos ({mode_str}) "))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(CYAN));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    lines.push(Line::from(Span::styled(
+        format!(" Mode: {mode_str} [Tab] toggle"),
+        Style::default().fg(MUTED_LIGHT),
+    )));
+    lines.push(Line::from(Span::styled(
+        " [a]ll toggle",
+        Style::default().fg(MUTED),
+    )));
+
+    for (i, repo) in repos.iter().enumerate() {
+        let is_selected = app.security.dependabot.prs.repo_filter.contains(repo);
         let marker = if is_selected { "\u{25c9}" } else { "\u{25cb}" };
         let num = i + 1;
         let line = Line::from(vec![

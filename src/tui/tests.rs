@@ -17274,3 +17274,42 @@ fn toggle_bot_pr_filter_mode_clamps_selection() {
     assert_eq!(app.filtered_bot_prs().len(), 0);
     assert_eq!(get_dependabot_row(&app, 0), 0);
 }
+
+// ---------------------------------------------------------------------------
+// Bug fix: bot-PR filter overlay renders
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bot_pr_filter_overlay_renders_repo_names() {
+    let mut app = make_two_bot_pr_app();
+    app.update(Message::StartBotPrRepoFilter);
+    assert_eq!(app.input.mode, InputMode::BotPrRepoFilter);
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "repo-a"),
+        "filter overlay must show repo names when in BotPrRepoFilter mode"
+    );
+}
+
+#[test]
+fn bot_pr_filter_overlay_shows_include_mode() {
+    let mut app = make_two_bot_pr_app();
+    app.update(Message::StartBotPrRepoFilter);
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "include"),
+        "filter overlay must show the current filter mode"
+    );
+}
+
+#[test]
+fn bot_pr_filter_overlay_shows_exclude_after_toggle() {
+    let mut app = make_two_bot_pr_app();
+    app.update(Message::StartBotPrRepoFilter);
+    app.update(Message::ToggleBotPrRepoFilterMode);
+    let buf = render_to_buffer(&mut app, 100, 30);
+    assert!(
+        buffer_contains(&buf, "exclude"),
+        "filter overlay must show 'exclude' after mode toggle"
+    );
+}

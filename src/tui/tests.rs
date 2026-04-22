@@ -3122,6 +3122,65 @@ fn render_help_overlay_in_review_board_shows_review_shortcuts() {
 }
 
 #[test]
+fn review_board_status_bar_shows_approve_hint_in_reviewer_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let mut pr = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
+    pr.ci_status = crate::models::CiStatus::None;
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    app.update(Message::SwitchToReviewBoard);
+    let buf = render_to_buffer(&mut app, 200, 30);
+    // The hint is rendered as "[a]pprove" (embedded key style), so check for the key span
+    assert!(
+        buffer_contains(&buf, "[a]pprove"),
+        "status bar should show approve hint in reviewer mode"
+    );
+    // The merge hint is rendered as "[m]erge"
+    assert!(
+        buffer_contains(&buf, "[m]erge"),
+        "status bar should show merge hint in reviewer mode"
+    );
+}
+
+#[test]
+fn review_board_status_bar_no_approve_hint_in_author_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    let pr = make_review_pr(1, "alice", ReviewDecision::Approved);
+    app.update(Message::PrsLoaded(PrListKind::Authored, vec![pr]));
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(3); // Approved is column 3
+    }
+    let buf = render_to_buffer(&mut app, 200, 30);
+    // Approve hint should not appear in author mode
+    assert!(
+        !buffer_contains(&buf, "[a]pprove"),
+        "status bar should NOT show approve hint in author mode"
+    );
+    // The merge hint "[m]erge" should still appear
+    assert!(
+        buffer_contains(&buf, "[m]erge"),
+        "status bar should show merge hint in author mode"
+    );
+}
+
+#[test]
+fn review_help_overlay_shows_approve_and_merge_shortcuts() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::ToggleHelp);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "approve"),
+        "review help overlay should mention approve"
+    );
+    assert!(
+        buffer_contains(&buf, "merge"),
+        "review help overlay should mention merge"
+    );
+}
+
+#[test]
 fn render_1x1_terminal_does_not_panic() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Running)], TEST_TIMEOUT);
     let _ = render_to_buffer(&mut app, 1, 1);

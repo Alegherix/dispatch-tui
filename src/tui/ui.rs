@@ -1958,6 +1958,12 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(" detach agent", desc),
             ]),
             Line::from(vec![
+                Span::styled("  [a]", key),
+                Span::styled(" approve PR (reviewer mode)  ", desc),
+                Span::styled("[m]", key),
+                Span::styled(" merge PR (when approved)", desc),
+            ]),
+            Line::from(vec![
                 Span::styled("  [f]", key),
                 Span::styled(" filter repos          ", desc),
                 Span::styled("[e]", key),
@@ -2903,6 +2909,12 @@ pub(in crate::tui) fn review_action_hints(
     push_hint("e", "edit queries");
     if is_author_mode {
         push_hint("D", "dispatch filter");
+    }
+    if has_pr {
+        if !is_author_mode {
+            push_hint("a", "approve");
+        }
+        push_hint("m", "merge");
     }
     push_hint("1/2", "mode");
     push_hint("Tab", "task board");

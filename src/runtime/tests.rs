@@ -2729,8 +2729,8 @@ fn load_cached_security_alerts_restores_persisted_alerts() {
     let mut app = make_app();
     let result = load_cached_security_alerts(&db, &mut app);
     assert!(result.is_none());
-    // One alert in the High column (index 1)
-    assert!(!app.security_alerts_for_column(1).is_empty());
+    // Alert has no fix agent → placed in Backlog column (index 0)
+    assert!(!app.security_alerts_for_column(0).is_empty());
 }
 
 #[test]

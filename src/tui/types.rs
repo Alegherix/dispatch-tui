@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, AlertSeverity, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus,
-    ReviewDecision, SecurityAlert, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
+    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus, ReviewDecision,
+    SecurityAlert, SecurityWorkflowColumn, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
     TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
@@ -1245,8 +1245,8 @@ impl Default for ReviewBoardSelection {
 #[derive(Debug, Clone)]
 pub struct SecurityBoardSelection {
     pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; AlertSeverity::COLUMN_COUNT],
-    pub(in crate::tui) list_states: [ListState; AlertSeverity::COLUMN_COUNT],
+    pub(in crate::tui) selected_row: [usize; SecurityWorkflowColumn::COLUMN_COUNT],
+    pub(in crate::tui) list_states: [ListState; SecurityWorkflowColumn::COLUMN_COUNT],
     pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
 }
 
@@ -1254,7 +1254,7 @@ impl SecurityBoardSelection {
     pub fn new() -> Self {
         Self {
             selected_column: 0,
-            selected_row: [0; AlertSeverity::COLUMN_COUNT],
+            selected_row: [0; SecurityWorkflowColumn::COLUMN_COUNT],
             list_states: std::array::from_fn(|_| ListState::default()),
             anchor_pr: None,
         }
@@ -1361,6 +1361,37 @@ impl SecurityBoardState {
         self.last_fetch
             .map(|t| t.elapsed() > interval)
             .unwrap_or(true)
+    }
+
+    /// Derive the workflow column for an alert based on its fix agent state.
+    pub fn workflow_column_for_alert(&self, alert: &SecurityAlert) -> SecurityWorkflowColumn {
+        let key = FixDispatchKey::new(alert.repo.clone(), alert.number, alert.kind);
+        match self.fix_agents.get(&key) {
+            None
+            | Some(FixAgentHandle {
+                status: ReviewAgentStatus::Idle,
+                ..
+            }) => SecurityWorkflowColumn::Backlog,
+            Some(FixAgentHandle {
+                status: ReviewAgentStatus::Reviewing,
+                ..
+            }) => SecurityWorkflowColumn::InProgress,
+            Some(FixAgentHandle {
+                status: ReviewAgentStatus::FindingsReady,
+                ..
+            }) => SecurityWorkflowColumn::Review,
+        }
+    }
+
+    /// Return filtered alerts for a specific workflow column, sorted by repo.
+    pub fn alerts_for_workflow_column(&self, col: SecurityWorkflowColumn) -> Vec<&SecurityAlert> {
+        let mut alerts: Vec<_> = self
+            .filtered_alerts()
+            .into_iter()
+            .filter(|a| self.workflow_column_for_alert(a) == col)
+            .collect();
+        alerts.sort_by(|a, b| a.repo.cmp(&b.repo));
+        alerts
     }
 }
 

@@ -17,4 +17,6 @@ pub(in crate::tui) use review::{
     review_action_hints, review_column_bg_color, review_column_color, review_cursor_bg_color,
 };
 #[cfg(test)]
-pub(in crate::tui) use security::{dependabot_action_hints, security_action_hints};
+pub(in crate::tui) use security::{
+    build_security_alert_item_for_test, dependabot_action_hints, security_action_hints,
+};

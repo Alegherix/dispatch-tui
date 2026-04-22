@@ -5,8 +5,7 @@ use super::{
     ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
 };
 use crate::models::{
-    AlertSeverity, DispatchMode, EpicId, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
-    TipsShowMode,
+    DispatchMode, EpicId, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag, TipsShowMode,
 };
 
 impl App {
@@ -853,7 +852,8 @@ impl App {
             KeyCode::Char('l') | KeyCode::Right => {
                 if let Some(sel) = self.security_selection_mut() {
                     let col = sel.selected_column;
-                    sel.selected_column = (col + 1).min(AlertSeverity::COLUMN_COUNT - 1);
+                    sel.selected_column =
+                        (col + 1).min(crate::models::SecurityWorkflowColumn::COLUMN_COUNT - 1);
                 }
                 self.update_security_anchor_from_current();
                 vec![]

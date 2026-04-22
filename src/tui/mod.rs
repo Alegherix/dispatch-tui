@@ -427,15 +427,11 @@ impl App {
         self.security.filtered_alerts()
     }
 
-    /// Return alerts for a specific severity column using the active filter.
+    /// Return alerts for a specific workflow column using the active filter.
     pub fn security_alerts_for_column(&self, col: usize) -> Vec<&crate::models::SecurityAlert> {
-        let mut alerts: Vec<_> = self
-            .filtered_security_alerts()
-            .into_iter()
-            .filter(|a| a.severity.column_index() == col)
-            .collect();
-        alerts.sort_by(|a, b| a.repo.cmp(&b.repo));
-        alerts
+        let workflow_col = crate::models::SecurityWorkflowColumn::from_column_index(col)
+            .unwrap_or(crate::models::SecurityWorkflowColumn::Backlog);
+        self.security.alerts_for_workflow_column(workflow_col)
     }
 
     /// Get the currently selected SecurityAlert, if in security board mode.
@@ -485,7 +481,7 @@ impl App {
     }
 
     pub(in crate::tui) fn clamp_security_selection(&mut self) {
-        let counts: [usize; crate::models::AlertSeverity::COLUMN_COUNT] =
+        let counts: [usize; crate::models::SecurityWorkflowColumn::COLUMN_COUNT] =
             std::array::from_fn(|col| self.security_alerts_for_column(col).len());
         if let Some(sel) = self.security_selection_mut() {
             for (col, &count) in counts.iter().enumerate() {
@@ -508,11 +504,11 @@ impl App {
             return self.clamp_security_selection();
         };
 
-        let counts: [usize; crate::models::AlertSeverity::COLUMN_COUNT] =
+        let counts: [usize; crate::models::SecurityWorkflowColumn::COLUMN_COUNT] =
             std::array::from_fn(|col| self.security_alerts_for_column(col).len());
 
         let mut found: Option<(usize, usize)> = None;
-        'outer: for col in 0..crate::models::AlertSeverity::COLUMN_COUNT {
+        'outer: for col in 0..crate::models::SecurityWorkflowColumn::COLUMN_COUNT {
             let alerts = self.security_alerts_for_column(col);
             for (row, alert) in alerts.iter().enumerate() {
                 if anchor_pr.matches(alert.number, &alert.repo) {
@@ -3652,15 +3648,12 @@ impl App {
     /// Remove review agents whose PR is no longer present in any of the three PR
     /// lists (reviewer, authored, bot). Called after any list refreshes.
     fn cleanup_stale_review_agents(&mut self) -> Vec<Command> {
-        let pr_keys: HashSet<crate::models::PrRef> = [
-            PrListKind::Review,
-            PrListKind::Authored,
-        ]
-        .iter()
-        .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
-        .chain(self.security.dependabot.prs.prs.iter())
-        .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
-        .collect();
+        let pr_keys: HashSet<crate::models::PrRef> = [PrListKind::Review, PrListKind::Authored]
+            .iter()
+            .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
+            .chain(self.security.dependabot.prs.prs.iter())
+            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
+            .collect();
 
         let gone: Vec<crate::models::PrRef> = self
             .review

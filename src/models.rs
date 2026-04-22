@@ -1208,6 +1208,47 @@ impl AlertKind {
 }
 
 // ---------------------------------------------------------------------------
+// SecurityWorkflowColumn — workflow stage for security alerts (left → right)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityWorkflowColumn {
+    Backlog,
+    InProgress,
+    Review,
+}
+
+impl SecurityWorkflowColumn {
+    pub const COLUMN_COUNT: usize = 3;
+    pub const ALL: [Self; 3] = [Self::Backlog, Self::InProgress, Self::Review];
+
+    pub fn column_index(self) -> usize {
+        match self {
+            Self::Backlog => 0,
+            Self::InProgress => 1,
+            Self::Review => 2,
+        }
+    }
+
+    pub fn from_column_index(idx: usize) -> Option<Self> {
+        match idx {
+            0 => Some(Self::Backlog),
+            1 => Some(Self::InProgress),
+            2 => Some(Self::Review),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Backlog => "Backlog",
+            Self::InProgress => "In Progress",
+            Self::Review => "Review",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SecurityAlert — a security vulnerability alert from GitHub
 // ---------------------------------------------------------------------------
 

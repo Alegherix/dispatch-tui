@@ -6,7 +6,8 @@ use super::shared::{
 };
 
 use crate::models::{
-    format_age, AlertKind, AlertSeverity, ReviewDecision, ReviewPr, SecurityAlert, Staleness,
+    format_age, AlertKind, AlertSeverity, ReviewDecision, ReviewPr, SecurityAlert,
+    SecurityWorkflowColumn, Staleness,
 };
 use crate::tui::{App, InputMode, SecurityBoardMode, ViewMode};
 use chrono::Utc;
@@ -37,15 +38,6 @@ fn security_cursor_bg_color(severity: AlertSeverity) -> Color {
         AlertSeverity::High => Color::Rgb(52, 44, 20),
         AlertSeverity::Medium => Color::Rgb(24, 40, 52),
         AlertSeverity::Low => Color::Rgb(34, 34, 40),
-    }
-}
-
-fn security_column_bg_color(severity: AlertSeverity) -> Color {
-    match severity {
-        AlertSeverity::Critical => Color::Rgb(36, 26, 26),
-        AlertSeverity::High => Color::Rgb(38, 34, 26),
-        AlertSeverity::Medium => Color::Rgb(26, 32, 38),
-        AlertSeverity::Low => Color::Rgb(30, 30, 34),
     }
 }
 
@@ -503,27 +495,21 @@ pub(in crate::tui) fn security_action_hints(
 fn render_security_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     let sel = app.security_selection();
     let selected_col = sel.map(|s| s.column()).unwrap_or(0);
-    let filtered = app.filtered_security_alerts();
-    let col_count = AlertSeverity::COLUMN_COUNT;
+    let col_count = SecurityWorkflowColumn::COLUMN_COUNT;
 
     let segments = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
         .split(area);
 
-    for i in 0..col_count {
-        let severity = AlertSeverity::from_column_index(i).unwrap_or(AlertSeverity::Medium);
-        let count = filtered
-            .iter()
-            .filter(|a| a.severity.column_index() == i)
-            .count();
+    for (i, workflow_col) in SecurityWorkflowColumn::ALL.iter().enumerate() {
+        let count = app.security_alerts_for_column(i).len();
         let is_focused = i == selected_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
-        let label = format!("{prefix}{} ({count})", severity.as_str());
+        let label = format!("{prefix}{} ({count})", workflow_col.label());
 
-        let color = security_column_color(severity);
         let style = if is_focused {
-            Style::default().fg(color).add_modifier(Modifier::BOLD)
+            Style::default().fg(FG).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
@@ -535,7 +521,7 @@ fn render_security_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.security_selection().map(|s| s.column()).unwrap_or(0);
-    let col_count = AlertSeverity::COLUMN_COUNT;
+    let col_count = SecurityWorkflowColumn::COLUMN_COUNT;
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
@@ -543,9 +529,9 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         .split(area);
 
     for i in 0..col_count {
-        let severity = AlertSeverity::from_column_index(i).unwrap_or(AlertSeverity::Medium);
         let is_focused = i == sel_col;
         let alerts: Vec<&SecurityAlert> = app.security_alerts_for_column(i);
+        let is_in_progress_col = i == SecurityWorkflowColumn::InProgress.column_index();
 
         let selected_row = app.security_selection().map(|s| s.row(i)).unwrap_or(0);
         let mut list_items: Vec<ListItem> = Vec::new();
@@ -565,14 +551,14 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
 
             list_items.push(build_security_alert_item(
                 alert,
-                severity,
                 is_focused && item_idx == selected_row,
                 col_areas[i].width,
+                is_in_progress_col,
             ));
         }
 
         let bg = if is_focused {
-            security_column_bg_color(severity)
+            Color::Rgb(24, 26, 32)
         } else {
             Color::Reset
         };
@@ -592,21 +578,65 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-pub(in crate::tui::ui) fn build_security_alert_item(
+/// Test helper: returns concatenated text content of the card for assertions.
+#[cfg(test)]
+pub(in crate::tui) fn build_security_alert_item_for_test(
     alert: &SecurityAlert,
-    severity: AlertSeverity,
     is_cursor: bool,
     col_width: u16,
+    is_running: bool,
+) -> String {
+    use ratatui::text::Text;
+    let item = build_security_alert_item(alert, is_cursor, col_width, is_running);
+    // Extract text via rendering to Text — ListItem wraps a Text internally.
+    // We reconstruct text by converting via the widget's Text representation.
+    // Simplest: build the same lines as the function and concatenate spans.
+    let now = chrono::Utc::now();
+    let age = format_age(alert.created_at, now);
+    let severity_color = security_column_color(alert.severity);
+    let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
+    let running_badge = if is_running { "\u{25c9} " } else { "" };
+    let header = format!("#{} {}", alert.number, alert.title);
+    let reserved = 2 + if is_running { 2 } else { 0 };
+    let max_header = (col_width as usize).saturating_sub(reserved);
+    let header_truncated = truncate(&header, max_header);
+    let (sev_badge, _) = match alert.severity {
+        AlertSeverity::Critical => ("[CRIT]", Color::Red),
+        AlertSeverity::High => ("[HIGH]", YELLOW),
+        AlertSeverity::Medium => ("[MED] ", Color::Rgb(86, 152, 194)),
+        AlertSeverity::Low => ("[LOW] ", Color::DarkGray),
+    };
+    let kind_label = match alert.kind {
+        AlertKind::Dependabot => "\u{2b21} Dependabot",
+        AlertKind::CodeScanning => "\u{2b21} CodeScanning",
+    };
+    let pkg = alert.package.as_deref().unwrap_or("-");
+    let cvss_str = alert
+        .cvss_score
+        .map(|s| format!(" \u{b7} CVSS:{s:.1}"))
+        .unwrap_or_default();
+    format!(
+        "{stripe}{running_badge}{header_truncated}  {sev_badge} {kind_label} \u{b7} {pkg}{cvss_str} \u{b7} {age}",
+    )
+}
+
+pub(in crate::tui::ui) fn build_security_alert_item(
+    alert: &SecurityAlert,
+    is_cursor: bool,
+    col_width: u16,
+    is_running: bool,
 ) -> ListItem<'static> {
-    let color = security_column_color(severity);
+    let severity_color = security_column_color(alert.severity);
     let now = Utc::now();
     let age = format_age(alert.created_at, now);
 
-    // Line 1: stripe + #number + title
+    // Line 1: severity-colored stripe + optional ◉ running badge + #number + title
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
+    let running_badge = if is_running { "\u{25c9} " } else { "" };
     let header = format!("#{} {}", alert.number, alert.title);
-    // stripe(2) + header
-    let max_header = (col_width as usize).saturating_sub(2);
+    // stripe(2) + running_badge(2 if present) + header
+    let reserved = 2 + if is_running { 2 } else { 0 };
+    let max_header = (col_width as usize).saturating_sub(reserved);
     let header_truncated = truncate(&header, max_header);
 
     let line1_style = if is_cursor {
@@ -614,17 +644,26 @@ pub(in crate::tui::ui) fn build_security_alert_item(
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(color)
+        Style::default().fg(severity_color)
     };
 
-    let line1 = Line::from(vec![
-        Span::styled(stripe, Style::default().fg(color)),
-        Span::styled(header_truncated, line1_style),
-    ]);
+    let mut line1_spans = vec![Span::styled(stripe, Style::default().fg(severity_color))];
+    if is_running {
+        line1_spans.push(Span::styled(running_badge, Style::default().fg(CYAN)));
+    }
+    line1_spans.push(Span::styled(header_truncated, line1_style));
+    let line1 = Line::from(line1_spans);
 
-    // Line 2: ⬡ kind · package · CVSS · age
+    // Line 2: [severity] ⬡ kind · package · CVSS · age
     let staleness = Staleness::from_age(alert.created_at, now);
     let age_color = staleness_color(staleness);
+
+    let (sev_badge, sev_color) = match alert.severity {
+        AlertSeverity::Critical => ("[CRIT]", Color::Red),
+        AlertSeverity::High => ("[HIGH]", YELLOW),
+        AlertSeverity::Medium => ("[MED] ", Color::Rgb(86, 152, 194)),
+        AlertSeverity::Low => ("[LOW] ", Color::DarkGray),
+    };
 
     let (kind_color, kind_label) = match alert.kind {
         AlertKind::Dependabot => (YELLOW, "\u{2b21} Dependabot"),
@@ -640,13 +679,15 @@ pub(in crate::tui::ui) fn build_security_alert_item(
 
     let line2 = Line::from(vec![
         Span::raw("  "),
+        Span::styled(sev_badge, Style::default().fg(sev_color)),
+        Span::raw(" "),
         Span::styled(kind_label, Style::default().fg(kind_color)),
         Span::styled(format!(" \u{b7} {pkg}{cvss_str} \u{b7} "), meta_style),
         Span::styled(age, Style::default().fg(age_color)),
     ]);
 
     let bg = if is_cursor {
-        security_cursor_bg_color(severity)
+        security_cursor_bg_color(alert.severity)
     } else {
         Color::Reset
     };

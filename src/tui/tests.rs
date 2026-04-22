@@ -11757,7 +11757,7 @@ fn security_board_column_clamps_at_zero() {
 #[test]
 fn security_board_column_clamps_at_max() {
     let mut app = make_security_board_app();
-    let max_col = crate::models::AlertSeverity::COLUMN_COUNT - 1;
+    let max_col = crate::models::SecurityWorkflowColumn::COLUMN_COUNT - 1;
     if let Some(sel) = app.security_selection_mut() {
         sel.set_column(max_col);
     }
@@ -12319,7 +12319,11 @@ fn bot_pr_agent_survives_review_list_refresh() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
 
     // Seed the bot PR list with PR #42
-    let bot_pr = make_bot_pr(42, ReviewDecision::ReviewRequired, crate::models::CiStatus::None);
+    let bot_pr = make_bot_pr(
+        42,
+        ReviewDecision::ReviewRequired,
+        crate::models::CiStatus::None,
+    );
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![bot_pr]));
 
     // Insert an active review agent for the bot PR
@@ -12359,7 +12363,11 @@ fn bot_pr_agent_cleaned_up_when_bot_pr_disappears() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
 
     // Seed the bot PR list with PR #42
-    let bot_pr = make_bot_pr(42, ReviewDecision::ReviewRequired, crate::models::CiStatus::None);
+    let bot_pr = make_bot_pr(
+        42,
+        ReviewDecision::ReviewRequired,
+        crate::models::CiStatus::None,
+    );
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![bot_pr]));
 
     // Insert an active review agent for the bot PR
@@ -12374,7 +12382,11 @@ fn bot_pr_agent_cleaned_up_when_bot_pr_disappears() {
     );
 
     // Bot list refreshes and PR #42 is gone (replaced by a different PR)
-    let other_bot_pr = make_bot_pr(99, ReviewDecision::Approved, crate::models::CiStatus::Success);
+    let other_bot_pr = make_bot_pr(
+        99,
+        ReviewDecision::Approved,
+        crate::models::CiStatus::Success,
+    );
     let cmds = app.update(Message::PrsLoaded(PrListKind::Bot, vec![other_bot_pr]));
 
     // Agent handle must have been removed
@@ -12645,6 +12657,11 @@ fn g_on_security_board_jumps_to_agent() {
             status: crate::models::ReviewAgentStatus::Reviewing,
         },
     );
+
+    // Alert is now in InProgress column (col 1); navigate there
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_column(1);
+    }
 
     let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
     assert!(cmds
@@ -14437,7 +14454,7 @@ fn handle_key_security_repo_filter_unknown_key_is_noop() {
 #[test]
 fn security_board_g_jumps_to_tmux_window() {
     let mut app = make_security_board_app();
-    // Give first alert an agent handle in the fix_agents map
+    // Give first alert an agent handle in the fix_agents map (Reviewing → InProgress column)
     app.security.fix_agents.insert(
         super::types::FixDispatchKey::new(
             "org/alpha".to_string(),
@@ -14450,6 +14467,11 @@ fn security_board_g_jumps_to_tmux_window() {
             status: crate::models::ReviewAgentStatus::Reviewing,
         },
     );
+
+    // Alert is now in InProgress column (col 1); navigate there
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_column(1);
+    }
 
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds
@@ -14486,6 +14508,11 @@ fn security_board_capital_t_detaches_agent() {
             status: crate::models::ReviewAgentStatus::Reviewing,
         },
     );
+
+    // Alert is now in InProgress column (col 1); navigate there
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_column(1);
+    }
 
     let cmds = app.handle_key(make_key(KeyCode::Char('T')));
     assert!(cmds
@@ -18124,15 +18151,12 @@ fn test_security_selection_preserved_on_refresh() {
     app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
 
     let alerts = vec![
-        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High), // col 1, row 0 — selected
-        make_security_alert(3, "org/repo", crate::models::AlertSeverity::High), // col 1, row 1
+        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High), // Backlog col 0, row 0 — selected
+        make_security_alert(3, "org/repo", crate::models::AlertSeverity::High), // Backlog col 0, row 1
     ];
     app.set_security_alerts(alerts);
 
-    // Navigate to High column (col 1) so alert 2 is selected at row 0
-    if let Some(sel) = app.security_selection_mut() {
-        sel.set_column(1);
-    }
+    // Both alerts have no fix agents → Backlog column (col 0). Selection already at col 0.
     // Set anchor on alert 2 at row 0 (org/repo)
     app.update_security_anchor_from_current();
     let selected = app.selected_security_alert().unwrap();
@@ -18151,4 +18175,256 @@ fn test_security_selection_preserved_on_refresh() {
 
     let selected = app.selected_security_alert().unwrap();
     assert_eq!(selected.number, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Security board: workflow column redesign (task #305)
+// ---------------------------------------------------------------------------
+
+fn make_fix_agent_handle(
+    status: crate::models::ReviewAgentStatus,
+) -> crate::tui::types::FixAgentHandle {
+    crate::tui::types::FixAgentHandle {
+        tmux_window: "fix-repo-1".to_string(),
+        worktree: "/tmp/fix-repo-1".to_string(),
+        status,
+    }
+}
+
+// -- SecurityWorkflowColumn enum --
+
+#[test]
+fn workflow_column_round_trips_column_index() {
+    use crate::models::SecurityWorkflowColumn;
+    for col in [
+        SecurityWorkflowColumn::Backlog,
+        SecurityWorkflowColumn::InProgress,
+        SecurityWorkflowColumn::Review,
+    ] {
+        assert_eq!(
+            SecurityWorkflowColumn::from_column_index(col.column_index()),
+            Some(col)
+        );
+    }
+}
+
+#[test]
+fn workflow_column_labels() {
+    use crate::models::SecurityWorkflowColumn;
+    assert_eq!(SecurityWorkflowColumn::Backlog.label(), "Backlog");
+    assert_eq!(SecurityWorkflowColumn::InProgress.label(), "In Progress");
+    assert_eq!(SecurityWorkflowColumn::Review.label(), "Review");
+}
+
+#[test]
+fn workflow_column_count_is_three() {
+    assert_eq!(crate::models::SecurityWorkflowColumn::COLUMN_COUNT, 3);
+}
+
+// -- Column assignment: workflow_column_for_alert --
+
+#[test]
+fn workflow_column_for_alert_no_agent_is_backlog() {
+    use crate::models::SecurityWorkflowColumn;
+    let state = crate::tui::types::SecurityBoardState::default();
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
+    assert_eq!(
+        state.workflow_column_for_alert(&alert),
+        SecurityWorkflowColumn::Backlog
+    );
+}
+
+#[test]
+fn workflow_column_for_alert_idle_agent_is_backlog() {
+    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
+    use crate::tui::types::FixDispatchKey;
+    let mut state = crate::tui::types::SecurityBoardState::default();
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
+    let key = FixDispatchKey::new("org/repo".to_string(), 1, AlertKind::Dependabot);
+    state
+        .fix_agents
+        .insert(key, make_fix_agent_handle(ReviewAgentStatus::Idle));
+    assert_eq!(
+        state.workflow_column_for_alert(&alert),
+        SecurityWorkflowColumn::Backlog
+    );
+}
+
+#[test]
+fn workflow_column_for_alert_reviewing_is_in_progress() {
+    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
+    use crate::tui::types::FixDispatchKey;
+    let mut state = crate::tui::types::SecurityBoardState::default();
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
+    let key = FixDispatchKey::new("org/repo".to_string(), 1, AlertKind::Dependabot);
+    state
+        .fix_agents
+        .insert(key, make_fix_agent_handle(ReviewAgentStatus::Reviewing));
+    assert_eq!(
+        state.workflow_column_for_alert(&alert),
+        SecurityWorkflowColumn::InProgress
+    );
+}
+
+#[test]
+fn workflow_column_for_alert_findings_ready_is_review() {
+    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
+    use crate::tui::types::FixDispatchKey;
+    let mut state = crate::tui::types::SecurityBoardState::default();
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
+    let key = FixDispatchKey::new("org/repo".to_string(), 1, AlertKind::Dependabot);
+    state
+        .fix_agents
+        .insert(key, make_fix_agent_handle(ReviewAgentStatus::FindingsReady));
+    assert_eq!(
+        state.workflow_column_for_alert(&alert),
+        SecurityWorkflowColumn::Review
+    );
+}
+
+// -- Column filtering: alerts_for_workflow_column --
+
+#[test]
+fn alerts_for_workflow_column_partitions_correctly() {
+    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
+    use crate::tui::types::FixDispatchKey;
+    let mut state = crate::tui::types::SecurityBoardState::default();
+
+    let a1 = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
+    let a2 = make_security_alert(2, "org/repo", crate::models::AlertSeverity::High);
+    let a3 = make_security_alert(3, "org/repo", crate::models::AlertSeverity::Medium);
+
+    state.set_alerts(vec![a1, a2, a3]);
+
+    // Alert 2 is being fixed (In Progress)
+    state.fix_agents.insert(
+        FixDispatchKey::new("org/repo".to_string(), 2, AlertKind::Dependabot),
+        make_fix_agent_handle(ReviewAgentStatus::Reviewing),
+    );
+    // Alert 3 is in review (PR open)
+    state.fix_agents.insert(
+        FixDispatchKey::new("org/repo".to_string(), 3, AlertKind::Dependabot),
+        make_fix_agent_handle(ReviewAgentStatus::FindingsReady),
+    );
+
+    let backlog = state.alerts_for_workflow_column(SecurityWorkflowColumn::Backlog);
+    let in_progress = state.alerts_for_workflow_column(SecurityWorkflowColumn::InProgress);
+    let review = state.alerts_for_workflow_column(SecurityWorkflowColumn::Review);
+
+    assert_eq!(backlog.len(), 1);
+    assert_eq!(backlog[0].number, 1);
+    assert_eq!(in_progress.len(), 1);
+    assert_eq!(in_progress[0].number, 2);
+    assert_eq!(review.len(), 1);
+    assert_eq!(review[0].number, 3);
+}
+
+// -- Card rendering --
+
+#[test]
+fn card_shows_running_badge_when_in_progress() {
+    use crate::tui::ui::build_security_alert_item_for_test;
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
+    let item = build_security_alert_item_for_test(&alert, false, 80, true);
+    let text = item;
+    assert!(
+        text.contains('◉'),
+        "running badge ◉ should appear when is_running=true"
+    );
+}
+
+#[test]
+fn card_no_running_badge_when_backlog() {
+    use crate::tui::ui::build_security_alert_item_for_test;
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
+    let item = build_security_alert_item_for_test(&alert, false, 80, false);
+    let text = item;
+    assert!(
+        !text.contains('◉'),
+        "running badge ◉ should not appear when is_running=false"
+    );
+}
+
+#[test]
+fn card_severity_badge_critical() {
+    use crate::tui::ui::build_security_alert_item_for_test;
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
+    let item = build_security_alert_item_for_test(&alert, false, 80, false);
+    let text = item;
+    assert!(
+        text.contains("[CRIT]"),
+        "critical severity badge should appear on card"
+    );
+}
+
+#[test]
+fn card_severity_badge_high() {
+    use crate::tui::ui::build_security_alert_item_for_test;
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
+    let item = build_security_alert_item_for_test(&alert, false, 80, false);
+    let text = item;
+    assert!(
+        text.contains("[HIGH]"),
+        "high severity badge should appear on card"
+    );
+}
+
+#[test]
+fn card_severity_badge_medium() {
+    use crate::tui::ui::build_security_alert_item_for_test;
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Medium);
+    let item = build_security_alert_item_for_test(&alert, false, 80, false);
+    let text = item;
+    assert!(
+        text.contains("[MED]"),
+        "medium severity badge should appear on card"
+    );
+}
+
+#[test]
+fn card_severity_badge_low() {
+    use crate::tui::ui::build_security_alert_item_for_test;
+    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Low);
+    let item = build_security_alert_item_for_test(&alert, false, 80, false);
+    let text = item;
+    assert!(
+        text.contains("[LOW]"),
+        "low severity badge should appear on card"
+    );
+}
+
+// -- Navigation bounds --
+
+#[test]
+fn security_navigation_right_clamps_at_workflow_column_count() {
+    use crate::models::SecurityWorkflowColumn;
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    // Switch to Alerts mode (key '2')
+    app.handle_key(make_key(KeyCode::Char('2')));
+    app.update(Message::SecurityAlertsLoaded(vec![make_security_alert(
+        1,
+        "org/repo",
+        crate::models::AlertSeverity::Critical,
+    )]));
+    // Mash right 10 times — should stop at COLUMN_COUNT - 1 = 2
+    for _ in 0..10 {
+        app.handle_key(make_key(KeyCode::Right));
+    }
+    let col = app.security_selection().unwrap().column();
+    assert_eq!(col, SecurityWorkflowColumn::COLUMN_COUNT - 1);
+}
+
+#[test]
+fn security_navigation_left_clamps_at_zero() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    // Switch to Alerts mode (key '2')
+    app.handle_key(make_key(KeyCode::Char('2')));
+    // Mash left 10 times from column 0
+    for _ in 0..10 {
+        app.handle_key(make_key(KeyCode::Left));
+    }
+    let col = app.security_selection().unwrap().column();
+    assert_eq!(col, 0);
 }

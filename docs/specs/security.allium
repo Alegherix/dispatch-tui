@@ -66,19 +66,24 @@ config {
 }
 
 ------------------------------------------------------------
--- Column Placement
+-- Workflow Columns
 ------------------------------------------------------------
 
--- SecurityAlerts are placed in 4 columns by severity:
---   column 0: critical
---   column 1: high
---   column 2: medium
---   column 3: low
+-- SecurityAlerts (Alerts sub-view) are placed in 3 workflow columns,
+-- ordered left to right. Column assignment is derived from the in-memory
+-- fix agent state for the alert:
+--
+--   column 0: backlog      — no fix agent, or fix agent status = idle
+--   column 1: in_progress  — fix agent status = reviewing
+--   column 2: review       — fix agent status = findings_ready
 --
 -- Within each column, alerts are sorted alphabetically by repo name.
 -- (The fetch pipeline pre-orders alerts globally by severity then CVSS
 -- descending, but the per-column view re-sorts by repo for stable grouping
 -- of alerts from the same repository.)
+--
+-- Severity is no longer the primary organiser: it is demoted to a per-card
+-- signal (see SeverityBadge and card stripe color below).
 
 ------------------------------------------------------------
 -- Rules
@@ -189,7 +194,7 @@ rule ReReviewAlert {
 ------------------------------------------------------------
 
 -- Navigation:
---   h/Left, l/Right   — change severity column
+--   h/Left, l/Right   — change workflow column (Backlog / In Progress / Review)
 --   j/Down, k/Up      — move within the current column
 --   Enter             — toggle the alert detail pane
 --
@@ -232,13 +237,35 @@ rule ReReviewAlert {
 --     auto-refreshes at config.security_poll_interval.
 
 ------------------------------------------------------------
--- Visual: KindBadge
+-- Visual: Card Layout
 ------------------------------------------------------------
 
--- The alert kind is displayed as a colored icon+label prefix on each card's
--- metadata line. Line 2 order: ⬡ <kind> · <package> · CVSS:<score> · <age>
--- Kind prefix comes first; age is last as a trailing staleness signal.
--- Group headers render as a 2-line item: blank spacer + bold bright repo name.
+-- Each alert card renders as 2 lines:
+--
+-- Line 1:  <stripe> [◉ ] #<number> <title>
+--   stripe  — severity-colored left-border character (▌ cursor, ▎ normal)
+--             color follows SeverityStripeColor below
+--   ◉       — cyan running badge; shown only when fix agent status = reviewing
+--   #number — alert number
+--   title   — truncated to column width
+--
+-- Line 2:  <SeverityBadge> <KindBadge> · <package> · CVSS:<score> · <age>
+--   SeverityBadge comes first so severity is always visible at a glance.
+--   Group headers render as a 2-line item: blank spacer + bold bright repo name.
+
+visual SeverityStripeColor(severity: AlertSeverity) -> Color {
+    critical  => red
+    high      => yellow
+    medium    => blue
+    low       => dark_gray
+}
+
+visual SeverityBadge(severity: AlertSeverity) -> (Color, String) {
+    critical  => (red,       "[CRIT]")
+    high      => (yellow,    "[HIGH]")
+    medium    => (blue,      "[MED] ")
+    low       => (dark_gray, "[LOW] ")
+}
 
 visual KindBadge(kind: AlertKind) -> (Color, String) {
     dependabot     => (yellow, "⬡ Dependabot")
@@ -249,8 +276,9 @@ visual KindBadge(kind: AlertKind) -> (Color, String) {
 -- Visual: Agent Status Badge
 ------------------------------------------------------------
 
--- Reuses the same badge convention as dependabot.allium / review-board.allium.
--- See dependabot.allium AgentStatusBadge for the full mapping.
+-- Running badge (◉) appears inline on card Line 1, in cyan, when
+-- fix agent status = reviewing. No badge is shown for idle or absent agents.
+-- This follows the same ◉ running convention as the task board.
 
 ------------------------------------------------------------
 -- Visual: Refresh Status Row
@@ -344,7 +372,7 @@ rule EditSecurityQueries {
 
 -- Unconfigured state: when github_queries_security has no active lines (all
 -- comments or blank), FetchSecurityAlerts sends SecurityAlertsUnconfigured.
--- The board renders a prompt instead of severity columns.
+-- The board renders a prompt instead of workflow columns.
 -- Format for each active line: owner/repo (e.g. myorg/backend).
 -- Invalid slugs (no '/') are silently skipped.
 
@@ -353,5 +381,5 @@ rule selection_preservation:
     (on any filter change or data refresh), the cursor position is resolved by locating
     the anchor alert in the new list.
 
-    If the anchor alert is found: the cursor moves to the alert's new column and row.
+    If the anchor alert is found: the cursor moves to the alert's new workflow column and row.
     If the anchor alert is not present: the cursor clamps to the nearest valid position.

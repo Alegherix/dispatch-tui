@@ -84,7 +84,7 @@ Each mode has 4 columns representing PR review states. The board auto-refreshes 
 
 ### Security Board
 
-The Security Board (`ViewMode::SecurityBoard`) shows GitHub security alerts fetched via `gh api`. Alerts are categorized by kind (`AlertKind::Dependabot`, `AlertKind::CodeScanning`) and displayed in 4 severity columns (`Critical`, `High`, `Medium`, `Low`). Filtered by `RepoFilterMode`. Auto-refreshes via `SECURITY_POLL_INTERVAL`. Dispatching a fix agent from an alert creates a worktree to address the vulnerability.
+The Security Board (`ViewMode::SecurityBoard`) shows GitHub security alerts fetched via `gh api`. Alerts are categorized by kind (`AlertKind::Dependabot`, `AlertKind::CodeScanning`). The Alerts sub-view displays alerts in 3 **workflow** columns (`Backlog`, `In Progress`, `Review`) — column placement is derived from the alert's fix agent state, not severity. Severity is shown per-card via a colored stripe and a `[CRIT]`/`[HIGH]`/`[MED]`/`[LOW]` badge. A `◉` running badge appears on cards in the `In Progress` column. Filtered by `RepoFilterMode`. Auto-refreshes via `SECURITY_POLL_INTERVAL`. Dispatching a fix agent from an alert creates a worktree to address the vulnerability.
 
 ### Board Switching
 

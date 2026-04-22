@@ -2917,7 +2917,7 @@ mod tests {
             Some("lodash"),
             None,
         );
-        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let item = build_security_alert_item(&alert, false, 80, false);
         let buf = render_list_item_to_buf(item, 80, 2);
         let row1 = buf_row(&buf, 1);
         assert!(
@@ -2934,7 +2934,7 @@ mod tests {
             Some("lodash"),
             None,
         );
-        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let item = build_security_alert_item(&alert, false, 80, false);
         let buf = render_list_item_to_buf(item, 80, 2);
         let area = buf.area();
         let has_cyan = (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(CYAN));
@@ -2952,7 +2952,7 @@ mod tests {
             Some("lodash"),
             None,
         );
-        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let item = build_security_alert_item(&alert, false, 80, false);
         let buf = render_list_item_to_buf(item, 80, 2);
         let row1 = buf_row(&buf, 1);
         assert!(
@@ -2969,7 +2969,7 @@ mod tests {
             Some("lodash"),
             Some(8.1),
         );
-        let item = build_security_alert_item(&alert, crate::models::AlertSeverity::High, false, 80);
+        let item = build_security_alert_item(&alert, false, 80, false);
         let buf = render_list_item_to_buf(item, 80, 2);
         let row1 = buf_row(&buf, 1);
         assert!(

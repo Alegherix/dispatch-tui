@@ -39,8 +39,6 @@ impl Scenario {
     }
 }
 
-// --- Scenario: task creation dialog ---
-
 #[test]
 fn scenario_task_creation_dialog_enters_input_title_mode() {
     let mut s = Scenario::new();
@@ -94,8 +92,6 @@ fn scenario_task_creation_esc_cancels_from_title_input() {
     );
 }
 
-// --- Scenario: quick dispatch ---
-
 #[test]
 fn scenario_quick_dispatch_with_repo_path_emits_command() {
     let mut app = make_app();
@@ -115,7 +111,6 @@ fn scenario_quick_dispatch_with_repo_path_emits_command() {
 
 #[test]
 fn scenario_quick_dispatch_without_repo_path_shows_no_dispatch_command() {
-    // make_app() starts with repo_paths = [], so D emits a StatusInfo instead
     let mut s = Scenario::new();
     s.key(KeyCode::Char('D'));
 
@@ -126,8 +121,6 @@ fn scenario_quick_dispatch_without_repo_path_shows_no_dispatch_command() {
         "should not emit QuickDispatch without a repo path"
     );
 }
-
-// --- Scenario: board tab cycling ---
 
 #[test]
 fn scenario_tab_switches_kanban_to_review_board() {
@@ -147,21 +140,18 @@ fn scenario_tab_switches_kanban_to_review_board() {
 #[test]
 fn scenario_tab_cycles_through_all_three_boards() {
     let mut s = Scenario::new();
-    // kanban → review
     s.key(KeyCode::Tab);
     assert!(
         matches!(s.app.board.view_mode, ViewMode::ReviewBoard { .. }),
         "first Tab: expected ReviewBoard, got {:?}",
         s.app.board.view_mode
     );
-    // review → security
     s.key(KeyCode::Tab);
     assert!(
         matches!(s.app.board.view_mode, ViewMode::SecurityBoard { .. }),
         "second Tab: expected SecurityBoard, got {:?}",
         s.app.board.view_mode
     );
-    // security → kanban
     s.key(KeyCode::Tab);
     assert!(
         matches!(s.app.board.view_mode, ViewMode::Board(_)),
@@ -169,8 +159,6 @@ fn scenario_tab_cycles_through_all_three_boards() {
         s.app.board.view_mode
     );
 }
-
-// --- Scenario: help overlay open/close ---
 
 #[test]
 fn scenario_help_overlay_opens_on_question_mark() {
@@ -195,15 +183,11 @@ fn scenario_help_overlay_toggles_closed_on_second_question_mark() {
     );
 }
 
-// --- Scenario: navigate and move task ---
-
 #[test]
 fn scenario_move_key_advances_selected_task_to_next_column() {
-    // make_app() places task 1 in Backlog; the initial selection is column 0 (Backlog), row 0.
-    // Press 'm' to move the selected task forward (Backlog → Running).
+    // Backlog column is selected by default; 'm' moves task 1 forward (Backlog → Running).
     let mut s = Scenario::new();
-    let cmds = s.app.handle_key(make_key(KeyCode::Char('m')));
-    s.commands.extend(cmds);
+    s.key(KeyCode::Char('m'));
 
     let task1 = s
         .app

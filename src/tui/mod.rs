@@ -3652,7 +3652,7 @@ impl App {
     /// Remove review agents whose PR is no longer present in any of the three PR
     /// lists (reviewer, authored, bot). Called after any list refreshes.
     fn cleanup_stale_review_agents(&mut self) -> Vec<Command> {
-        let pr_keys: std::collections::HashSet<crate::models::PrRef> = [
+        let pr_keys: HashSet<crate::models::PrRef> = [
             PrListKind::Review,
             PrListKind::Authored,
         ]

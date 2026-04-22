@@ -17397,3 +17397,11 @@ fn security_alerts_loaded_clears_unconfigured_flag() {
     app.update(Message::SecurityAlertsLoaded(vec![]));
     assert!(!app.security.unconfigured);
 }
+
+#[test]
+fn security_alerts_fetch_failed_clears_unconfigured_flag() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.security.unconfigured = true;
+    app.update(Message::SecurityAlertsFetchFailed("network error".into()));
+    assert!(!app.security.unconfigured);
+}

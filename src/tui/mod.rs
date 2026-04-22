@@ -4592,6 +4592,7 @@ impl App {
 
     fn handle_security_alerts_fetch_failed(&mut self, err: String) -> Vec<Command> {
         self.security.loading = false;
+        self.security.unconfigured = false;
         self.security.last_error = Some(err);
         vec![]
     }
@@ -4604,6 +4605,7 @@ impl App {
 
     fn handle_refresh_security_alerts(&mut self) -> Vec<Command> {
         self.security.loading = true;
+        self.security.unconfigured = false;
         vec![Command::FetchSecurityAlerts]
     }
 

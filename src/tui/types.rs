@@ -1141,6 +1141,7 @@ pub struct BoardSelection {
     pub(in crate::tui) selected_row: [usize; TaskStatus::COLUMN_COUNT],
     pub(in crate::tui) on_select_all: bool,
     pub(in crate::tui) list_states: [ListState; TaskStatus::COLUMN_COUNT],
+    pub(in crate::tui) anchor: Option<ColumnAnchor>,
 }
 
 impl BoardSelection {
@@ -1150,6 +1151,7 @@ impl BoardSelection {
             selected_row: [0; TaskStatus::COLUMN_COUNT],
             on_select_all: false,
             list_states: std::array::from_fn(|_| ListState::default()),
+            anchor: None,
         }
     }
 
@@ -1179,6 +1181,14 @@ impl BoardSelection {
             Some(self.selected_row[col])
         }
     }
+
+    /// Update the anchor to track the currently-pointed-at column item.
+    pub fn set_anchor(&mut self, item: &ColumnItem<'_>) {
+        self.anchor = Some(match item {
+            ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
+            ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
+        });
+    }
 }
 
 impl Default for BoardSelection {
@@ -1196,6 +1206,7 @@ pub struct ReviewBoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; ReviewDecision::COLUMN_COUNT],
     pub(in crate::tui) list_states: [ListState; ReviewDecision::COLUMN_COUNT],
+    pub(in crate::tui) anchor_pr: Option<i64>,
 }
 
 impl ReviewBoardSelection {
@@ -1204,6 +1215,7 @@ impl ReviewBoardSelection {
             selected_column: 0,
             selected_row: [0; ReviewDecision::COLUMN_COUNT],
             list_states: std::array::from_fn(|_| ListState::default()),
+            anchor_pr: None,
         }
     }
 
@@ -1243,6 +1255,7 @@ pub struct SecurityBoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; AlertSeverity::COLUMN_COUNT],
     pub(in crate::tui) list_states: [ListState; AlertSeverity::COLUMN_COUNT],
+    pub(in crate::tui) anchor_alert: Option<i64>,
 }
 
 impl SecurityBoardSelection {
@@ -1251,6 +1264,7 @@ impl SecurityBoardSelection {
             selected_column: 0,
             selected_row: [0; AlertSeverity::COLUMN_COUNT],
             list_states: std::array::from_fn(|_| ListState::default()),
+            anchor_alert: None,
         }
     }
 
@@ -1400,6 +1414,19 @@ impl Default for ViewMode {
 pub enum ColumnItem<'a> {
     Task(&'a Task),
     Epic(&'a Epic),
+}
+
+// ---------------------------------------------------------------------------
+// ColumnAnchor — identity of the currently-selected task-board item
+// ---------------------------------------------------------------------------
+
+/// Identifies which item the cursor is anchored to across column refreshes.
+/// Task and Epic IDs come from separate SQLite sequences and can overlap,
+/// so we use a discriminated enum rather than a bare i64.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnAnchor {
+    Task(crate::models::TaskId),
+    Epic(crate::models::EpicId),
 }
 
 // ---------------------------------------------------------------------------

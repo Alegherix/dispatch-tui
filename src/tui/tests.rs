@@ -17791,3 +17791,256 @@ fn review_approve_no_pr_selected_is_noop() {
     app.handle_key(make_key(KeyCode::Char('a')));
     assert!(matches!(app.input.mode, InputMode::Normal));
 }
+
+// ── selection preservation ──────────────────────────────────────────────────
+
+#[test]
+fn test_selection_preserved_when_task_above_cursor_moves() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Backlog), // row 0
+            make_task(2, TaskStatus::Backlog), // row 1 — cursor here
+            make_task(3, TaskStatus::Backlog), // row 2
+        ],
+        TEST_TIMEOUT,
+    );
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(0), 1);
+
+    // Task 1 moves out; Task 2 becomes row 0
+    app.update(Message::RefreshTasks(vec![
+        make_task(1, TaskStatus::Running),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]));
+
+    assert_eq!(app.selection().column(), 0);
+    assert_eq!(app.selection().row(0), 0);
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(2)));
+}
+
+#[test]
+fn test_selection_follows_task_to_new_column() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Backlog), // row 0 — default cursor
+            make_task(2, TaskStatus::Backlog),
+        ],
+        TEST_TIMEOUT,
+    );
+    assert_eq!(app.selection().column(), 0);
+    assert_eq!(app.selection().row(0), 0);
+
+    // Task 1 dispatched to Running
+    app.update(Message::RefreshTasks(vec![
+        make_task(1, TaskStatus::Running),
+        make_task(2, TaskStatus::Backlog),
+    ]));
+
+    assert_eq!(app.selection().column(), 1); // Running = column 1
+    assert_eq!(app.selection().row(1), 0);
+    let items = app.column_items_for_status(TaskStatus::Running);
+    assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(1)));
+}
+
+#[test]
+fn test_selection_falls_back_when_task_deleted() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Backlog),
+            make_task(3, TaskStatus::Backlog),
+        ],
+        TEST_TIMEOUT,
+    );
+    app.update(Message::NavigateRow(1));
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(0), 2); // Task 3
+
+    // Task 3 deleted
+    app.update(Message::RefreshTasks(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]));
+
+    assert_eq!(app.selection().column(), 0);
+    assert_eq!(app.selection().row(0), 1); // clamped to last valid row
+}
+
+#[test]
+fn test_selection_preserved_on_same_data_refresh() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Backlog),
+            make_task(3, TaskStatus::Backlog),
+        ],
+        TEST_TIMEOUT,
+    );
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(0), 1);
+
+    app.update(Message::RefreshTasks(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]));
+
+    assert_eq!(app.selection().row(0), 1);
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    assert!(matches!(items[1], ColumnItem::Task(t) if t.id == TaskId(2)));
+}
+
+#[test]
+fn test_epic_anchor_preserved_on_refresh() {
+    let tasks = vec![make_task(1, TaskStatus::Backlog)];
+    let epics = vec![make_epic(1)];
+    let mut app = App::new(tasks.clone(), TEST_TIMEOUT);
+    app.update(Message::RefreshEpics(epics.clone()));
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let epic_row = items
+        .iter()
+        .position(|i| matches!(i, ColumnItem::Epic(_)))
+        .expect("epic should be in Backlog column");
+    for _ in 0..epic_row {
+        app.update(Message::NavigateRow(1));
+    }
+    assert!(matches!(
+        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(0)],
+        ColumnItem::Epic(_)
+    ));
+
+    // Refresh same data
+    app.update(Message::RefreshTasks(tasks));
+    app.update(Message::RefreshEpics(epics));
+
+    // Still on the epic
+    assert!(matches!(
+        app.column_items_for_status(TaskStatus::Backlog)[app.selection().row(0)],
+        ColumnItem::Epic(_)
+    ));
+}
+
+#[test]
+fn test_on_select_all_preserved_on_refresh() {
+    let mut app = make_app();
+    // Navigate up from row 0 to select-all header
+    app.update(Message::NavigateRow(-1));
+    assert!(app.selection().on_select_all);
+
+    app.update(Message::RefreshTasks(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]));
+
+    assert!(app.selection().on_select_all);
+    assert_eq!(app.selection().anchor, None);
+}
+
+#[test]
+fn test_selection_falls_back_when_column_empties() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Backlog),
+            make_task(2, TaskStatus::Running),
+        ],
+        TEST_TIMEOUT,
+    );
+    app.update(Message::NavigateColumn(1)); // move to Running
+    assert_eq!(app.selection().column(), 1);
+
+    // Task 2 deleted — Running column empties, anchor not found
+    app.update(Message::RefreshTasks(vec![make_task(1, TaskStatus::Backlog)]));
+
+    // Cursor must be in a valid state: row 0 in the empty Running column
+    assert_eq!(app.selection().column(), 1);
+    assert_eq!(app.selection().row(1), 0);
+}
+
+#[test]
+fn test_selection_survives_flatten_toggle() {
+    let tasks = vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ];
+    let epics = vec![make_epic(1)];
+    let mut app = App::new(tasks.clone(), TEST_TIMEOUT);
+    app.update(Message::RefreshEpics(epics.clone()));
+
+    app.update(Message::NavigateRow(1)); // row 1 — Task 2
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let pre_id: TaskId = match &items[app.selection().row(0)] {
+        ColumnItem::Task(t) => t.id,
+        _ => panic!("expected task at cursor"),
+    };
+
+    app.update(Message::ToggleFlattened);
+    app.update(Message::ToggleFlattened);
+
+    let items = app.column_items_for_status(TaskStatus::Backlog);
+    let post_id: TaskId = match &items[app.selection().row(0)] {
+        ColumnItem::Task(t) => t.id,
+        _ => panic!("expected task at cursor"),
+    };
+    assert_eq!(pre_id, post_id);
+}
+
+#[test]
+fn test_review_selection_preserved_on_refresh() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+
+    let prs = vec![
+        make_review_pr(1, "alice", ReviewDecision::ReviewRequired), // col 0, row 0
+        make_review_pr(2, "alice", ReviewDecision::ReviewRequired), // col 0, row 1
+    ];
+    app.set_review_prs(prs);
+    app.navigate_review_row(1); // select PR 2
+
+    let selected = app.selected_review_pr().unwrap();
+    assert_eq!(selected.number, 2);
+
+    // PR 1 moves to Approved — PR 2 shifts to row 0
+    app.update(Message::PrsLoaded(
+        PrListKind::Review,
+        vec![
+            make_review_pr(1, "alice", ReviewDecision::Approved),
+            make_review_pr(2, "alice", ReviewDecision::ReviewRequired),
+        ],
+    ));
+
+    let selected = app.selected_review_pr().unwrap();
+    assert_eq!(selected.number, 2);
+}
+
+#[test]
+fn test_security_selection_preserved_on_refresh() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
+
+    let alerts = vec![
+        make_security_alert(1, "org/repo", crate::models::AlertSeverity::High), // col 1, row 0
+        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High), // col 1, row 1
+    ];
+    app.set_security_alerts(alerts);
+
+    // Navigate to High column (col 1), then to row 1
+    if let Some(sel) = app.security_selection_mut() {
+        sel.set_column(1);
+    }
+    app.navigate_security_row(1); // select alert 2
+
+    let selected = app.selected_security_alert().unwrap();
+    assert_eq!(selected.number, 2);
+
+    // Alert 1 dismissed — alert 2 shifts to row 0
+    app.update(Message::SecurityAlertsLoaded(vec![
+        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High),
+    ]));
+
+    let selected = app.selected_security_alert().unwrap();
+    assert_eq!(selected.number, 2);
+}

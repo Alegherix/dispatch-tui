@@ -187,6 +187,50 @@ impl TuiRuntime {
         Ok(app.update(refresh_msg))
     }
 
+    pub(super) fn exec_edit_security_queries(
+        &self,
+        app: &mut App,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
+    ) -> Result<Vec<Command>> {
+        let current = self
+            .database
+            .get_setting_string("github_queries_security")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
+        let header = "# Security alert repositories — one owner/repo per line.\n\
+                      # Lines starting with # and blank lines are ignored.\n\
+                      #\n\
+                      # Examples:\n\
+                      #   myorg/backend\n\
+                      #   myorg/frontend\n\
+                      #   myorg/infra\n\n";
+        let content = format!("{header}{current}\n");
+
+        let Some(edited) = self.run_editor(terminal, key_rx, "security-queries-", &content)? else {
+            return Ok(vec![]);
+        };
+
+        let repos: String = edited
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if let Err(e) = self
+            .database
+            .set_setting_string("github_queries_security", &repos)
+        {
+            app.update(Message::Error(Self::db_error("saving security queries", e)));
+            return Ok(vec![]);
+        }
+
+        Ok(app.update(Message::RefreshSecurityAlerts))
+    }
+
     pub(super) fn exec_refresh_usage_from_db(&self, app: &mut App) {
         match self.database.get_all_usage() {
             Ok(usage) => {

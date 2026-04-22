@@ -891,6 +891,7 @@ impl App {
                 }
             }
             KeyCode::Char('r') => self.update(Message::RefreshSecurityAlerts),
+            KeyCode::Char('e') => vec![Command::EditSecurityQueries],
             KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
             KeyCode::Char('t') => self.update(Message::ToggleSecurityKindFilter),
             KeyCode::Char('?') => self.update(Message::ToggleHelp),

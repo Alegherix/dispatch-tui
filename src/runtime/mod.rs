@@ -630,6 +630,10 @@ async fn execute_commands(
                 let extra = rt.exec_edit_github_queries(app, mode, terminal, key_rx)?;
                 queue.extend(extra);
             }
+            Command::EditSecurityQueries => {
+                let extra = rt.exec_edit_security_queries(app, terminal, key_rx)?;
+                queue.extend(extra);
+            }
             Command::UpdateAgentStatus {
                 repo,
                 number,

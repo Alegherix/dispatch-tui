@@ -656,6 +656,7 @@ pub enum Command {
     PersistSecurityAlerts(Vec<SecurityAlert>),
     DispatchFixAgent(FixAgentRequest),
     EditGithubQueries(PrListKind),
+    EditSecurityQueries,
     UpdateAgentStatus {
         repo: String,
         number: i64,

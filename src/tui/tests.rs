@@ -12138,6 +12138,21 @@ fn e_in_security_dependabot_emits_edit_bot_queries() {
 }
 
 #[test]
+fn e_in_security_alerts_emits_edit_security_queries() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.view_mode = ViewMode::SecurityBoard {
+        mode: SecurityBoardMode::Alerts,
+        selection: SecurityBoardSelection::default(),
+        dependabot_selection: ReviewBoardSelection::default(),
+        saved_board: BoardSelection::default(),
+    };
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::EditSecurityQueries)));
+}
+
+#[test]
 fn refresh_review_prs_returns_fetch_command() {
     let mut app = make_review_board_app();
     let cmds = app.update(Message::RefreshReviewPrs);

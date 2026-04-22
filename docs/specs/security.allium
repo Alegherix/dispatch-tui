@@ -202,6 +202,7 @@ rule ReReviewAlert {
 -- Actions on the selected alert:
 --   d                 — dispatch a fix agent (DispatchFixAgent), or resume session (agent_status = idle)
 --   r                 — force-refresh alert data from GitHub (always; no agent interaction)
+--   e                 — edit the security alert repositories (EditSecurityQueries)
 --   T                 — detach the fix agent (DetachFixAgent)
 --   g                 — jump to the alert's tmux window (if any)
 --   p                 — open the alert URL in the browser
@@ -332,3 +333,17 @@ rule DispatchFixAgentViaMcp {
         -- On success, persists tmux_window, worktree, and agent_status
         -- to the DB and triggers a TUI refresh.
 }
+
+rule EditSecurityQueries {
+    when: UserAction([e]) and SecurityBoardMode = Alerts
+    opens: $EDITOR with github_queries_security setting
+    on_save: strips comments and blank lines, persists, triggers RefreshSecurityAlerts
+    on_cancel: no change
+    note: key is available in both configured and unconfigured states
+}
+
+-- Unconfigured state: when github_queries_security has no active lines (all
+-- comments or blank), FetchSecurityAlerts sends SecurityAlertsUnconfigured.
+-- The board renders a prompt instead of severity columns.
+-- Format for each active line: owner/repo (e.g. myorg/backend).
+-- Invalid slugs (no '/') are silently skipped.

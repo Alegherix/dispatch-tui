@@ -270,7 +270,6 @@ fn pr_fetch_failed_sets_error_state_and_preserves_prs() {
 fn approve_review_pr_start_enters_confirm_mode() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
-    // ReviewRequired is column 0, matching the default review board selection
     app.update(Message::PrsLoaded(
         PrListKind::Review,
         vec![make_pr(42, "org/app")],
@@ -307,9 +306,7 @@ fn approve_review_pr_confirm_emits_command() {
 }
 
 #[test]
-fn approve_review_pr_success_triggers_refresh() {
-    // After exec_approve_review_pr succeeds, the runtime sends RefreshReviewPrs.
-    // Verify that message triggers a FetchPrs command to reload the board.
+fn refresh_review_prs_triggers_fetch() {
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
 
@@ -323,15 +320,12 @@ fn approve_review_pr_success_triggers_refresh() {
 
 #[test]
 fn approve_review_pr_error_preserves_board_state() {
-    // When exec_approve_review_pr fails, the runtime sends StatusInfo (not RefreshReviewPrs).
-    // Verify the board retains its existing PRs and surfaces the error as a status message.
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(
         PrListKind::Review,
         vec![make_pr(42, "org/app")],
     ));
-    assert_eq!(app.review_prs().len(), 1);
 
     app.update(Message::StatusInfo(
         "Failed to approve PR: not a reviewer".to_string(),
@@ -394,15 +388,12 @@ fn merge_review_pr_confirm_emits_command() {
 
 #[test]
 fn merge_review_pr_error_preserves_board_state() {
-    // When exec_merge_review_pr fails, the runtime sends StatusInfo (not RefreshReviewPrs).
-    // Verify the board retains its existing PRs and surfaces the error as a status message.
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(
         PrListKind::Review,
         vec![make_approved_pr(42, "org/app")],
     ));
-    assert_eq!(app.review_prs().len(), 1);
 
     app.update(Message::StatusInfo(
         "Failed to merge PR: checks required".to_string(),

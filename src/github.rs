@@ -277,61 +277,17 @@ fn parse_prs_response(json: &str, alias_count: usize) -> Result<Vec<ReviewPr>, S
 
 use crate::models::{AlertKind, AlertSeverity, SecurityAlert};
 
-/// The GraphQL fields fragment for vulnerability alerts.
-const VULN_ALERT_FIELDS: &str = r#"nodes {
-              nameWithOwner
-              vulnerabilityAlerts(first: 25, states: OPEN) {
-                nodes {
-                  number
-                  createdAt
-                  securityVulnerability {
-                    severity
-                    package { name }
-                    vulnerableVersionRange
-                    firstPatchedVersion { identifier }
-                  }
-                  securityAdvisory {
-                    summary
-                    description
-                    cvss { score }
-                  }
-                }
-              }
-            }"#;
-
-/// Parse the GraphQL vulnerability alerts response into `SecurityAlert`s.
-fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, String> {
-    let root: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
-
-    let repos = root
-        .pointer("/data/viewer/repositories/nodes")
-        .and_then(|v| v.as_array())
-        .unwrap_or(&Vec::new())
-        .clone();
-
-    let mut alerts = Vec::new();
-    for repo_node in &repos {
-        let repo = repo_node["nameWithOwner"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-        let alert_nodes = match repo_node
-            .pointer("/vulnerabilityAlerts/nodes")
-            .and_then(|v| v.as_array())
-        {
-            Some(nodes) => nodes,
-            None => continue,
-        };
-
-        for node in alert_nodes {
+/// Map a single vulnerability alert node to a `SecurityAlert`.
+fn parse_repo_alerts(repo: &str, alert_nodes: &[serde_json::Value]) -> Vec<SecurityAlert> {
+    alert_nodes
+        .iter()
+        .map(|node| {
             let number = node["number"].as_i64().unwrap_or(0);
             let severity_str = node
                 .pointer("/securityVulnerability/severity")
                 .and_then(|v| v.as_str())
                 .unwrap_or("MODERATE");
             let severity = AlertSeverity::parse(severity_str).unwrap_or(AlertSeverity::Medium);
-
             let title = node
                 .pointer("/securityAdvisory/summary")
                 .and_then(|v| v.as_str())
@@ -362,10 +318,9 @@ fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, Strin
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-
-            alerts.push(SecurityAlert {
+            SecurityAlert {
                 number,
-                repo: repo.clone(),
+                repo: repo.to_string(),
                 severity,
                 kind: AlertKind::Dependabot,
                 title,
@@ -377,71 +332,133 @@ fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, Strin
                 created_at,
                 state: "open".to_string(),
                 description,
-            });
-        }
+            }
+        })
+        .collect()
+}
+
+/// Parse the GraphQL vulnerability alerts response (viewer.repositories) into `SecurityAlert`s.
+#[cfg(test)]
+fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, String> {
+    let root: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+    let repos = root
+        .pointer("/data/viewer/repositories/nodes")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&Vec::new())
+        .clone();
+
+    let mut alerts = Vec::new();
+    for repo_node in &repos {
+        let repo = repo_node["nameWithOwner"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let alert_nodes = match repo_node
+            .pointer("/vulnerabilityAlerts/nodes")
+            .and_then(|v| v.as_array())
+        {
+            Some(nodes) => nodes,
+            None => continue,
+        };
+        alerts.extend(parse_repo_alerts(&repo, alert_nodes));
     }
     Ok(alerts)
 }
 
-/// Fetch security alerts from GitHub using GraphQL `vulnerabilityAlerts`.
+/// Parse a per-repo aliased GraphQL response (`r0`, `r1`, …) into `SecurityAlert`s.
 ///
-/// Paginates through the viewer's repositories (ordered by most recently pushed),
-/// collecting open Dependabot vulnerability alerts. Uses at most `MAX_PAGES`
-/// GraphQL requests (100 repos each), which is dramatically faster than the
-/// per-repo REST API approach.
-///
-/// Results are sorted by severity (critical first), then CVSS score descending.
-pub fn fetch_security_alerts(runner: &dyn ProcessRunner) -> Result<Vec<SecurityAlert>, String> {
-    const MAX_PAGES: usize = 3;
+/// `count` is the number of repos that were queried (aliases `r0..r{count-1}`).
+/// Aliases that are absent in the response (e.g. because the slug was invalid
+/// and skipped) are silently ignored via the `None` branch.
+fn parse_graphql_security_alerts_per_repo(
+    json: &str,
+    count: usize,
+) -> Result<Vec<SecurityAlert>, String> {
+    let root: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
 
-    let mut all_alerts: Vec<SecurityAlert> = Vec::new();
-    let mut cursor: Option<String> = None;
-
-    for _ in 0..MAX_PAGES {
-        let after_clause = match &cursor {
-            Some(c) => format!(", after: \"{c}\""),
-            None => String::new(),
+    let mut alerts = Vec::new();
+    for i in 0..count {
+        let key = format!("r{i}");
+        let repo_node = match root.pointer(&format!("/data/{key}")) {
+            Some(n) => n,
+            None => continue,
         };
+        let repo = repo_node["nameWithOwner"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let nodes = repo_node
+            .pointer("/vulnerabilityAlerts/nodes")
+            .and_then(|v| v.as_array())
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        alerts.extend(parse_repo_alerts(&repo, nodes));
+    }
+    Ok(alerts)
+}
 
-        let query = format!(
-            r#"{{
-  viewer {{
-    repositories(first: 100, affiliations: [OWNER, ORGANIZATION_MEMBER], orderBy: {{field: PUSHED_AT, direction: DESC}}{after_clause}) {{
-      pageInfo {{ hasNextPage endCursor }}
-      {VULN_ALERT_FIELDS}
-    }}
-  }}
-}}"#
-        );
-
-        let output = runner
-            .run("gh", &["api", "graphql", "-f", &format!("query={query}")])
-            .map_err(|e| format!("Failed to run gh: {e}"))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("gh api graphql failed: {stderr}"));
-        }
-
-        let json = String::from_utf8_lossy(&output.stdout);
-        all_alerts.extend(parse_graphql_security_alerts(&json)?);
-
-        let root: serde_json::Value =
-            serde_json::from_str(&json).map_err(|e| format!("Failed to parse JSON: {e}"))?;
-        let page_info = root.pointer("/data/viewer/repositories/pageInfo");
-        let has_next = page_info
-            .and_then(|p| p["hasNextPage"].as_bool())
-            .unwrap_or(false);
-        if !has_next {
-            break;
-        }
-        cursor = page_info
-            .and_then(|p| p["endCursor"].as_str())
-            .map(|s| s.to_string());
+/// Fetch security alerts for the given repos using per-repo GraphQL aliases.
+///
+/// Each entry in `repos` must be an "owner/repo" slug. Returns an empty vec
+/// immediately if `repos` is empty (caller is responsible for showing the
+/// unconfigured prompt). Invalid slugs (no '/') are silently skipped.
+/// Results are sorted by severity (critical first), then CVSS score descending.
+pub fn fetch_security_alerts(
+    runner: &dyn ProcessRunner,
+    repos: &[String],
+) -> Result<Vec<SecurityAlert>, String> {
+    if repos.is_empty() {
+        return Ok(vec![]);
     }
 
-    // Sort by severity (critical first), then CVSS descending
-    all_alerts.sort_by(|a, b| {
+    let repo_fields: Vec<String> = repos
+        .iter()
+        .enumerate()
+        .filter_map(|(i, slug)| {
+            let (owner, name) = slug.split_once('/')?;
+            Some(format!(
+                r#"r{i}: repository(owner: "{owner}", name: "{name}") {{
+    nameWithOwner
+    vulnerabilityAlerts(first: 25, states: OPEN) {{
+      nodes {{
+        number
+        createdAt
+        securityVulnerability {{
+          severity
+          package {{ name }}
+          vulnerableVersionRange
+          firstPatchedVersion {{ identifier }}
+        }}
+        securityAdvisory {{
+          summary
+          description
+          cvss {{ score }}
+        }}
+      }}
+    }}
+  }}"#
+            ))
+        })
+        .collect();
+
+    let query = format!("{{\n  {}\n}}", repo_fields.join("\n  "));
+
+    let output = runner
+        .run("gh", &["api", "graphql", "-f", &format!("query={query}")])
+        .map_err(|e| format!("Failed to run gh: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh api graphql failed: {stderr}"));
+    }
+
+    let json = String::from_utf8_lossy(&output.stdout);
+    let mut alerts = parse_graphql_security_alerts_per_repo(&json, repos.len())?;
+
+    alerts.sort_by(|a, b| {
         a.severity
             .column_index()
             .cmp(&b.severity.column_index())
@@ -453,7 +470,7 @@ pub fn fetch_security_alerts(runner: &dyn ProcessRunner) -> Result<Vec<SecurityA
             })
     });
 
-    Ok(all_alerts)
+    Ok(alerts)
 }
 
 #[cfg(test)]
@@ -1189,53 +1206,157 @@ mod tests {
         assert!(result.is_err());
     }
 
+    const PER_REPO_RESPONSE: &str = r#"{
+        "data": {
+            "r0": {
+                "nameWithOwner": "acme/app",
+                "vulnerabilityAlerts": {
+                    "nodes": [
+                        {
+                            "number": 1,
+                            "createdAt": "2026-03-01T10:00:00Z",
+                            "securityVulnerability": {
+                                "severity": "CRITICAL",
+                                "package": {"name": "lodash"},
+                                "vulnerableVersionRange": "< 4.17.21",
+                                "firstPatchedVersion": {"identifier": "4.17.21"}
+                            },
+                            "securityAdvisory": {
+                                "summary": "Prototype Pollution in lodash",
+                                "cvss": {"score": 9.8},
+                                "description": "A prototype pollution vuln."
+                            }
+                        }
+                    ]
+                }
+            },
+            "r1": {
+                "nameWithOwner": "acme/lib",
+                "vulnerabilityAlerts": {
+                    "nodes": []
+                }
+            }
+        }
+    }"#;
+
     #[test]
-    fn fetch_security_alerts_uses_graphql() {
-        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-            GRAPHQL_ALERTS_RESPONSE.as_bytes(),
-        )]);
-        let alerts = fetch_security_alerts(&runner).unwrap();
-        assert_eq!(alerts.len(), 2);
-
-        let calls = runner.recorded_calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "gh");
-        assert!(
-            calls[0].1.contains(&"graphql".to_string()),
-            "should use graphql API"
+    fn fetch_security_alerts_empty_repos_returns_empty_without_shell_call() {
+        let runner = MockProcessRunner::new(vec![]);
+        let alerts = fetch_security_alerts(&runner, &[]).unwrap();
+        assert!(alerts.is_empty());
+        assert_eq!(
+            runner.recorded_calls().len(),
+            0,
+            "should not call gh when repos is empty"
         );
-        let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
-        assert!(
-            query_arg.contains("vulnerabilityAlerts"),
-            "query should include vulnerabilityAlerts"
-        );
-
-        // Results should be sorted by severity (critical first)
-        assert_eq!(alerts[0].severity, AlertSeverity::Critical);
-        assert_eq!(alerts[1].severity, AlertSeverity::Medium);
     }
 
     #[test]
-    fn fetch_security_alerts_paginates() {
-        let page1 = r#"{"data":{"viewer":{"repositories":{"pageInfo":{"hasNextPage":true,"endCursor":"abc123"},"nodes":[{"nameWithOwner":"acme/app","vulnerabilityAlerts":{"nodes":[{"number":1,"createdAt":"2026-03-01T10:00:00Z","securityVulnerability":{"severity":"HIGH","package":{"name":"pkg1"},"vulnerableVersionRange":"< 1.0","firstPatchedVersion":{"identifier":"1.0"}},"securityAdvisory":{"summary":"Vuln 1","cvss":{"score":7.5},"description":"desc1"}}]}}]}}}}"#;
-        let page2 = r#"{"data":{"viewer":{"repositories":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"nameWithOwner":"acme/lib","vulnerabilityAlerts":{"nodes":[{"number":2,"createdAt":"2026-03-02T10:00:00Z","securityVulnerability":{"severity":"LOW","package":{"name":"pkg2"},"vulnerableVersionRange":"< 2.0","firstPatchedVersion":{"identifier":"2.0"}},"securityAdvisory":{"summary":"Vuln 2","cvss":{"score":3.1},"description":"desc2"}}]}}]}}}}"#;
+    fn fetch_security_alerts_builds_per_repo_graphql() {
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            PER_REPO_RESPONSE.as_bytes(),
+        )]);
+        let alerts = fetch_security_alerts(
+            &runner,
+            &["acme/app".to_string(), "acme/lib".to_string()],
+        )
+        .unwrap();
 
-        let runner = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(page1.as_bytes()),
-            MockProcessRunner::ok_with_stdout(page2.as_bytes()),
-        ]);
-        let alerts = fetch_security_alerts(&runner).unwrap();
-        assert_eq!(alerts.len(), 2);
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].repo, "acme/app");
+        assert_eq!(alerts[0].severity, AlertSeverity::Critical);
+        assert_eq!(alerts[0].package.as_deref(), Some("lodash"));
 
         let calls = runner.recorded_calls();
-        assert_eq!(calls.len(), 2, "should make 2 requests for pagination");
-
-        // Second query should include the cursor
-        let query_arg = calls[1].1.iter().find(|a| a.contains("query=")).unwrap();
+        assert_eq!(calls.len(), 1);
+        let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
         assert!(
-            query_arg.contains("abc123"),
-            "second page should use cursor from first page"
+            query_arg.contains("r0: repository"),
+            "query should use r0 alias"
         );
+        assert!(
+            query_arg.contains(r#"owner: "acme""#),
+            "query should include owner"
+        );
+        assert!(
+            query_arg.contains(r#"name: "app""#),
+            "query should include repo name"
+        );
+        assert!(
+            query_arg.contains("r1: repository"),
+            "query should have r1 alias for second repo"
+        );
+    }
+
+    #[test]
+    fn fetch_security_alerts_per_repo_sorted_by_severity() {
+        let response = r#"{
+            "data": {
+                "r0": {
+                    "nameWithOwner": "acme/app",
+                    "vulnerabilityAlerts": {"nodes": [
+                        {"number": 2, "createdAt": "2026-03-01T10:00:00Z",
+                         "securityVulnerability": {"severity": "HIGH", "package": {"name": "x"}, "vulnerableVersionRange": "< 1.0", "firstPatchedVersion": null},
+                         "securityAdvisory": {"summary": "High vuln", "cvss": {"score": 7.5}, "description": "d"}}
+                    ]}
+                },
+                "r1": {
+                    "nameWithOwner": "acme/lib",
+                    "vulnerabilityAlerts": {"nodes": [
+                        {"number": 3, "createdAt": "2026-03-01T10:00:00Z",
+                         "securityVulnerability": {"severity": "CRITICAL", "package": {"name": "y"}, "vulnerableVersionRange": "< 2.0", "firstPatchedVersion": {"identifier": "2.0"}},
+                         "securityAdvisory": {"summary": "Critical vuln", "cvss": {"score": 9.8}, "description": "d"}}
+                    ]}
+                }
+            }
+        }"#;
+        let runner =
+            MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(response.as_bytes())]);
+        let alerts = fetch_security_alerts(
+            &runner,
+            &["acme/app".to_string(), "acme/lib".to_string()],
+        )
+        .unwrap();
+        assert_eq!(alerts.len(), 2);
+        assert_eq!(alerts[0].severity, AlertSeverity::Critical);
+        assert_eq!(alerts[1].severity, AlertSeverity::High);
+    }
+
+    #[test]
+    fn parse_graphql_security_alerts_per_repo_basic() {
+        let alerts = parse_graphql_security_alerts_per_repo(PER_REPO_RESPONSE, 2).unwrap();
+        assert_eq!(alerts.len(), 1, "acme/lib has no alerts");
+        assert_eq!(alerts[0].number, 1);
+        assert_eq!(alerts[0].repo, "acme/app");
+        assert_eq!(alerts[0].severity, AlertSeverity::Critical);
+        assert_eq!(alerts[0].kind, AlertKind::Dependabot);
+        assert_eq!(alerts[0].package.as_deref(), Some("lodash"));
+        assert_eq!(alerts[0].fixed_version.as_deref(), Some("4.17.21"));
+        assert_eq!(alerts[0].cvss_score, Some(9.8));
+        assert_eq!(
+            alerts[0].url,
+            "https://github.com/acme/app/security/dependabot/1"
+        );
+    }
+
+    #[test]
+    fn parse_graphql_security_alerts_per_repo_invalid_json() {
+        let result = parse_graphql_security_alerts_per_repo("not json", 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fetch_security_alerts_skips_invalid_slugs() {
+        // "noslash" has no '/' so split_once fails — it should be silently skipped
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            r#"{"data":{"r0":{"nameWithOwner":"acme/app","vulnerabilityAlerts":{"nodes":[]}}}}"#
+                .as_bytes(),
+        )]);
+        // "noslash" is skipped; "acme/app" becomes r0
+        let result =
+            fetch_security_alerts(&runner, &["noslash".to_string(), "acme/app".to_string()]);
+        assert!(result.is_ok());
+        assert_eq!(runner.recorded_calls().len(), 1);
     }
 
     #[test]

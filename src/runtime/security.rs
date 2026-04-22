@@ -4,9 +4,10 @@ impl TuiRuntime {
     pub(super) fn exec_fetch_security_alerts(&self) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
+        let repos = self.load_github_queries("github_queries_security");
         tokio::task::spawn_blocking(move || {
             tracing::info!("fetching security alerts via gh");
-            match crate::github::fetch_security_alerts(&*runner) {
+            match crate::github::fetch_security_alerts(&*runner, &repos) {
                 Ok(alerts) => {
                     tracing::info!(count = alerts.len(), "security alerts fetched successfully");
                     let _ = tx.send(Message::SecurityAlertsLoaded(alerts));

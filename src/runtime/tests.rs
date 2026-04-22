@@ -2073,6 +2073,9 @@ async fn exec_kill_tmux_window_failure_is_best_effort() {
 #[tokio::test]
 async fn exec_fetch_security_alerts_gh_failure() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    // Seed a repo so that gh is actually called (empty repos short-circuit to Ok([])).
+    db.set_setting_string("github_queries_security", "acme/app")
+        .unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("auth error"), // gh api graphql fails
@@ -2094,20 +2097,9 @@ async fn exec_fetch_security_alerts_gh_failure() {
 #[tokio::test]
 async fn exec_fetch_security_alerts_empty_result() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    // No repos configured — returns immediately with an empty list, no gh call needed.
+    let mock = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let json = serde_json::json!({
-        "data": {
-            "viewer": {
-                "repositories": {
-                    "pageInfo": { "hasNextPage": false, "endCursor": null },
-                    "nodes": []
-                }
-            }
-        }
-    });
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(json.to_string().as_bytes()),
-    ]));
     let rt = make_runtime(db, tx, mock);
 
     rt.exec_fetch_security_alerts();

@@ -193,9 +193,7 @@ impl TuiRuntime {
                 Ok(output) => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     tracing::warn!(url, error = %stderr, "failed to merge review PR");
-                    let _ = tx.send(Message::StatusInfo(format!(
-                        "Failed to merge PR: {stderr}"
-                    )));
+                    let _ = tx.send(Message::StatusInfo(format!("Failed to merge PR: {stderr}")));
                 }
                 Err(e) => {
                     tracing::warn!(url, error = %e, "failed to run gh");

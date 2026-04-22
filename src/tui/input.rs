@@ -55,12 +55,8 @@ impl App {
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmApproveBotPr(_) => self.handle_key_confirm_pr_op(key, true),
             InputMode::ConfirmMergeBotPr(_) => self.handle_key_confirm_pr_op(key, false),
-            InputMode::ConfirmApproveReviewPr(_) => {
-                self.handle_key_confirm_review_pr_op(key, true)
-            }
-            InputMode::ConfirmMergeReviewPr(_) => {
-                self.handle_key_confirm_review_pr_op(key, false)
-            }
+            InputMode::ConfirmApproveReviewPr(_) => self.handle_key_confirm_review_pr_op(key, true),
+            InputMode::ConfirmMergeReviewPr(_) => self.handle_key_confirm_review_pr_op(key, false),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
         }
     }
@@ -1302,11 +1298,7 @@ impl App {
         }
     }
 
-    fn handle_key_confirm_review_pr_op(
-        &mut self,
-        key: KeyEvent,
-        is_approve: bool,
-    ) -> Vec<Command> {
+    fn handle_key_confirm_review_pr_op(&mut self, key: KeyEvent, is_approve: bool) -> Vec<Command> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 if is_approve {

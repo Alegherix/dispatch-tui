@@ -3461,6 +3461,16 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
                 .style(Style::default().fg(Color::DarkGray)),
             chunks[4],
         );
+        // Status bar
+        if let Some(msg) = app.status.message.as_deref() {
+            frame.render_widget(
+                Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow)),
+                chunks[6],
+            );
+        } else {
+            let hints = Paragraph::new(Line::from(security_action_hints(app, false, None)));
+            frame.render_widget(hints, chunks[6]);
+        }
         // Filter overlay still available when unconfigured
         if matches!(app.mode(), InputMode::SecurityRepoFilter) {
             render_security_repo_filter_overlay(frame, app, area);

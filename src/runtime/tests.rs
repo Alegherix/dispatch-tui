@@ -2005,6 +2005,126 @@ async fn exec_merge_bot_pr_sends_status_on_failure() {
 }
 
 // -----------------------------------------------------------------------
+// exec_approve_review_pr / exec_merge_review_pr
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_approve_review_pr_calls_gh_review_approve() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // gh pr review --approve
+    ]));
+    let rt = make_runtime(db, tx, mock.clone());
+
+    rt.exec_approve_review_pr("https://github.com/acme/app/pull/42".into());
+
+    let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg1, Message::RefreshReviewPrs),
+        "Expected RefreshReviewPrs, got: {msg1:?}"
+    );
+    let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match msg2 {
+        Message::StatusInfo(s) => assert!(s.contains("Approved PR")),
+        other => panic!("Expected StatusInfo, got: {other:?}"),
+    }
+
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "gh");
+    assert!(calls[0].1.contains(&"--approve".to_string()));
+    assert!(calls[0]
+        .1
+        .contains(&"https://github.com/acme/app/pull/42".to_string()));
+}
+
+#[tokio::test]
+async fn exec_approve_review_pr_sends_status_on_failure() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "not a reviewer",
+    )]));
+    let rt = make_runtime(db, tx, mock);
+
+    rt.exec_approve_review_pr("https://github.com/acme/app/pull/42".into());
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match msg {
+        Message::StatusInfo(s) => assert!(s.contains("Failed to approve PR")),
+        other => panic!("Expected StatusInfo, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn exec_merge_review_pr_calls_gh_pr_merge_squash() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // gh pr merge --squash
+    ]));
+    let rt = make_runtime(db, tx, mock.clone());
+
+    rt.exec_merge_review_pr("https://github.com/acme/app/pull/42".into());
+
+    let msg1 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg1, Message::RefreshReviewPrs),
+        "Expected RefreshReviewPrs, got: {msg1:?}"
+    );
+    let msg2 = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match msg2 {
+        Message::StatusInfo(s) => assert!(s.contains("Merged PR")),
+        other => panic!("Expected StatusInfo, got: {other:?}"),
+    }
+
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "gh");
+    assert!(calls[0].1.contains(&"--squash".to_string()));
+    assert!(calls[0]
+        .1
+        .contains(&"https://github.com/acme/app/pull/42".to_string()));
+}
+
+#[tokio::test]
+async fn exec_merge_review_pr_sends_status_on_failure() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "checks required",
+    )]));
+    let rt = make_runtime(db, tx, mock);
+
+    rt.exec_merge_review_pr("https://github.com/acme/app/pull/42".into());
+
+    let msg = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match msg {
+        Message::StatusInfo(s) => assert!(s.contains("Failed to merge PR")),
+        other => panic!("Expected StatusInfo, got: {other:?}"),
+    }
+}
+
+// -----------------------------------------------------------------------
 // Browser / tmux window
 // -----------------------------------------------------------------------
 

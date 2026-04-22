@@ -155,6 +155,56 @@ impl TuiRuntime {
         });
     }
 
+    pub(super) fn exec_approve_review_pr(&self, url: String) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            tracing::info!(url, "approving review PR");
+            match runner.run("gh", &["pr", "review", "--approve", &url]) {
+                Ok(output) if output.status.success() => {
+                    let _ = tx.send(Message::RefreshReviewPrs);
+                    let _ = tx.send(Message::StatusInfo(format!("Approved PR {url}")));
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(url, error = %stderr, "failed to approve review PR");
+                    let _ = tx.send(Message::StatusInfo(format!(
+                        "Failed to approve PR: {stderr}"
+                    )));
+                }
+                Err(e) => {
+                    tracing::warn!(url, error = %e, "failed to run gh");
+                    let _ = tx.send(Message::StatusInfo(format!("Failed to approve PR: {e}")));
+                }
+            }
+        });
+    }
+
+    pub(super) fn exec_merge_review_pr(&self, url: String) {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+        tokio::task::spawn_blocking(move || {
+            tracing::info!(url, "merging review PR");
+            match runner.run("gh", &["pr", "merge", "--squash", &url]) {
+                Ok(output) if output.status.success() => {
+                    let _ = tx.send(Message::RefreshReviewPrs);
+                    let _ = tx.send(Message::StatusInfo(format!("Merged PR {url}")));
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(url, error = %stderr, "failed to merge review PR");
+                    let _ = tx.send(Message::StatusInfo(format!(
+                        "Failed to merge PR: {stderr}"
+                    )));
+                }
+                Err(e) => {
+                    tracing::warn!(url, error = %e, "failed to run gh");
+                    let _ = tx.send(Message::StatusInfo(format!("Failed to merge PR: {e}")));
+                }
+            }
+        });
+    }
+
     pub(super) fn exec_merge_bot_pr(&self, url: String) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();

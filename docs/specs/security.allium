@@ -347,3 +347,11 @@ rule EditSecurityQueries {
 -- The board renders a prompt instead of severity columns.
 -- Format for each active line: owner/repo (e.g. myorg/backend).
 -- Invalid slugs (no '/') are silently skipped.
+
+rule selection_preservation:
+    When the cursor has an anchor (an alert number) and the alert list is recomputed
+    (on any filter change or data refresh), the cursor position is resolved by locating
+    the anchor alert in the new list.
+
+    If the anchor alert is found: the cursor moves to the alert's new column and row.
+    If the anchor alert is not present: the cursor clamps to the nearest valid position.

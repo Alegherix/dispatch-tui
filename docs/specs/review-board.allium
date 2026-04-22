@@ -497,6 +497,14 @@ rule GetReviewPrViaMcp {
         -- PR is absent from both tables. The bot_prs table is NOT searched.
 }
 
+rule selection_preservation:
+    When the cursor has an anchor (a PR number) and the PR list is recomputed (on any
+    PR status change or data refresh), the cursor position is resolved by locating the
+    anchor PR in the new list.
+
+    If the anchor PR is found: the cursor moves to the PR's new column and row.
+    If the anchor PR is not present: the cursor clamps to the nearest valid position.
+
 rule DispatchReviewAgentViaMcp {
     when: McpDispatchReviewAgent(repo, number, local_repo)
 

@@ -1446,3 +1446,17 @@ surface RepoPathPicker {
 -- Q1: Should stale/crashed detection trigger automatic status changes
 --     (e.g., moving back to Backlog), or should it remain advisory-only
 --     as it is today?
+
+rule selection_preservation:
+    When the cursor has an anchor (a task or epic ID) and column items are recomputed
+    (on any status change, task movement, filter change, or data refresh), the cursor
+    position is resolved by locating the anchor item in the new item list.
+
+    If the anchor item is found: the cursor moves to the item's new column and row,
+    following the item if it changed columns.
+
+    If the anchor item is not present (deleted or moved outside board scope): the cursor
+    clamps to the nearest valid position in the current column.
+
+    When the cursor is on the select-all column header (on_select_all = true), the anchor
+    is None and the header state is preserved across refreshes.

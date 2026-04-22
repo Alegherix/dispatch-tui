@@ -17961,6 +17961,10 @@ fn test_selection_falls_back_when_column_empties() {
 
 #[test]
 fn test_selection_survives_flatten_toggle() {
+    // Use task IDs > 1 so they sort after Epic(1) in the column.
+    // Column order: [Task(1), Epic(1), Task(2)] — tasks inserted before epics,
+    // stable sort keeps Task(1) before Epic(1) when both have key (5,1,1).
+    // Navigate +2 to reach Task(2) at row 2.
     let tasks = vec![
         make_task(1, TaskStatus::Backlog),
         make_task(2, TaskStatus::Backlog),
@@ -17969,7 +17973,8 @@ fn test_selection_survives_flatten_toggle() {
     let mut app = App::new(tasks.clone(), TEST_TIMEOUT);
     app.update(Message::RefreshEpics(epics.clone()));
 
-    app.update(Message::NavigateRow(1)); // row 1 — Task 2
+    app.update(Message::NavigateRow(1)); // row 1 — Epic(1)
+    app.update(Message::NavigateRow(1)); // row 2 — Task(2)
     let items = app.column_items_for_status(TaskStatus::Backlog);
     let pre_id: TaskId = match &items[app.selection().row(0)] {
         ColumnItem::Task(t) => t.id,

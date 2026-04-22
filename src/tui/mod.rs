@@ -136,7 +136,7 @@ pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<Strin
 
 impl App {
     pub fn new(tasks: Vec<Task>, inactivity_timeout: Duration) -> Self {
-        App {
+        let mut app = App {
             board: BoardState {
                 tasks,
                 epics: Vec::new(),
@@ -162,7 +162,9 @@ impl App {
             dispatching_review: HashSet::new(),
             dispatching_fix: HashSet::new(),
             tips: None,
-        }
+        };
+        app.update_anchor_from_current();
+        app
     }
 
     /// Returns true if the given task has an in-flight dispatch.
@@ -539,12 +541,12 @@ impl App {
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
         self.filter.repos = filter;
-        self.clamp_selection();
+        self.sync_board_selection();
     }
 
     pub fn set_repo_filter_mode(&mut self, mode: RepoFilterMode) {
         self.filter.mode = mode;
-        self.clamp_selection();
+        self.sync_board_selection();
     }
 
     /// Set a transient status message with auto-clear timestamp.
@@ -871,6 +873,89 @@ impl App {
             } else if sel.row(col) >= count {
                 sel.set_row(col, count - 1);
             }
+        }
+    }
+
+    /// Set the selection anchor to the item currently under the cursor.
+    /// Called after every navigation keystroke so that subsequent data refreshes
+    /// can restore the cursor to this item.
+    /// Sets anchor to None when the cursor is on the select-all header.
+    pub(in crate::tui) fn update_anchor_from_current(&mut self) {
+        // Collect what we need from immutable borrow first
+        let on_select_all = self.selection().on_select_all;
+        if on_select_all {
+            self.selection_mut().anchor = None;
+            return;
+        }
+        let col = self.selection().column();
+        let row = self.selection().row(col);
+        let status = match TaskStatus::from_column_index(col) {
+            Some(s) => s,
+            None => return,
+        };
+        let new_anchor = self
+            .column_items_for_status(status)
+            .into_iter()
+            .nth(row)
+            .map(|item| match item {
+                ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
+                ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
+            });
+        self.selection_mut().anchor = new_anchor;
+    }
+
+    /// Restore cursor position from the anchor after a data change.
+    /// Scans all columns for the anchor item and moves the cursor to its new
+    /// position (following it across columns if needed).
+    /// Falls back to index clamping if the anchor is not found.
+    pub fn sync_board_selection(&mut self) {
+        let anchor = match &self.board.view_mode {
+            ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
+            _ => return self.clamp_selection(),
+        };
+
+        let Some(anchor) = anchor else {
+            // on_select_all or no anchor set yet — just clamp
+            return self.clamp_selection();
+        };
+
+        // Search all columns for the anchor item
+        let mut found: Option<(usize, usize)> = None;
+        'outer: for (col, &status) in TaskStatus::ALL.iter().enumerate() {
+            let items = self.column_items_for_status(status);
+            for (row, item) in items.into_iter().enumerate() {
+                let item_anchor = match item {
+                    ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
+                    ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
+                };
+                if item_anchor == anchor {
+                    found = Some((col, row));
+                    break 'outer;
+                }
+            }
+        }
+
+        if let Some((found_col, found_row)) = found {
+            // Clamp all non-anchor columns
+            for (col, &status) in TaskStatus::ALL.iter().enumerate() {
+                if col == found_col {
+                    continue;
+                }
+                let count = self.column_item_count(status);
+                let sel = self.selection_mut();
+                if count == 0 {
+                    sel.set_row(col, 0);
+                } else if sel.row(col) >= count {
+                    sel.set_row(col, count - 1);
+                }
+            }
+            let sel = self.selection_mut();
+            sel.set_column(found_col);
+            sel.set_row(found_col, found_row);
+            sel.on_select_all = false;
+        } else {
+            // Anchor not found — fall back to index clamping
+            self.clamp_selection();
         }
     }
 
@@ -1503,6 +1588,7 @@ impl App {
             .clamp(0, (TaskStatus::COLUMN_COUNT - 1) as isize) as usize;
         self.selection_mut().set_column(new_col);
         self.clamp_selection();
+        self.update_anchor_from_current();
         vec![]
     }
 
@@ -1540,6 +1626,7 @@ impl App {
                 self.selection_mut().on_select_all = true;
             }
         }
+        self.update_anchor_from_current();
         vec![]
     }
 
@@ -1650,7 +1737,7 @@ impl App {
             task.sub_status = SubStatus::default_for(new_status);
             let task_clone = task.clone();
             self.clear_agent_tracking(id);
-            self.clamp_selection();
+            self.sync_board_selection();
 
             let mut cmds = Vec::new();
             if let Some(c) = detach {
@@ -1694,7 +1781,7 @@ impl App {
             }
         }
         self.select.tasks.clear();
-        self.clamp_selection();
+        self.sync_board_selection();
         cmds
     }
 
@@ -1749,7 +1836,7 @@ impl App {
             task.sub_status = SubStatus::default_for(TaskStatus::Running);
             let task_clone = task.clone();
             self.agents.mark_active(id);
-            self.clamp_selection();
+            self.sync_board_selection();
             let mut cmds = vec![Command::PersistTask(task_clone)];
             if switch_focus {
                 cmds.push(Command::JumpToTmux {
@@ -1764,7 +1851,7 @@ impl App {
 
     fn handle_task_created(&mut self, task: Task) -> Vec<Command> {
         self.board.tasks.push(task);
-        self.clamp_selection();
+        self.sync_board_selection();
         vec![]
     }
 
@@ -1772,7 +1859,7 @@ impl App {
         let cleanup = self.find_task_mut(id).and_then(Self::take_cleanup);
         self.clear_agent_tracking(id);
         self.board.tasks.retain(|t| t.id != id);
-        self.clamp_selection();
+        self.sync_board_selection();
         let archive_count = self.archived_tasks().len();
         if self.archive.selected_row >= archive_count && archive_count > 0 {
             self.archive.selected_row = archive_count - 1;
@@ -1795,8 +1882,8 @@ impl App {
         self.board.flattened = !self.board.flattened;
         // Column item counts change when toggling (epics hidden / shown, and
         // tasks from the subtree merged in / split out), so selection row
-        // indices may be out of bounds. Clamp to the nearest valid row.
-        self.clamp_selection();
+        // indices may be out of bounds. Sync to follow the anchor.
+        self.sync_board_selection();
         vec![]
     }
 
@@ -1919,7 +2006,7 @@ impl App {
         let valid_ids: HashSet<TaskId> = new_tasks.iter().map(|t| t.id).collect();
         self.select.tasks.retain(|id| valid_ids.contains(id));
         self.board.tasks = new_tasks;
-        self.clamp_selection();
+        self.sync_board_selection();
         cmds
     }
 
@@ -2149,7 +2236,7 @@ impl App {
             let task_clone = task.clone();
             self.agents.mark_active(id);
             self.agents.last_error.remove(&id);
-            self.clamp_selection();
+            self.sync_board_selection();
             self.set_status(format!("Task {id} resumed"));
             vec![Command::PersistTask(task_clone)]
         } else {
@@ -2175,7 +2262,7 @@ impl App {
             }
             t.updated_at = chrono::Utc::now();
         }
-        self.clamp_selection();
+        self.sync_board_selection();
         vec![]
     }
 
@@ -2292,7 +2379,7 @@ impl App {
             task.sub_status = SubStatus::default_for(TaskStatus::Archived);
             let task_clone = task.clone();
             self.clear_agent_tracking(id);
-            self.clamp_selection();
+            self.sync_board_selection();
 
             let mut cmds = Vec::new();
             if let Some(c) = cleanup {
@@ -2853,7 +2940,7 @@ impl App {
             task.sub_status = SubStatus::None;
             let task_clone = task.clone();
             self.clear_agent_tracking(id);
-            self.clamp_selection();
+            self.sync_board_selection();
             if !in_queue {
                 self.set_status(format!("Task {} finished", id));
             }
@@ -2996,7 +3083,7 @@ impl App {
             let task_clone = task.clone();
 
             self.clear_agent_tracking(id);
-            self.clamp_selection();
+            self.sync_board_selection();
             self.set_status(format!(
                 "{pr_label} merged \u{2014} task #{id} moved to Done"
             ));
@@ -4123,7 +4210,7 @@ impl App {
         if matches!(&self.board.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
             self.handle_exit_epic();
         }
-        self.clamp_selection();
+        self.sync_board_selection();
         cmds.push(Command::DeleteEpic(id));
         cmds
     }
@@ -4173,7 +4260,7 @@ impl App {
                 }
             }
         }
-        self.clamp_selection();
+        self.sync_board_selection();
         cmds
     }
 
@@ -4193,7 +4280,7 @@ impl App {
         if matches!(&self.board.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
             self.handle_exit_epic();
         }
-        self.clamp_selection();
+        self.sync_board_selection();
         cmds.push(Command::DeleteEpic(id));
         cmds
     }
@@ -4315,7 +4402,7 @@ impl App {
 
     fn handle_close_repo_filter(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.clamp_selection();
+        self.sync_board_selection();
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
         let value = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
@@ -4338,7 +4425,7 @@ impl App {
         } else {
             self.filter.repos.insert(path);
         }
-        self.clamp_selection();
+        self.sync_board_selection();
         vec![]
     }
 
@@ -4348,7 +4435,7 @@ impl App {
         } else {
             self.filter.repos = self.board.repo_paths.iter().cloned().collect();
         }
-        self.clamp_selection();
+        self.sync_board_selection();
         vec![]
     }
 
@@ -4357,7 +4444,7 @@ impl App {
             RepoFilterMode::Include => RepoFilterMode::Exclude,
             RepoFilterMode::Exclude => RepoFilterMode::Include,
         };
-        self.clamp_selection();
+        self.sync_board_selection();
         vec![]
     }
 
@@ -4450,7 +4537,7 @@ impl App {
                 .cloned()
                 .collect();
             self.filter.mode = *mode;
-            self.clamp_selection();
+            self.sync_board_selection();
             self.set_status(format!("Loaded preset \"{name}\""));
         }
         vec![]

@@ -17527,3 +17527,220 @@ fn sort_prs_for_display_stable_by_updated_at_within_repo() {
     assert_eq!(prs[0].number, 2);
     assert_eq!(prs[1].number, 1);
 }
+
+// ---------------------------------------------------------------------------
+// Task: approve/merge from review tab
+// ---------------------------------------------------------------------------
+
+fn make_reviewer_app_with_pr(
+    decision: ReviewDecision,
+    ci: crate::models::CiStatus,
+) -> (App, String) {
+    let mut pr = make_review_pr(42, "alice", decision);
+    pr.ci_status = ci;
+    let url = pr.url.clone();
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
+    // Navigate to the PR's column so it is selected
+    let col = decision.column_index();
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(col);
+    }
+    (app, url)
+}
+
+fn make_author_app_with_pr(
+    decision: ReviewDecision,
+    ci: crate::models::CiStatus,
+) -> (App, String) {
+    let mut pr = make_review_pr(42, "alice", decision);
+    pr.ci_status = ci;
+    let url = pr.url.clone();
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Author));
+    app.update(Message::PrsLoaded(PrListKind::Authored, vec![pr]));
+    let col = decision.column_index();
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(col);
+    }
+    (app, url)
+}
+
+#[test]
+fn review_approve_reviewer_mode_review_required_enters_confirm() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::ReviewRequired,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmApproveReviewPr(_)),
+        "expected ConfirmApproveReviewPr, got {:?}",
+        app.input.mode
+    );
+}
+
+#[test]
+fn review_approve_reviewer_mode_waiting_for_response_enters_confirm() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::WaitingForResponse,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmApproveReviewPr(_)));
+}
+
+#[test]
+fn review_approve_reviewer_mode_already_approved_is_blocked() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::Approved,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(
+        matches!(app.input.mode, InputMode::Normal),
+        "approve should be blocked when PR is already approved"
+    );
+    assert!(
+        app.status.message.is_some(),
+        "should show a status message when approve is blocked"
+    );
+}
+
+#[test]
+fn review_approve_author_mode_is_noop() {
+    let (mut app, _url) = make_author_app_with_pr(
+        ReviewDecision::ReviewRequired,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(
+        matches!(app.input.mode, InputMode::Normal),
+        "approve key should do nothing in author mode"
+    );
+}
+
+#[test]
+fn review_approve_confirm_y_emits_approve_command() {
+    let (mut app, url) = make_reviewer_app_with_pr(
+        ReviewDecision::ReviewRequired,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('a')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::ApproveReviewPr(u) if u == &url)),
+        "y should emit ApproveReviewPr command"
+    );
+    assert!(
+        matches!(app.input.mode, InputMode::Normal),
+        "mode should reset to Normal after confirm"
+    );
+}
+
+#[test]
+fn review_approve_confirm_n_cancels() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::ReviewRequired,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(
+        matches!(app.input.mode, InputMode::Normal),
+        "n should cancel and reset mode"
+    );
+}
+
+#[test]
+fn review_merge_reviewer_mode_approved_ci_success_enters_confirm() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::Approved,
+        crate::models::CiStatus::Success,
+    );
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
+        "merge should enter confirm mode when Approved + CI success"
+    );
+}
+
+#[test]
+fn review_merge_author_mode_approved_ci_none_enters_confirm() {
+    let (mut app, _url) = make_author_app_with_pr(
+        ReviewDecision::Approved,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
+        "merge should enter confirm mode in author mode when Approved"
+    );
+}
+
+#[test]
+fn review_merge_blocked_when_not_approved() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::ReviewRequired,
+        crate::models::CiStatus::None,
+    );
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(
+        matches!(app.input.mode, InputMode::Normal),
+        "merge should be blocked when PR is not Approved"
+    );
+    assert!(app.status.message.is_some());
+}
+
+#[test]
+fn review_merge_blocked_when_ci_failing() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::Approved,
+        crate::models::CiStatus::Failure,
+    );
+    app.handle_key(make_key(KeyCode::Char('m')));
+    assert!(
+        matches!(app.input.mode, InputMode::Normal),
+        "merge should be blocked when CI is failing"
+    );
+    assert!(app.status.message.is_some());
+}
+
+#[test]
+fn review_merge_confirm_y_emits_merge_command() {
+    let (mut app, url) = make_reviewer_app_with_pr(
+        ReviewDecision::Approved,
+        crate::models::CiStatus::Success,
+    );
+    app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::MergeReviewPr(u) if u == &url)),
+        "y should emit MergeReviewPr command"
+    );
+    assert!(matches!(app.input.mode, InputMode::Normal));
+}
+
+#[test]
+fn review_merge_confirm_n_cancels() {
+    let (mut app, _url) = make_reviewer_app_with_pr(
+        ReviewDecision::Approved,
+        crate::models::CiStatus::Success,
+    );
+    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('n')));
+    assert!(matches!(app.input.mode, InputMode::Normal));
+}
+
+#[test]
+fn review_approve_no_pr_selected_is_noop() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToReviewBoard);
+    // No PRs loaded
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(matches!(app.input.mode, InputMode::Normal));
+}

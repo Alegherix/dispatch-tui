@@ -1361,10 +1361,10 @@ impl App {
             Message::ToggleAllReviewRepoFilter => self.handle_toggle_all_review_repo_filter(),
             Message::ToggleReviewRepoFilterMode => self.handle_toggle_review_repo_filter_mode(),
             Message::ToggleDispatchPrFilter => self.handle_toggle_dispatch_pr_filter(),
-            Message::StartApproveReviewPr => vec![], // TODO: implement
-            Message::ConfirmApproveReviewPr => vec![], // TODO: implement
-            Message::StartMergeReviewPr => vec![], // TODO: implement
-            Message::ConfirmMergeReviewPr => vec![], // TODO: implement
+            Message::StartApproveReviewPr => self.handle_start_approve_review_pr(),
+            Message::ConfirmApproveReviewPr => self.handle_confirm_approve_review_pr(),
+            Message::StartMergeReviewPr => self.handle_start_merge_review_pr(),
+            Message::ConfirmMergeReviewPr => self.handle_confirm_merge_review_pr(),
             _ => unreachable!(),
         }
     }
@@ -3794,6 +3794,74 @@ impl App {
         self.security.dependabot.selected_prs.clear();
         self.set_status("Merging PR...".into());
         vec![Command::MergeBotPr(url)]
+    }
+
+    fn handle_start_approve_review_pr(&mut self) -> Vec<Command> {
+        let pr = self.selected_review_pr();
+        let Some(pr) = pr else {
+            self.set_status("No PR selected".into());
+            return vec![];
+        };
+        use crate::models::ReviewDecision;
+        let can_approve = matches!(
+            pr.review_decision,
+            ReviewDecision::ReviewRequired | ReviewDecision::WaitingForResponse
+        );
+        if !can_approve {
+            self.set_status("PR doesn't need your review".into());
+            return vec![];
+        }
+        let url = pr.url.clone();
+        let number_str = format!("#{}", pr.number);
+        self.set_status(format!("Approve PR {number_str}? (y/N)"));
+        self.input.mode = InputMode::ConfirmApproveReviewPr(url);
+        vec![]
+    }
+
+    fn handle_confirm_approve_review_pr(&mut self) -> Vec<Command> {
+        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
+            InputMode::ConfirmApproveReviewPr(url) => url,
+            other => {
+                self.input.mode = other;
+                return vec![];
+            }
+        };
+        self.set_status("Approving PR...".into());
+        vec![Command::ApproveReviewPr(url)]
+    }
+
+    fn handle_start_merge_review_pr(&mut self) -> Vec<Command> {
+        let pr = self.selected_review_pr();
+        let Some(pr) = pr else {
+            self.set_status("No PR selected".into());
+            return vec![];
+        };
+        use crate::models::{CiStatus, ReviewDecision};
+        if pr.review_decision != ReviewDecision::Approved {
+            self.set_status("PR is not approved yet".into());
+            return vec![];
+        }
+        if pr.ci_status == CiStatus::Failure {
+            self.set_status("CI is failing — cannot merge".into());
+            return vec![];
+        }
+        let url = pr.url.clone();
+        let number_str = format!("#{}", pr.number);
+        self.set_status(format!("Merge PR {number_str}? (y/N)"));
+        self.input.mode = InputMode::ConfirmMergeReviewPr(url);
+        vec![]
+    }
+
+    fn handle_confirm_merge_review_pr(&mut self) -> Vec<Command> {
+        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
+            InputMode::ConfirmMergeReviewPr(url) => url,
+            other => {
+                self.input.mode = other;
+                return vec![];
+            }
+        };
+        self.set_status("Merging PR...".into());
+        vec![Command::MergeReviewPr(url)]
     }
 
     fn handle_cancel_pr_operation(&mut self) -> Vec<Command> {

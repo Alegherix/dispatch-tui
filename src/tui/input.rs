@@ -55,8 +55,12 @@ impl App {
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmApproveBotPr(_) => self.handle_key_confirm_pr_op(key, true),
             InputMode::ConfirmMergeBotPr(_) => self.handle_key_confirm_pr_op(key, false),
-            InputMode::ConfirmApproveReviewPr(_) => vec![], // TODO: implement
-            InputMode::ConfirmMergeReviewPr(_) => vec![],   // TODO: implement
+            InputMode::ConfirmApproveReviewPr(_) => {
+                self.handle_key_confirm_review_pr_op(key, true)
+            }
+            InputMode::ConfirmMergeReviewPr(_) => {
+                self.handle_key_confirm_review_pr_op(key, false)
+            }
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
         }
     }
@@ -1265,6 +1269,22 @@ impl App {
                 }
             }
 
+            KeyCode::Char('a') => {
+                if matches!(
+                    self.board.view_mode,
+                    ViewMode::ReviewBoard {
+                        mode: ReviewBoardMode::Reviewer,
+                        ..
+                    }
+                ) {
+                    self.update(Message::StartApproveReviewPr)
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('m') => self.update(Message::StartMergeReviewPr),
+
             _ => vec![],
         }
     }
@@ -1276,6 +1296,23 @@ impl App {
                     self.update(Message::ConfirmApproveBotPr)
                 } else {
                     self.update(Message::ConfirmMergeBotPr)
+                }
+            }
+            _ => self.update(Message::CancelPrOperation),
+        }
+    }
+
+    fn handle_key_confirm_review_pr_op(
+        &mut self,
+        key: KeyEvent,
+        is_approve: bool,
+    ) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if is_approve {
+                    self.update(Message::ConfirmApproveReviewPr)
+                } else {
+                    self.update(Message::ConfirmMergeReviewPr)
                 }
             }
             _ => self.update(Message::CancelPrOperation),

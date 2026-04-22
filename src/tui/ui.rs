@@ -3452,6 +3452,22 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
         chunks[3],
     );
 
+    if app.security.unconfigured {
+        let prompt =
+            "No repositories configured — press [e] to set up security alert queries";
+        frame.render_widget(
+            Paragraph::new(prompt)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::DarkGray)),
+            chunks[4],
+        );
+        // Filter overlay still available when unconfigured
+        if matches!(app.mode(), InputMode::SecurityRepoFilter) {
+            render_security_repo_filter_overlay(frame, app, area);
+        }
+        return;
+    }
+
     let filtered = app.filtered_security_alerts();
     if filtered.is_empty() {
         let msg = if app.filtered_security_alerts().is_empty() && !app.security.alerts.is_empty() {

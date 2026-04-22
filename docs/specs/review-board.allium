@@ -371,6 +371,39 @@ rule BotPrsMergedCleanupReviewBoard {
         -- BotPrsMerged is not emitted at all.
 }
 
+-- == Stale Review Agent Cleanup ==
+
+rule StaleReviewAgentCleanup {
+    -- After any PR list (reviewer / authored / bot) finishes loading, review
+    -- agents whose PR no longer appears in ANY of the three lists are cleaned up.
+    -- This runs on every list refresh (every 30 s) and covers PRs that were
+    -- closed or merged directly on GitHub without going through the TUI.
+
+    when: PrsLoaded(kind, prs)
+
+    for agent in review_agents:
+        let all_pr_keys = union(reviewer_prs, authored_prs, bot_prs)
+        if agent.pr_ref ∉ all_pr_keys:
+            ensures: agent.tmux_window = null
+            ensures: agent.worktree = null
+            ensures: agent.agent_status = null
+
+    @guidance
+        -- Implemented in handle_prs_loaded via the cleanup_stale_review_agents()
+        -- helper. The helper builds pr_keys from all three lists (reviewer,
+        -- authored, bot) and calls cleanup_review_board_pr() for each agent
+        -- key not found in the union.
+        --
+        -- Previous (broken) behaviour: cleanup only checked the reviewer and
+        -- authored lists. Dependabot PR agents were never in those lists, so
+        -- they were cleaned up — and their tmux windows killed — on every
+        -- reviewer/authored list refresh (~30 s cadence).
+        --
+        -- Cleanup order matters: set_prs() is called before
+        -- cleanup_stale_review_agents() so the freshly loaded list is already
+        -- reflected when we decide which agents are stale.
+}
+
 -- == Review Status Updates from Agents ==
 
 rule UpdateReviewStatusViaMcp {

@@ -38,6 +38,20 @@ fn bot_pr_column(
     }
 }
 
+/// Sort a slice of bot-PR references for display within a column.
+///
+/// Primary key: repo name (alphabetical). Secondary key: `updated_at` DESC
+/// within the same repo. This guarantees that all PRs from the same repo form
+/// a single consecutive block, so the repo group header is emitted exactly
+/// once per repo regardless of the order returned by GitHub.
+pub(in crate::tui) fn sort_prs_for_display(prs: &mut Vec<&crate::models::ReviewPr>) {
+    prs.sort_by(|a, b| {
+        a.repo
+            .cmp(&b.repo)
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------

@@ -31,9 +31,7 @@ use crate::editor::{
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
-use crate::tui::{
-    self, App, Command, Message, PrListKind, RepoFilterMode, ReviewAgentRequest, ReviewBoardMode,
-};
+use crate::tui::{self, App, Command, Message, PrListKind, RepoFilterMode, ReviewAgentRequest};
 use crate::{db, dispatch, mcp, models, tmux};
 
 /// Convert `Option<String>` to `FieldUpdate`: `Some(v)` → `Set(v)`, `None` → `Clear`.
@@ -325,6 +323,59 @@ impl TuiRuntime {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Load the structured dependabot config, running migration from the old
+    /// `github_queries_bot` setting if needed. Returns the assembled queries
+    /// and logs any slug warnings.
+    pub(super) fn load_dependabot_queries(&self) -> Vec<String> {
+        use crate::github::{
+            assemble_dependabot_queries, format_dependabot_config,
+            migrate_bot_queries_to_dependabot_config, parse_dependabot_config,
+        };
+
+        // Migration: convert old freeform queries to structured config on first load.
+        let existing = self
+            .database
+            .get_setting_string("dependabot_config")
+            .ok()
+            .flatten();
+        if existing.is_none() {
+            let old = self
+                .database
+                .get_setting_string("github_queries_bot")
+                .ok()
+                .flatten();
+            if let Some(migrated) = migrate_bot_queries_to_dependabot_config(old.as_deref()) {
+                let content = format_dependabot_config(&migrated);
+                if let Err(e) = self
+                    .database
+                    .set_setting_string("dependabot_config", &content)
+                {
+                    tracing::warn!("Failed to migrate dependabot config: {e}");
+                } else {
+                    // Clear old key so it no longer interferes.
+                    let _ = self.database.set_setting_string("github_queries_bot", "");
+                    tracing::info!(
+                        repos = migrated.repos.len(),
+                        "Migrated github_queries_bot → dependabot_config"
+                    );
+                }
+            }
+        }
+
+        let raw = self
+            .database
+            .get_setting_string("dependabot_config")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let config = parse_dependabot_config(&raw);
+        let (queries, warnings) = assemble_dependabot_queries(&config);
+        for w in &warnings {
+            tracing::warn!("{w}");
+        }
+        queries
     }
 
     fn create_task(

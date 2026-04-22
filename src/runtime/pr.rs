@@ -82,12 +82,16 @@ impl TuiRuntime {
     pub(super) fn exec_fetch_prs(&self, kind: PrListKind) {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
-        let queries = self.load_github_queries(kind.settings_key());
+        let queries = if kind == PrListKind::Bot {
+            self.load_dependabot_queries()
+        } else {
+            self.load_github_queries(kind.settings_key())
+        };
 
         if queries.is_empty() && kind == PrListKind::Bot {
             let _ = tx.send(Message::PrsFetchFailed(
                 kind,
-                "Bot queries not configured — press [e] to add your org filter".to_string(),
+                "Bot queries not configured — press [e] to add repos".to_string(),
             ));
             return;
         }

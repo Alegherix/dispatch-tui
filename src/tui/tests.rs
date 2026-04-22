@@ -17246,7 +17246,9 @@ fn make_two_bot_pr_app() -> App {
     let mut pr_b = make_review_pr(2, "dependabot[bot]", ReviewDecision::ReviewRequired);
     pr_b.repo = "org/repo-b".to_string();
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr_a, pr_b]));
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Dependabot));
+    app.update(Message::SwitchSecurityBoardMode(
+        SecurityBoardMode::Dependabot,
+    ));
     app
 }
 
@@ -17274,7 +17276,7 @@ fn get_dependabot_row(app: &App, col: usize) -> usize {
 fn toggle_bot_pr_repo_filter_clamps_selection() {
     let mut app = make_two_bot_pr_app();
     set_dependabot_row(&mut app, 0, 1); // cursor at row 1 (2 PRs visible in backlog)
-    // Include only repo-a → 1 PR visible, cursor must clamp to 0
+                                        // Include only repo-a → 1 PR visible, cursor must clamp to 0
     app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
     assert_eq!(app.filtered_bot_prs().len(), 1);
     assert_eq!(get_dependabot_row(&app, 0), 0);
@@ -17297,10 +17299,10 @@ fn close_bot_pr_filter_clamps_selection() {
 fn toggle_all_bot_pr_repo_filter_clamps_selection() {
     let mut app = make_two_bot_pr_app();
     set_dependabot_row(&mut app, 0, 1); // cursor at row 1 (2 PRs)
-    // Switch to exclude mode, then toggle-all selects all repos →
-    // exclude all repos → 0 PRs visible → cursor must clamp to 0
+                                        // Switch to exclude mode, then toggle-all selects all repos →
+                                        // exclude all repos → 0 PRs visible → cursor must clamp to 0
     app.update(Message::ToggleBotPrRepoFilterMode); // switch to exclude
-    app.update(Message::ToggleAllBotPrRepoFilter);  // select all repos → exclude all
+    app.update(Message::ToggleAllBotPrRepoFilter); // select all repos → exclude all
     assert_eq!(app.filtered_bot_prs().len(), 0);
     assert_eq!(get_dependabot_row(&app, 0), 0);
 }
@@ -17419,4 +17421,109 @@ fn security_alerts_fetch_failed_clears_unconfigured_flag() {
     app.security.unconfigured = true;
     app.update(Message::SecurityAlertsFetchFailed("network error".into()));
     assert!(!app.security.unconfigured);
+}
+
+// ---------------------------------------------------------------------------
+// sort_prs_for_display tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sort_prs_for_display_groups_by_repo_alphabetically() {
+    let pr1 = make_review_pr_for_repo(
+        1,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/zzz",
+    );
+    let pr2 = make_review_pr_for_repo(
+        2,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/aaa",
+    );
+    let pr3 = make_review_pr_for_repo(
+        3,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/zzz",
+    );
+
+    let mut prs = vec![&pr1, &pr2, &pr3];
+    super::sort_prs_for_display(&mut prs);
+
+    // acme/aaa comes before acme/zzz alphabetically
+    assert_eq!(prs[0].repo, "acme/aaa");
+    assert_eq!(prs[1].repo, "acme/zzz");
+    assert_eq!(prs[2].repo, "acme/zzz");
+}
+
+#[test]
+fn sort_prs_for_display_no_duplicate_consecutive_repos() {
+    // Simulate interleaved order as returned by GitHub (sorted by updated_at across repos).
+    let mut pr_backend_old = make_review_pr_for_repo(
+        1,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/backend",
+    );
+    pr_backend_old.updated_at = chrono::DateTime::from_timestamp(1000, 0).unwrap();
+    let mut pr_app_mid = make_review_pr_for_repo(
+        2,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
+    pr_app_mid.updated_at = chrono::DateTime::from_timestamp(2000, 0).unwrap();
+    let mut pr_backend_new = make_review_pr_for_repo(
+        3,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/backend",
+    );
+    pr_backend_new.updated_at = chrono::DateTime::from_timestamp(3000, 0).unwrap();
+
+    // Sorted globally by updated_at DESC: [backend_new(3000), app_mid(2000), backend_old(1000)]
+    // → interleaved repos → duplicate headers without sort_prs_for_display.
+    let mut prs = vec![&pr_backend_new, &pr_app_mid, &pr_backend_old];
+    super::sort_prs_for_display(&mut prs);
+
+    // After sort: all acme/app PRs consecutive, all acme/backend consecutive.
+    let mut seen_repos: Vec<&str> = Vec::new();
+    let mut prev_repo = "";
+    for pr in &prs {
+        if pr.repo != prev_repo {
+            assert!(
+                !seen_repos.contains(&pr.repo.as_str()),
+                "Duplicate repo group: {}",
+                pr.repo
+            );
+            seen_repos.push(&pr.repo);
+            prev_repo = &pr.repo;
+        }
+    }
+}
+
+#[test]
+fn sort_prs_for_display_stable_by_updated_at_within_repo() {
+    let mut pr_old = make_review_pr_for_repo(
+        1,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
+    pr_old.updated_at = chrono::DateTime::from_timestamp(1000, 0).unwrap();
+    let mut pr_new = make_review_pr_for_repo(
+        2,
+        "dependabot[bot]",
+        ReviewDecision::ReviewRequired,
+        "acme/app",
+    );
+    pr_new.updated_at = chrono::DateTime::from_timestamp(2000, 0).unwrap();
+
+    let mut prs = vec![&pr_old, &pr_new];
+    super::sort_prs_for_display(&mut prs);
+
+    // Within same repo: newer (2000) before older (1000)
+    assert_eq!(prs[0].number, 2);
+    assert_eq!(prs[1].number, 1);
 }

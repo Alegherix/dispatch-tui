@@ -3441,8 +3441,7 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
     render_security_mode_header(frame, SecurityBoardMode::Alerts, chunks[1]);
 
     if app.security.unconfigured {
-        let prompt =
-            "No repositories configured — press [e] to set up security alert queries";
+        let prompt = "No repositories configured — press [e] to set up security alert queries";
         frame.render_widget(
             Paragraph::new(prompt)
                 .alignment(Alignment::Center)
@@ -3720,11 +3719,12 @@ fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         let decision_for_color = col_decisions[i];
         let selected_row = sel_rows[i];
 
-        let prs: Vec<&ReviewPr> = app
+        let mut prs: Vec<&ReviewPr> = app
             .filtered_bot_prs()
             .into_iter()
             .filter(|pr| super::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == i)
             .collect();
+        super::sort_prs_for_display(&mut prs);
 
         let mut list_items: Vec<ListItem> = Vec::new();
         let mut list_selection_idx: Option<usize> = None;

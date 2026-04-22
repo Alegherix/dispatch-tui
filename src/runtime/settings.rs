@@ -141,11 +141,15 @@ impl TuiRuntime {
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
     ) -> Result<Vec<Command>> {
+        if kind == PrListKind::Bot {
+            return self.exec_edit_dependabot_config(app, terminal, key_rx);
+        }
+
         let key = kind.settings_key();
         let label = match kind {
             PrListKind::Review => "Review PRs",
             PrListKind::Authored => "My PRs",
-            PrListKind::Bot => "Dependabot / Renovate PRs",
+            PrListKind::Bot => unreachable!(),
         };
 
         let current = self
@@ -179,12 +183,64 @@ impl TuiRuntime {
             return Ok(vec![]);
         }
 
-        // Trigger a refresh for the affected category
-        let refresh_msg = match kind {
-            PrListKind::Review | PrListKind::Authored => Message::RefreshReviewPrs,
-            PrListKind::Bot => Message::RefreshBotPrs,
+        Ok(app.update(Message::RefreshReviewPrs))
+    }
+
+    fn exec_edit_dependabot_config(
+        &self,
+        app: &mut App,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
+    ) -> Result<Vec<Command>> {
+        use crate::github::{
+            assemble_dependabot_queries, format_dependabot_config, parse_dependabot_config,
+            DependabotConfig,
         };
-        Ok(app.update(refresh_msg))
+
+        // Load current config (or build a default template if not yet set).
+        let raw = self
+            .database
+            .get_setting_string("dependabot_config")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
+        let current = if raw.trim().is_empty() {
+            format_dependabot_config(&DependabotConfig::default())
+        } else {
+            raw
+        };
+
+        let header = "# Dependabot / Renovate PR queries\n\
+                      #\n\
+                      # Base query: GitHub search filters applied to every repo.\n\
+                      # Repositories: one owner/repo slug per line.\n\
+                      # Lines starting with # are ignored.\n\n";
+        let content = format!("{header}{current}\n");
+
+        let Some(edited) = self.run_editor(terminal, key_rx, "dependabot-config-", &content)?
+        else {
+            return Ok(vec![]);
+        };
+
+        let config = parse_dependabot_config(&edited);
+        let (_, warnings) = assemble_dependabot_queries(&config);
+        for w in &warnings {
+            app.update(Message::StatusInfo(w.clone()));
+        }
+
+        if let Err(e) = self
+            .database
+            .set_setting_string("dependabot_config", &format_dependabot_config(&config))
+        {
+            app.update(Message::Error(Self::db_error(
+                "saving dependabot config",
+                e,
+            )));
+            return Ok(vec![]);
+        }
+
+        Ok(app.update(Message::RefreshBotPrs))
     }
 
     pub(super) fn exec_edit_security_queries(

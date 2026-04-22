@@ -1,8 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{
-    App, ColumnItem, Command, FixAgentRequest, InputMode, Message, MoveDirection,
-    PrListKind, ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
+    App, ColumnItem, Command, FixAgentRequest, InputMode, Message, MoveDirection, PrListKind,
+    ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
 };
 use crate::models::{
     AlertSeverity, DispatchMode, EpicId, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,

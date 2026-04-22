@@ -477,6 +477,136 @@ pub fn fetch_security_alerts(
     Ok(alerts)
 }
 
+// ---------------------------------------------------------------------------
+// Dependabot structured config
+// ---------------------------------------------------------------------------
+
+pub const DEFAULT_DEPENDABOT_BASE_QUERY: &str = "is:pr is:open author:app/dependabot -is:draft";
+
+/// Parsed representation of the `dependabot_config` settings blob.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DependabotConfig {
+    /// Base GitHub search string applied to every repo query.
+    pub base_query: String,
+    /// Ordered list of `owner/repo` slugs to query.
+    pub repos: Vec<String>,
+}
+
+impl Default for DependabotConfig {
+    fn default() -> Self {
+        Self {
+            base_query: DEFAULT_DEPENDABOT_BASE_QUERY.to_string(),
+            repos: Vec::new(),
+        }
+    }
+}
+
+/// Parse the two-section structured config text into a `DependabotConfig`.
+///
+/// Format:
+/// ```text
+/// # Base query
+/// is:pr is:open author:app/dependabot -is:draft
+///
+/// # Repositories
+/// owner/repo-a
+/// owner/repo-b
+/// ```
+///
+/// Lines whose trimmed form starts with `#` are treated as comments and
+/// ignored within each section (except the `# Repositories` section marker
+/// which is the split point between sections).
+///
+/// If the base-query section is empty, `DEFAULT_DEPENDABOT_BASE_QUERY` is used.
+pub fn parse_dependabot_config(input: &str) -> DependabotConfig {
+    let mut base_lines: Vec<&str> = Vec::new();
+    let mut repo_lines: Vec<String> = Vec::new();
+    let mut in_repos_section = false;
+
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.eq_ignore_ascii_case("# repositories") {
+            in_repos_section = true;
+            continue;
+        }
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        if in_repos_section {
+            repo_lines.push(trimmed.to_string());
+        } else {
+            base_lines.push(trimmed);
+        }
+    }
+
+    let base_query = if base_lines.is_empty() {
+        DEFAULT_DEPENDABOT_BASE_QUERY.to_string()
+    } else {
+        base_lines.join(" ")
+    };
+
+    DependabotConfig {
+        base_query,
+        repos: repo_lines,
+    }
+}
+
+/// Render a `DependabotConfig` back to its structured text representation.
+pub fn format_dependabot_config(config: &DependabotConfig) -> String {
+    let repos = config.repos.join("\n");
+    format!(
+        "# Base query\n{}\n\n# Repositories\n{}\n",
+        config.base_query, repos
+    )
+}
+
+/// Assemble GitHub search query strings from a `DependabotConfig`.
+///
+/// Returns `(queries, warnings)`. Slugs that do not contain `/` are skipped
+/// and a warning string is added for each.
+pub fn assemble_dependabot_queries(config: &DependabotConfig) -> (Vec<String>, Vec<String>) {
+    let mut queries = Vec::new();
+    let mut warnings = Vec::new();
+    for repo in &config.repos {
+        if repo.contains('/') {
+            queries.push(format!("{} repo:{repo}", config.base_query));
+        } else {
+            warnings.push(format!("Invalid repo slug (missing '/'): '{repo}'"));
+        }
+    }
+    (queries, warnings)
+}
+
+/// Migrate the old `github_queries_bot` setting to `dependabot_config`.
+///
+/// Extracts `repo:owner/name` tokens from the old query lines and constructs
+/// a new structured config with the default base query. Deletes the old key
+/// on success. No-ops if `dependabot_config` is already set or `github_queries_bot`
+/// is absent.
+pub fn migrate_bot_queries_to_dependabot_config(
+    old_value: Option<&str>,
+) -> Option<DependabotConfig> {
+    let old = old_value?;
+    let mut repos: Vec<String> = Vec::new();
+    for line in old.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        for token in trimmed.split_whitespace() {
+            if let Some(slug) = token.strip_prefix("repo:") {
+                if slug.contains('/') && !repos.contains(&slug.to_string()) {
+                    repos.push(slug.to_string());
+                }
+            }
+        }
+    }
+    Some(DependabotConfig {
+        base_query: DEFAULT_DEPENDABOT_BASE_QUERY.to_string(),
+        repos,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1260,11 +1390,9 @@ mod tests {
         let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
             PER_REPO_RESPONSE.as_bytes(),
         )]);
-        let alerts = fetch_security_alerts(
-            &runner,
-            &["acme/app".to_string(), "acme/lib".to_string()],
-        )
-        .unwrap();
+        let alerts =
+            fetch_security_alerts(&runner, &["acme/app".to_string(), "acme/lib".to_string()])
+                .unwrap();
 
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].repo, "acme/app");
@@ -1316,11 +1444,9 @@ mod tests {
         }"#;
         let runner =
             MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(response.as_bytes())]);
-        let alerts = fetch_security_alerts(
-            &runner,
-            &["acme/app".to_string(), "acme/lib".to_string()],
-        )
-        .unwrap();
+        let alerts =
+            fetch_security_alerts(&runner, &["acme/app".to_string(), "acme/lib".to_string()])
+                .unwrap();
         assert_eq!(alerts.len(), 2);
         assert_eq!(alerts[0].severity, AlertSeverity::Critical);
         assert_eq!(alerts[1].severity, AlertSeverity::High);
@@ -1362,8 +1488,14 @@ mod tests {
         assert_eq!(runner.recorded_calls().len(), 1);
         let calls = runner.recorded_calls();
         let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
-        assert!(query_arg.contains("r1: repository"), "valid slug at index 1 should become r1");
-        assert!(!query_arg.contains("r0: repository"), "invalid slug at index 0 should be absent");
+        assert!(
+            query_arg.contains("r1: repository"),
+            "valid slug at index 1 should become r1"
+        );
+        assert!(
+            !query_arg.contains("r0: repository"),
+            "invalid slug at index 0 should be absent"
+        );
     }
 
     #[test]
@@ -1390,5 +1522,110 @@ mod tests {
         assert!(gql.contains("q0: search(query: \"query-a\""));
         assert!(gql.contains("q1: search(query: \"query-b\""));
         assert!(gql.contains("q2: search(query: \"query-c\""));
+    }
+
+    // -----------------------------------------------------------------------
+    // DependabotConfig parser tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_dependabot_config_splits_base_and_repos() {
+        let input = "# Base query\nis:pr is:open author:app/dependabot -is:draft\n\n# Repositories\nacme/frontend\nacme/backend\n";
+        let cfg = parse_dependabot_config(input);
+        assert_eq!(
+            cfg.base_query,
+            "is:pr is:open author:app/dependabot -is:draft"
+        );
+        assert_eq!(cfg.repos, vec!["acme/frontend", "acme/backend"]);
+    }
+
+    #[test]
+    fn parse_dependabot_config_ignores_comments_and_blanks() {
+        let input = "# Base query\nis:pr is:open -is:draft\n\n# Repositories\n# skip this\nacme/frontend\n\nacme/backend\n# also skip\n";
+        let cfg = parse_dependabot_config(input);
+        assert_eq!(cfg.repos, vec!["acme/frontend", "acme/backend"]);
+    }
+
+    #[test]
+    fn parse_dependabot_config_empty_repos_returns_empty_vec() {
+        let input = "# Base query\nis:pr is:open\n\n# Repositories\n";
+        let cfg = parse_dependabot_config(input);
+        assert!(cfg.repos.is_empty());
+    }
+
+    #[test]
+    fn parse_dependabot_config_missing_repos_section_uses_empty() {
+        let input = "# Base query\nis:pr is:open author:app/dependabot\n";
+        let cfg = parse_dependabot_config(input);
+        assert!(cfg.repos.is_empty());
+        assert_eq!(cfg.base_query, "is:pr is:open author:app/dependabot");
+    }
+
+    #[test]
+    fn parse_dependabot_config_missing_base_uses_default() {
+        let input = "# Base query\n\n# Repositories\nacme/app\n";
+        let cfg = parse_dependabot_config(input);
+        assert_eq!(cfg.base_query, DEFAULT_DEPENDABOT_BASE_QUERY);
+        assert_eq!(cfg.repos, vec!["acme/app"]);
+    }
+
+    #[test]
+    fn assemble_queries_produces_base_plus_repo() {
+        let cfg = DependabotConfig {
+            base_query: "is:pr is:open author:app/dependabot".to_string(),
+            repos: vec!["acme/frontend".to_string(), "acme/backend".to_string()],
+        };
+        let (queries, warnings) = assemble_dependabot_queries(&cfg);
+        assert!(warnings.is_empty());
+        assert_eq!(
+            queries,
+            vec![
+                "is:pr is:open author:app/dependabot repo:acme/frontend",
+                "is:pr is:open author:app/dependabot repo:acme/backend",
+            ]
+        );
+    }
+
+    #[test]
+    fn assemble_queries_skips_invalid_slug() {
+        let cfg = DependabotConfig {
+            base_query: "is:pr is:open".to_string(),
+            repos: vec!["notaslug".to_string(), "acme/valid".to_string()],
+        };
+        let (queries, warnings) = assemble_dependabot_queries(&cfg);
+        assert_eq!(queries, vec!["is:pr is:open repo:acme/valid"]);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("notaslug"));
+    }
+
+    #[test]
+    fn migrate_bot_queries_extracts_repos() {
+        let old = "is:pr is:open author:app/dependabot repo:acme/frontend repo:acme/backend\n";
+        let cfg = migrate_bot_queries_to_dependabot_config(Some(old)).unwrap();
+        assert_eq!(cfg.repos, vec!["acme/frontend", "acme/backend"]);
+        assert_eq!(cfg.base_query, DEFAULT_DEPENDABOT_BASE_QUERY);
+    }
+
+    #[test]
+    fn migrate_bot_queries_deduplicates_repos() {
+        let old = "repo:acme/app\nrepo:acme/app repo:acme/backend\n";
+        let cfg = migrate_bot_queries_to_dependabot_config(Some(old)).unwrap();
+        assert_eq!(cfg.repos, vec!["acme/app", "acme/backend"]);
+    }
+
+    #[test]
+    fn migrate_bot_queries_noop_when_none() {
+        assert!(migrate_bot_queries_to_dependabot_config(None).is_none());
+    }
+
+    #[test]
+    fn format_dependabot_config_roundtrips() {
+        let cfg = DependabotConfig {
+            base_query: "is:pr is:open author:app/dependabot -is:draft".to_string(),
+            repos: vec!["acme/frontend".to_string(), "acme/backend".to_string()],
+        };
+        let formatted = format_dependabot_config(&cfg);
+        let parsed = parse_dependabot_config(&formatted);
+        assert_eq!(parsed, cfg);
     }
 }

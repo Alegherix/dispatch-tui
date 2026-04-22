@@ -56,8 +56,11 @@ rule DependabotColumnPlacement(pr: rb/ReviewPr) -> DependabotColumn {
 -- column (which is the only column that contains reviewing / findings_ready
 -- items), but the stable sort is applied to the full filtered list.
 --
--- The underlying order (for PRs with the same sort priority) is updated_at
--- descending as delivered by fetch_prs.
+-- Within each priority tier, PRs are further sorted by their repo's position
+-- in the dependabot_config repo list (repo-config order), then by updated_at
+-- descending within the same repo. This guarantees that all PRs from the same
+-- repo appear as a consecutive block in the column — no interleaved repos,
+-- no duplicate repo group headers.
 
 rule DependabotSortPriority(pr: rb/ReviewPr) -> Nat {
     when pr.agent_status == findings_ready => 0
@@ -280,6 +283,26 @@ config {
     review_refresh_interval: Duration = 30.seconds
     staleness_fresh_max: Duration = 3.days
     staleness_aging_max: Duration = 7.days
+    -- Structured query config stored as a text blob in the settings table under
+    -- the key "dependabot_config". Contains two sections separated by
+    -- "# Repositories":
+    --
+    --   # Base query
+    --   is:pr is:open author:app/dependabot -is:draft
+    --
+    --   # Repositories
+    --   owner/repo-a
+    --   owner/repo-b
+    --
+    -- Lines starting with # are treated as comments and ignored within each
+    -- section. At runtime one GitHub search query is assembled per repo:
+    --   "{base_query} repo:{slug}"
+    -- These become the q0, q1, ... aliases passed to fetch_prs.
+    --
+    -- Migration: if github_queries_bot is set and dependabot_config is not,
+    -- repo slugs are extracted from "repo:owner/name" tokens in the old queries
+    -- and a default dependabot_config is written. The old key is deleted.
+    dependabot_config: String = ""
 }
 
 ------------------------------------------------------------
@@ -340,7 +363,17 @@ visual StalenessColor(age: Duration) -> Color {
 
 rule EditBotQueries {
     when: UserAction([e]) and ViewMode = SecurityBoard(Dependabot)
-    opens: $EDITOR with github_queries_bot setting
-    on_save: strips comments and blank lines, persists, triggers RefreshBotPrs
+    opens: $EDITOR with dependabot_config setting as a structured two-section file:
+        -- "# Base query\n{base_query}\n\n# Repositories\n{repo1}\n{repo2}\n..."
+        -- If dependabot_config is not yet set, a default template is shown.
+    on_save: parses the two sections, validates repo slugs (must contain "/"),
+             persists to dependabot_config, triggers RefreshBotPrs.
+             Invalid slugs (no "/") are skipped with a status-bar warning.
     on_cancel: no change
+    @guidance
+        -- Migration: on the first call to exec_fetch_prs after an upgrade,
+        -- if github_queries_bot is present and dependabot_config is absent,
+        -- the runtime extracts "repo:owner/name" tokens from the old queries,
+        -- writes dependabot_config with those repos and the default base query,
+        -- then deletes github_queries_bot.
 }

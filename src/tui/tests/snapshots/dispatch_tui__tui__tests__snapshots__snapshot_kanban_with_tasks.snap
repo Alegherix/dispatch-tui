@@ -1,0 +1,44 @@
+---
+source: src/tui/tests/snapshots.rs
+expression: rendered
+---
+ ▸ Tasks  │  Reviews  │  Security   [Tab]                                                                         🔕  [N]
+        ▸ backlog 2 [ ]                 ◦ running 1                   ◦ review 0                     ◦ done 1
+  ▌ #1 Task 1                   ── active                                                   ▎ #4 Task 4
+   ◦ <1h                        ▎ #3 Task 3                                                  ✓ <1h
+  ▎ #2 Task 2                    ◉ running
+   ◦ <1h
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+[d] brainstorm  [e]dit  [m]ove  [x] archive  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quick  [S]plit

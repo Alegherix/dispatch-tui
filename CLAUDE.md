@@ -39,7 +39,30 @@ cargo test --test cli              # CLI subcommand smoke tests
 
 # Single test by name (substring match)
 cargo test update_task_params_has_any_field
+
+# Scenario tests (key-sequence integration tests)
+cargo test tui::tests::scenarios
+
+# Snapshot tests (ratatui buffer rendering tests)
+cargo test tui::tests::snapshots
 ```
+
+### Snapshot Tests
+
+Snapshot tests in `src/tui/tests/snapshots.rs` render the TUI to a 120×40 `TestBackend` buffer and compare against committed `.snap` files in `src/tui/tests/snapshots/`.
+
+**Updating snapshots intentionally** (e.g. after a deliberate UI change):
+
+```bash
+# Accept all pending new snapshots
+cargo insta review
+
+# Or auto-accept without interactive review
+INSTA_UPDATE=always cargo test tui::tests::snapshots
+rm src/tui/tests/snapshots/*.snap.new  # clean up leftover .snap.new files
+```
+
+Keep snapshots at 120×40 so failure diffs remain readable.
 
 ## Test-Driven Development
 

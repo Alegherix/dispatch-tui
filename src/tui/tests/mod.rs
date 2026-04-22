@@ -1,3 +1,6 @@
+pub mod scenarios;
+pub mod snapshots;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::TestBackend,

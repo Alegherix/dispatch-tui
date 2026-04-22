@@ -26,6 +26,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tempfile = "3"
 
 [dev-dependencies]
+insta = { version = "1", features = ["filters"] }
 proptest = "1"
 
 [[bin]]

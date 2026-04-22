@@ -1,0 +1,44 @@
+---
+source: src/tui/tests/snapshots.rs
+expression: rendered
+---
+ Tasks  │  Reviews  │  ▸ Security (3)   [Tab] tasks  [Esc] back                                                   🔕  [N]
+[1] Dependabot  [2] Alerts
+▸ Critical (2)                ◦ High (1)                    ◦ Medium (0)                  ◦ Low (0)
+Updated 0s ago  [r] refresh
+  ── alpha                      ── beta
+▌ #1 Alert 1                  ▎ #2 Alert 2
+  ⬡ Dependabot · some-pkg · <1  ⬡ Dependabot · some-pkg · <1
+
+  ── gamma
+▎ #3 Alert 3
+  ⬡ Dependabot · some-pkg · <1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[Enter] detail  [d]ispatch  [p] open  [f]ilter  [t] kind:all  [Tab] tasks  [?] help  [q]uit

@@ -558,10 +558,10 @@ async fn execute_commands(
             } => queue.extend(rt.exec_persist_review_agent(
                 app,
                 pr_kind,
-                github_repo,
+                &github_repo,
                 number,
-                tmux_window,
-                worktree,
+                &tmux_window,
+                &worktree,
             )),
             Command::PersistFixAgent {
                 github_repo,
@@ -571,11 +571,11 @@ async fn execute_commands(
                 worktree,
             } => queue.extend(rt.exec_persist_fix_agent(
                 app,
-                github_repo,
+                &github_repo,
                 number,
                 kind,
-                tmux_window,
-                worktree,
+                &tmux_window,
+                &worktree,
             )),
             Command::InsertTask { draft, epic_id } => rt.exec_insert_task(app, draft, epic_id),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),

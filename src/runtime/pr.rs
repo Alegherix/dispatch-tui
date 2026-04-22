@@ -207,18 +207,16 @@ impl TuiRuntime {
         &self,
         app: &mut App,
         pr_kind: db::PrKind,
-        github_repo: String,
+        github_repo: &str,
         number: i64,
-        tmux_window: String,
-        worktree: String,
+        tmux_window: &str,
+        worktree: &str,
     ) -> Vec<Command> {
         if let Err(e) =
             self.database
-                .set_pr_agent(pr_kind, &github_repo, number, &tmux_window, &worktree)
+                .set_pr_agent(pr_kind, github_repo, number, tmux_window, worktree)
         {
-            return app.update(Message::Error(format!(
-                "Failed to persist review agent: {e}"
-            )));
+            return app.update(Message::Error(Self::db_error("persisting review agent", e)));
         }
         vec![]
     }

@@ -4,17 +4,17 @@ impl TuiRuntime {
     pub(super) fn exec_persist_fix_agent(
         &self,
         app: &mut App,
-        github_repo: String,
+        github_repo: &str,
         number: i64,
         kind: models::AlertKind,
-        tmux_window: String,
-        worktree: String,
+        tmux_window: &str,
+        worktree: &str,
     ) -> Vec<Command> {
         if let Err(e) =
             self.database
-                .set_alert_agent(&github_repo, number, kind, &tmux_window, &worktree)
+                .set_alert_agent(github_repo, number, kind, tmux_window, worktree)
         {
-            return app.update(Message::Error(format!("Failed to persist fix agent: {e}")));
+            return app.update(Message::Error(Self::db_error("persisting fix agent", e)));
         }
         vec![]
     }

@@ -2095,9 +2095,9 @@ async fn exec_fetch_security_alerts_gh_failure() {
 }
 
 #[tokio::test]
-async fn exec_fetch_security_alerts_empty_result() {
+async fn exec_fetch_security_alerts_unconfigured_when_no_repos() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
-    // No repos configured — returns immediately with an empty list, no gh call needed.
+    // No repos configured — sends SecurityAlertsUnconfigured immediately, no gh call.
     let mock = Arc::new(MockProcessRunner::new(vec![]));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, mock);
@@ -2108,10 +2108,10 @@ async fn exec_fetch_security_alerts_empty_result() {
         .await
         .unwrap()
         .unwrap();
-    match msg {
-        Message::SecurityAlertsLoaded(alerts) => assert!(alerts.is_empty()),
-        other => panic!("Expected SecurityAlertsLoaded, got: {other:?}"),
-    }
+    assert!(
+        matches!(msg, Message::SecurityAlertsUnconfigured),
+        "Expected SecurityAlertsUnconfigured, got: {msg:?}"
+    );
 }
 
 // -----------------------------------------------------------------------

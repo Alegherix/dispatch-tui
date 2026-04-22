@@ -2,11 +2,15 @@ use super::*;
 
 impl TuiRuntime {
     pub(super) fn exec_fetch_security_alerts(&self) {
+        let repos = self.load_github_queries("github_queries_security");
+        if repos.is_empty() {
+            let _ = self.msg_tx.send(Message::SecurityAlertsUnconfigured);
+            return;
+        }
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
-        let repos = self.load_github_queries("github_queries_security");
         tokio::task::spawn_blocking(move || {
-            tracing::info!("fetching security alerts via gh");
+            tracing::info!(repo_count = repos.len(), "fetching security alerts via gh");
             match crate::github::fetch_security_alerts(&*runner, &repos) {
                 Ok(alerts) => {
                     tracing::info!(count = alerts.len(), "security alerts fetched successfully");

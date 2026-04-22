@@ -369,9 +369,9 @@ fn parse_graphql_security_alerts(json: &str) -> Result<Vec<SecurityAlert>, Strin
 
 /// Parse a per-repo aliased GraphQL response (`r0`, `r1`, …) into `SecurityAlert`s.
 ///
-/// `count` is the number of repos that were queried (aliases `r0..r{count-1}`).
-/// Aliases that are absent in the response (e.g. because the slug was invalid
-/// and skipped) are silently ignored via the `None` branch.
+/// `count` is the length of the original `repos` slice. Aliases are named after
+/// their original index in that slice, so some `rN` keys may be absent when a
+/// slug at position N was invalid and skipped. Absent keys are ignored via `continue`.
 fn parse_graphql_security_alerts_per_repo(
     json: &str,
     count: usize,
@@ -443,6 +443,10 @@ pub fn fetch_security_alerts(
             ))
         })
         .collect();
+
+    if repo_fields.is_empty() {
+        return Ok(vec![]);
+    }
 
     let query = format!("{{\n  {}\n}}", repo_fields.join("\n  "));
 
@@ -1347,16 +1351,19 @@ mod tests {
 
     #[test]
     fn fetch_security_alerts_skips_invalid_slugs() {
-        // "noslash" has no '/' so split_once fails — it should be silently skipped
+        // "noslash" (index 0) has no '/' and is skipped; "acme/app" (index 1) becomes r1
         let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
-            r#"{"data":{"r0":{"nameWithOwner":"acme/app","vulnerabilityAlerts":{"nodes":[]}}}}"#
+            r#"{"data":{"r1":{"nameWithOwner":"acme/app","vulnerabilityAlerts":{"nodes":[]}}}}"#
                 .as_bytes(),
         )]);
-        // "noslash" is skipped; "acme/app" becomes r0
         let result =
             fetch_security_alerts(&runner, &["noslash".to_string(), "acme/app".to_string()]);
         assert!(result.is_ok());
         assert_eq!(runner.recorded_calls().len(), 1);
+        let calls = runner.recorded_calls();
+        let query_arg = calls[0].1.iter().find(|a| a.contains("query=")).unwrap();
+        assert!(query_arg.contains("r1: repository"), "valid slug at index 1 should become r1");
+        assert!(!query_arg.contains("r0: repository"), "invalid slug at index 0 should be absent");
     }
 
     #[test]

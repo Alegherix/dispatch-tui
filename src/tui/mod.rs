@@ -3649,6 +3649,34 @@ impl App {
         cmds
     }
 
+    /// Remove review agents whose PR is no longer present in any of the three PR
+    /// lists (reviewer, authored, bot). Called after any list refreshes.
+    fn cleanup_stale_review_agents(&mut self) -> Vec<Command> {
+        let pr_keys: std::collections::HashSet<crate::models::PrRef> = [
+            PrListKind::Review,
+            PrListKind::Authored,
+        ]
+        .iter()
+        .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
+        .chain(self.security.dependabot.prs.prs.iter())
+        .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
+        .collect();
+
+        let gone: Vec<crate::models::PrRef> = self
+            .review
+            .review_agents
+            .keys()
+            .filter(|k| !pr_keys.contains(*k))
+            .cloned()
+            .collect();
+
+        let mut cmds = Vec::new();
+        for key in gone {
+            cmds.extend(self.cleanup_review_board_pr(key.repo().to_string(), key.number()));
+        }
+        cmds
+    }
+
     fn handle_prs_loaded(
         &mut self,
         kind: PrListKind,
@@ -3668,27 +3696,8 @@ impl App {
             list.last_fetch = Some(Instant::now());
             list.last_error = None;
             self.sync_review_selection();
-
-            // Clean up review agents whose PRs no longer appear in either list
-            let pr_keys: std::collections::HashSet<crate::models::PrRef> =
-                [PrListKind::Review, PrListKind::Authored]
-                    .iter()
-                    .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
-                    .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
-                    .collect();
-
-            let gone: Vec<crate::models::PrRef> = self
-                .review
-                .review_agents
-                .keys()
-                .filter(|k| !pr_keys.contains(*k))
-                .cloned()
-                .collect();
-
-            for key in gone {
-                cmds.extend(self.cleanup_review_board_pr(key.repo().to_string(), key.number()));
-            }
         }
+        cmds.extend(self.cleanup_stale_review_agents());
         cmds
     }
 

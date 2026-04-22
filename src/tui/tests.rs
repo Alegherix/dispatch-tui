@@ -12105,7 +12105,50 @@ fn review_board_e_edits_github_queries() {
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::EditGithubQueries(ReviewBoardMode::Reviewer))));
+        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Review))));
+}
+
+#[test]
+fn e_in_review_board_reviewer_emits_edit_review_queries() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.view_mode = ViewMode::ReviewBoard {
+        mode: ReviewBoardMode::Reviewer,
+        selection: ReviewBoardSelection::default(),
+        saved_board: BoardSelection::default(),
+    };
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Review))));
+}
+
+#[test]
+fn e_in_review_board_author_emits_edit_authored_queries() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.view_mode = ViewMode::ReviewBoard {
+        mode: ReviewBoardMode::Author,
+        selection: ReviewBoardSelection::default(),
+        saved_board: BoardSelection::default(),
+    };
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Authored))));
+}
+
+#[test]
+fn e_in_security_dependabot_emits_edit_bot_queries() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.board.view_mode = ViewMode::SecurityBoard {
+        mode: SecurityBoardMode::Dependabot,
+        selection: SecurityBoardSelection::default(),
+        dependabot_selection: ReviewBoardSelection::default(),
+        saved_board: BoardSelection::default(),
+    };
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Bot))));
 }
 
 #[test]

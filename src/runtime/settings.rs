@@ -137,13 +137,14 @@ impl TuiRuntime {
     pub(super) fn exec_edit_github_queries(
         &self,
         app: &mut App,
-        mode: ReviewBoardMode,
+        kind: PrListKind,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
     ) -> Result<Vec<Command>> {
-        let key = match mode {
-            ReviewBoardMode::Reviewer => "github_queries_review",
-            ReviewBoardMode::Author => "github_queries_my_prs",
+        let (key, label) = match kind {
+            PrListKind::Review => ("github_queries_review", "Review PRs"),
+            PrListKind::Authored => ("github_queries_my_prs", "My PRs"),
+            PrListKind::Bot => ("github_queries_bot", "Dependabot / Renovate PRs"),
         };
 
         let current = self
@@ -154,11 +155,9 @@ impl TuiRuntime {
             .unwrap_or_default();
 
         let header = format!(
-            "# GitHub queries for: {}\n# One search query per line. Blank lines and lines starting with # are ignored.\n# See: https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests\n\n",
-            match mode {
-                ReviewBoardMode::Reviewer => "Review PRs",
-                ReviewBoardMode::Author => "My PRs",
-            }
+            "# GitHub queries for: {label}\n\
+             # One search query per line. Blank lines and lines starting with # are ignored.\n\
+             # See: https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests\n\n"
         );
         let content = format!("{header}{current}\n");
 
@@ -180,8 +179,9 @@ impl TuiRuntime {
         }
 
         // Trigger a refresh for the affected category
-        let refresh_msg = match mode {
-            ReviewBoardMode::Reviewer | ReviewBoardMode::Author => Message::RefreshReviewPrs,
+        let refresh_msg = match kind {
+            PrListKind::Review | PrListKind::Authored => Message::RefreshReviewPrs,
+            PrListKind::Bot => Message::RefreshBotPrs,
         };
         Ok(app.update(refresh_msg))
     }

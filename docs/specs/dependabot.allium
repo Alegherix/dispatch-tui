@@ -228,6 +228,10 @@ rule MergeBotPr {
 --   1         : switch to Dependabot sub-view (no-op when already here)
 --   2         : switch to Alerts sub-view
 --   Enter     : toggle the bottom detail panel (placeholder; currently empty)
+--   e         : edit GitHub search queries for Dependabot / Renovate PRs.
+--               Opens $EDITOR with the github_queries_bot setting.
+--               One search query per line; lines starting with # are ignored.
+--               Changes take effect on the next refresh.
 --   f         : open the Dependabot repo filter overlay. The filter state
 --               lives on DependabotBoardState.prs.repo_filter and affects
 --               only the bot-PR list. Each repo can be toggled by its digit
@@ -329,3 +333,14 @@ visual StalenessColor(age: Duration) -> Color {
 -- before the agent badge and PR number. The set persists across refreshes
 -- within the current session and is cleared on approve/merge confirm or on
 -- Esc when the set is non-empty.
+
+------------------------------------------------------------
+-- Edit Bot PR Queries
+------------------------------------------------------------
+
+rule EditBotQueries {
+    when: UserAction([e]) and ViewMode = SecurityBoard(Dependabot)
+    opens: $EDITOR with github_queries_bot setting
+    on_save: strips comments and blank lines, persists, triggers RefreshBotPrs
+    on_cancel: no change
+}

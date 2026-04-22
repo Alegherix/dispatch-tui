@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::{
     App, ColumnItem, Command, FixAgentRequest, InputMode, Message, MoveDirection,
-    ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
+    PrListKind, ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
 };
 use crate::models::{
     AlertSeverity, DispatchMode, EpicId, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag,
@@ -997,6 +997,7 @@ impl App {
                     vec![]
                 }
             }
+            KeyCode::Char('e') => vec![Command::EditGithubQueries(PrListKind::Bot)],
             KeyCode::Char('r') => self.update(Message::RefreshBotPrs),
             KeyCode::Char('p') => {
                 if let Some(pr) = self.selected_dependabot_pr() {
@@ -1221,7 +1222,11 @@ impl App {
 
             KeyCode::Char('e') => {
                 if let ViewMode::ReviewBoard { mode, .. } = self.board.view_mode {
-                    vec![Command::EditGithubQueries(mode)]
+                    let kind = match mode {
+                        ReviewBoardMode::Reviewer => PrListKind::Review,
+                        ReviewBoardMode::Author => PrListKind::Authored,
+                    };
+                    vec![Command::EditGithubQueries(kind)]
                 } else {
                     vec![]
                 }

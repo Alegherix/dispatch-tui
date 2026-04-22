@@ -55,6 +55,8 @@ impl App {
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmApproveBotPr(_) => self.handle_key_confirm_pr_op(key, true),
             InputMode::ConfirmMergeBotPr(_) => self.handle_key_confirm_pr_op(key, false),
+            InputMode::ConfirmApproveReviewPr(_) => vec![], // TODO: implement
+            InputMode::ConfirmMergeReviewPr(_) => vec![],   // TODO: implement
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
         }
     }

@@ -482,6 +482,11 @@ pub enum Message {
     ConfirmApproveBotPr,
     ConfirmMergeBotPr,
     CancelPrOperation,
+    // Review board approve/merge
+    StartApproveReviewPr,
+    ConfirmApproveReviewPr,
+    StartMergeReviewPr,
+    ConfirmMergeReviewPr,
     // Tips overlay
     ShowTips {
         tips: Vec<crate::tips::Tip>,
@@ -644,6 +649,8 @@ pub enum Command {
     PersistPrs(PrListKind, Vec<crate::models::ReviewPr>),
     ApproveBotPr(String),
     MergeBotPr(String),
+    ApproveReviewPr(String),
+    MergeReviewPr(String),
     OpenInBrowser {
         url: String,
     },
@@ -713,6 +720,9 @@ pub enum InputMode {
     // Dependabot approve/merge confirmation
     ConfirmApproveBotPr(String),
     ConfirmMergeBotPr(String),
+    // Review PR approve/merge confirmation
+    ConfirmApproveReviewPr(String),
+    ConfirmMergeReviewPr(String),
     ConfirmQuit,
     // Dispatch repo path input (review/security tab fallback)
     InputDispatchRepoPath,

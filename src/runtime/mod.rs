@@ -658,6 +658,8 @@ async fn execute_commands(
             Command::PersistPrs(kind, prs) => rt.exec_persist_prs(app, kind, prs),
             Command::ApproveBotPr(url) => rt.exec_approve_bot_pr(url),
             Command::MergeBotPr(url) => rt.exec_merge_bot_pr(url),
+            Command::ApproveReviewPr(_url) => {} // TODO: implement
+            Command::MergeReviewPr(_url) => {}   // TODO: implement
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
             Command::PersistFilterPreset {
                 name,

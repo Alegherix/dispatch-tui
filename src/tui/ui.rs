@@ -2663,6 +2663,16 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Green));
             frame.render_widget(bar, area);
         }
+        InputMode::ConfirmApproveReviewPr(_) => {
+            let text = app.status.message.as_deref().unwrap_or("Approve PR? [y/n]");
+            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmMergeReviewPr(_) => {
+            let text = app.status.message.as_deref().unwrap_or("Merge PR? [y/n]");
+            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Green));
+            frame.render_widget(bar, area);
+        }
         InputMode::ConfirmQuit => {
             let bar =
                 Paragraph::new("Quit dispatch? [y/n]").style(Style::default().fg(Color::Yellow));

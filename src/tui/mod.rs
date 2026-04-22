@@ -1098,7 +1098,11 @@ impl App {
             | Message::StartMergeBotPr
             | Message::ConfirmApproveBotPr
             | Message::ConfirmMergeBotPr
-            | Message::CancelPrOperation) => self.dispatch_security_and_filters(msg),
+            | Message::CancelPrOperation
+            | Message::StartApproveReviewPr
+            | Message::ConfirmApproveReviewPr
+            | Message::StartMergeReviewPr
+            | Message::ConfirmMergeReviewPr) => self.dispatch_security_and_filters(msg),
             Message::ShowTips {
                 tips,
                 starting_index,
@@ -1423,6 +1427,10 @@ impl App {
             Message::ConfirmApproveBotPr => self.handle_confirm_approve_bot_pr(),
             Message::ConfirmMergeBotPr => self.handle_confirm_merge_bot_pr(),
             Message::CancelPrOperation => self.handle_cancel_pr_operation(),
+            Message::StartApproveReviewPr => vec![], // TODO: implement
+            Message::ConfirmApproveReviewPr => vec![], // TODO: implement
+            Message::StartMergeReviewPr => vec![], // TODO: implement
+            Message::ConfirmMergeReviewPr => vec![], // TODO: implement
             _ => unreachable!(),
         }
     }

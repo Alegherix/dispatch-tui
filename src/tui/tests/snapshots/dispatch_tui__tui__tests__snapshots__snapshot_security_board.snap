@@ -4,19 +4,19 @@ expression: rendered
 ---
  Tasks  │  Reviews  │  ▸ Security (3)   [Tab] tasks  [Esc] back                                                   🔕  [N]
 [1] Dependabot  [2] Alerts
-▸ Critical (2)                ◦ High (1)                    ◦ Medium (0)                  ◦ Low (0)
+▸ Backlog (3)                           ◦ In Progress (0)                       ◦ Review (0)
 Updated 0s ago  [r] refresh
-  ── alpha                      ── beta
-▌ #1 Alert 1                  ▎ #2 Alert 2
-  ⬡ Dependabot · some-pkg · <1  ⬡ Dependabot · some-pkg · <1
+  ── alpha
+▌ #1 Alert 1
+  [CRIT] ⬡ Dependabot · some-pkg · <1h
+
+  ── beta
+▎ #2 Alert 2
+  [HIGH] ⬡ Dependabot · some-pkg · <1h
 
   ── gamma
 ▎ #3 Alert 3
-  ⬡ Dependabot · some-pkg · <1
-
-
-
-
+  [CRIT] ⬡ Dependabot · some-pkg · <1h
 
 
 

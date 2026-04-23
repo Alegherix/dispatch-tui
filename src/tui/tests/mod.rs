@@ -17324,6 +17324,99 @@ fn review_board_r_refreshes_even_when_agent_idle() {
 }
 
 #[test]
+fn review_board_reviewing_agent_shows_circle_badge() {
+    let mut app = make_review_board_app();
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-1".to_string(),
+            worktree: "/repo/.worktrees/review-1".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "\u{25c9}"),
+        "expected ◉ (U+25C9) in review board when agent is Reviewing"
+    );
+    assert!(
+        !buffer_contains(&buf, "\u{25c6}"),
+        "expected ◆ (U+25C6) to be absent from review board when agent is Reviewing"
+    );
+}
+
+#[test]
+fn review_board_reviewing_agent_badge_is_cyan() {
+    let mut app = make_review_board_app();
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-1".to_string(),
+            worktree: "/repo/.worktrees/review-1".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
+    let buf = render_to_buffer(&mut app, 120, 40);
+    let area = buf.area();
+    let mut found_cyan_circle = false;
+    'outer: for y in 0..area.height {
+        for x in 0..area.width {
+            let cell = &buf[(x, y)];
+            if cell.symbol() == "\u{25c9}" {
+                if cell.style().fg == Some(ratatui::style::Color::Rgb(86, 182, 194)) {
+                    found_cyan_circle = true;
+                    break 'outer;
+                }
+            }
+        }
+    }
+    assert!(
+        found_cyan_circle,
+        "expected ◉ to be styled in CYAN (86, 182, 194) on the review board when agent is Reviewing"
+    );
+}
+
+#[test]
+fn review_board_findings_ready_agent_shows_checkmark_badge() {
+    let mut app = make_review_board_app();
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-1".to_string(),
+            worktree: "/repo/.worktrees/review-1".to_string(),
+            status: crate::models::ReviewAgentStatus::FindingsReady,
+        },
+    );
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "\u{2714}"),
+        "expected ✔ (U+2714) for FindingsReady agent"
+    );
+    assert!(
+        !buffer_contains(&buf, "\u{25c6}"),
+        "◆ should not appear for FindingsReady"
+    );
+}
+
+#[test]
+fn review_board_idle_agent_shows_open_circle_badge() {
+    let mut app = make_review_board_app();
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-1".to_string(),
+            worktree: "/repo/.worktrees/review-1".to_string(),
+            status: crate::models::ReviewAgentStatus::Idle,
+        },
+    );
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "\u{25cb}"),
+        "expected ○ (U+25CB) for Idle agent"
+    );
+}
+
+#[test]
 fn security_board_r_refreshes_security_alerts_in_alerts_mode() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::SwitchToSecurityBoard);

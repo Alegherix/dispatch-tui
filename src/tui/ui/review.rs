@@ -473,16 +473,20 @@ fn build_pr_line1(
 ) -> Line<'static> {
     let select_prefix = if is_selected { "* " } else { "" };
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
-    let agent_badge = match agent_status {
-        Some(crate::models::ReviewAgentStatus::Reviewing) => "\u{25c6} ",
-        Some(crate::models::ReviewAgentStatus::FindingsReady) => "\u{2714} ",
-        Some(crate::models::ReviewAgentStatus::Idle) => "\u{25cb} ",
-        None => "",
+
+    let (badge_text, badge_is_running) = match agent_status {
+        Some(crate::models::ReviewAgentStatus::Reviewing) => ("\u{25c9} ", true),
+        Some(crate::models::ReviewAgentStatus::FindingsReady) => ("\u{2714} ", false),
+        Some(crate::models::ReviewAgentStatus::Idle) => ("\u{25cb} ", false),
+        None => ("", false),
     };
-    let header = format!("{select_prefix}{agent_badge}#{} {}", pr.number, pr.title);
-    // stripe(2) + header + " ●"(2) — reserve width for the CI dot
-    let max_header = (col_width as usize).saturating_sub(4);
+
+    let header = format!("{select_prefix}#{} {}", pr.number, pr.title);
+    // stripe(2) + badge(0 or 2) + header + " ●"(2)
+    let badge_w = if badge_text.is_empty() { 0 } else { 2 };
+    let max_header = (col_width as usize).saturating_sub(4 + badge_w);
     let header_truncated = truncate(&header, max_header);
+
     let line1_style = if is_selected || is_cursor {
         Style::default()
             .fg(Color::White)
@@ -490,11 +494,22 @@ fn build_pr_line1(
     } else {
         Style::default().fg(color)
     };
-    Line::from(vec![
-        Span::styled(stripe, Style::default().fg(color)),
-        Span::styled(header_truncated, line1_style),
-        Span::styled(" \u{25cf}", Style::default().fg(ci_dot_color(pr.ci_status))),
-    ])
+    let badge_style = if badge_is_running {
+        Style::default().fg(super::palette::CYAN)
+    } else {
+        line1_style
+    };
+
+    let mut spans = vec![Span::styled(stripe, Style::default().fg(color))];
+    if !badge_text.is_empty() {
+        spans.push(Span::styled(badge_text.to_string(), badge_style));
+    }
+    spans.push(Span::styled(header_truncated, line1_style));
+    spans.push(Span::styled(
+        " \u{25cf}",
+        Style::default().fg(ci_dot_color(pr.ci_status)),
+    ));
+    Line::from(spans)
 }
 
 pub(in crate::tui::ui) fn build_review_pr_item(

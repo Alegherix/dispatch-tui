@@ -47,6 +47,21 @@ fn snapshot_review_board_reviewer_mode() {
 }
 
 #[test]
+fn snapshot_review_board_with_running_agent() {
+    let mut app = make_review_board_app();
+    app.review.review_agents.insert(
+        crate::models::PrRef::new("acme/app".to_string(), 1),
+        super::super::types::ReviewAgentHandle {
+            tmux_window: "review:pr-1".to_string(),
+            worktree: "/repo/.worktrees/review-1".to_string(),
+            status: crate::models::ReviewAgentStatus::Reviewing,
+        },
+    );
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_security_board() {
     let mut app = make_security_board_app();
     let rendered = render_to_string(&mut app, 120, 40);

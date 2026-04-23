@@ -6053,7 +6053,7 @@ fn pr_merged_kills_matching_review_board_window() {
     );
     // Agent handle should be removed from the map
     let key = crate::models::PrRef::new("org/repo".to_string(), 42);
-    assert!(app.review.review_agents.get(&key).is_none());
+    assert!(!app.review.review_agents.contains_key(&key));
 }
 
 #[test]
@@ -12152,7 +12152,7 @@ fn bot_prs_merged_kills_active_review_window() {
         "should clear review agent status"
     );
     // Agent handle should be removed from the map
-    assert!(app.review.review_agents.get(&key).is_none());
+    assert!(!app.review.review_agents.contains_key(&key));
 }
 
 #[test]
@@ -12217,7 +12217,7 @@ fn bot_pr_agent_survives_review_list_refresh() {
 
     // Agent must still be present
     assert!(
-        app.review.review_agents.get(&key).is_some(),
+        app.review.review_agents.contains_key(&key),
         "bot PR agent must not be removed by a Review list refresh"
     );
     // No KillTmuxWindow for the bot PR window
@@ -12265,7 +12265,7 @@ fn bot_pr_agent_cleaned_up_when_bot_pr_disappears() {
 
     // Agent handle must have been removed
     assert!(
-        app.review.review_agents.get(&key).is_none(),
+        !app.review.review_agents.contains_key(&key),
         "bot PR agent must be removed when the bot PR disappears from the Bot list"
     );
     // KillTmuxWindow must have been emitted
@@ -12674,7 +12674,7 @@ fn detach_review_agent_clears_fields_and_returns_commands() {
         .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
 
     // Agent handle should be removed from the map
-    assert!(app.review.review_agents.get(&key).is_none());
+    assert!(!app.review.review_agents.contains_key(&key));
 }
 
 #[test]
@@ -13158,7 +13158,7 @@ fn toggle_split_exit_restores_pinned_task_window() {
 // [G] tests — pin task in split pane without focus transfer
 
 #[test]
-fn G_in_split_mode_on_already_pinned_task_does_nothing() {
+fn g_in_split_mode_on_already_pinned_task_does_nothing() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
@@ -13174,7 +13174,7 @@ fn G_in_split_mode_on_already_pinned_task_does_nothing() {
 }
 
 #[test]
-fn G_in_split_mode_emits_swap_command() {
+fn g_in_split_mode_emits_swap_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
@@ -13195,7 +13195,7 @@ fn G_in_split_mode_emits_swap_command() {
 }
 
 #[test]
-fn G_outside_split_mode_is_noop() {
+fn g_outside_split_mode_is_noop() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
@@ -13206,7 +13206,7 @@ fn G_outside_split_mode_is_noop() {
 }
 
 #[test]
-fn G_in_split_mode_on_task_without_window_shows_status() {
+fn g_in_split_mode_on_task_without_window_shows_status() {
     let task = make_task(4, TaskStatus::Running); // no tmux_window
     let mut app = App::new(vec![task], TEST_TIMEOUT);
     app.board.split.active = true;
@@ -15553,7 +15553,7 @@ fn epic_wrap_up_respawns_split_pane_only_once() {
 #[test]
 fn mark_active_sets_last_active_at_to_now() {
     let mut tracking = AgentTracking::new(TEST_TIMEOUT);
-    assert!(tracking.last_active_at.get(&TaskId(1)).is_none());
+    assert!(!tracking.last_active_at.contains_key(&TaskId(1)));
 
     tracking.mark_active(TaskId(1));
 
@@ -16043,8 +16043,6 @@ fn security_dependabot_d_no_pr_is_noop() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     assert!(cmds.is_empty());
 }
-
-#[test]
 
 #[test]
 fn agent_status_preserved_on_dependabot_pr_refresh() {
@@ -16997,11 +16995,11 @@ fn review_board_reviewing_agent_badge_is_cyan() {
     'outer: for y in 0..area.height {
         for x in 0..area.width {
             let cell = &buf[(x, y)];
-            if cell.symbol() == "\u{25c9}" {
-                if cell.style().fg == Some(ratatui::style::Color::Rgb(86, 182, 194)) {
-                    found_cyan_circle = true;
-                    break 'outer;
-                }
+            if cell.symbol() == "\u{25c9}"
+                && cell.style().fg == Some(ratatui::style::Color::Rgb(86, 182, 194))
+            {
+                found_cyan_circle = true;
+                break 'outer;
             }
         }
     }

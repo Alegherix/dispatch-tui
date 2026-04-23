@@ -1438,10 +1438,10 @@ fn exec_persist_review_agent_saves_agent_to_db() {
     rt.exec_persist_review_agent(
         &mut app,
         db::PrKind::Review,
-        "acme/app".into(),
+        "acme/app",
         1,
-        "dispatch:review-1".into(),
-        "/tmp/worktree".into(),
+        "dispatch:review-1",
+        "/tmp/worktree",
     );
 
     let states = rt.database.load_pr_agent_states().unwrap();
@@ -1477,11 +1477,11 @@ fn exec_persist_fix_agent_saves_agent_to_db() {
 
     rt.exec_persist_fix_agent(
         &mut app,
-        "acme/app".into(),
+        "acme/app",
         1,
         AlertKind::Dependabot,
-        "dispatch:fix-1".into(),
-        "/tmp/worktree".into(),
+        "dispatch:fix-1",
+        "/tmp/worktree",
     );
 
     let states = rt.database.load_alert_agent_states().unwrap();

@@ -11641,7 +11641,7 @@ fn n_in_confirm_delete_repo_path_cancels() {
 fn make_security_board_app() -> App {
     let mut app = make_app();
     app.update(Message::SwitchToSecurityBoard);
-    // The security board defaults to Dependabot mode; switch to Alerts for these tests.
+    // Stay in Alerts mode for these tests (Dependabot sub-mode will be removed in a later task).
     app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
     app.update(Message::SecurityAlertsLoaded(vec![
         make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Critical),
@@ -11719,7 +11719,7 @@ fn security_board_column_clamps_at_zero() {
 #[test]
 fn security_board_column_clamps_at_max() {
     let mut app = make_security_board_app();
-    let max_col = crate::models::SecurityWorkflowColumn::COLUMN_COUNT - 1;
+    let max_col = crate::models::SecurityWorkflowState::COLUMN_COUNT - 1;
     if let Some(sel) = app.security_selection_mut() {
         sel.set_column(max_col);
     }
@@ -12619,8 +12619,18 @@ fn g_on_security_board_jumps_to_agent() {
             status: crate::models::ReviewAgentStatus::Reviewing,
         },
     );
+    // Put alert in Ongoing column (col 1) via workflow state
+    let key = super::types::WorkflowKey::new(
+        "acme/app".to_string(),
+        1,
+        crate::models::WorkflowItemKind::DependabotAlert,
+    );
+    app.security.security_workflow_states.insert(
+        key,
+        (crate::models::SecurityWorkflowState::Ongoing, None),
+    );
 
-    // Alert is now in InProgress column (col 1); navigate there
+    // Alert is now in Ongoing column (col 1); navigate there
     if let Some(sel) = app.security_selection_mut() {
         sel.set_column(1);
     }
@@ -14416,7 +14426,7 @@ fn handle_key_security_repo_filter_unknown_key_is_noop() {
 #[test]
 fn security_board_g_jumps_to_tmux_window() {
     let mut app = make_security_board_app();
-    // Give first alert an agent handle in the fix_agents map (Reviewing → InProgress column)
+    // Give first alert an agent handle in the fix_agents map
     app.security.fix_agents.insert(
         super::types::FixDispatchKey::new(
             "org/alpha".to_string(),
@@ -14429,8 +14439,18 @@ fn security_board_g_jumps_to_tmux_window() {
             status: crate::models::ReviewAgentStatus::Reviewing,
         },
     );
+    // Put alert in Ongoing column (col 1) via workflow state
+    let key = super::types::WorkflowKey::new(
+        "org/alpha".to_string(),
+        1,
+        crate::models::WorkflowItemKind::DependabotAlert,
+    );
+    app.security.security_workflow_states.insert(
+        key,
+        (crate::models::SecurityWorkflowState::Ongoing, None),
+    );
 
-    // Alert is now in InProgress column (col 1); navigate there
+    // Alert is now in Ongoing column (col 1); navigate there
     if let Some(sel) = app.security_selection_mut() {
         sel.set_column(1);
     }
@@ -14470,8 +14490,18 @@ fn security_board_capital_t_detaches_agent() {
             status: crate::models::ReviewAgentStatus::Reviewing,
         },
     );
+    // Put alert in Ongoing column (col 1) via workflow state
+    let key = super::types::WorkflowKey::new(
+        "org/alpha".to_string(),
+        1,
+        crate::models::WorkflowItemKind::DependabotAlert,
+    );
+    app.security.security_workflow_states.insert(
+        key,
+        (crate::models::SecurityWorkflowState::Ongoing, None),
+    );
 
-    // Alert is now in InProgress column (col 1); navigate there
+    // Alert is now in Ongoing column (col 1); navigate there
     if let Some(sel) = app.security_selection_mut() {
         sel.set_column(1);
     }
@@ -17642,40 +17672,9 @@ fn toggle_bot_pr_filter_mode_clamps_selection() {
 // Bug fix: bot-PR filter overlay renders
 // ---------------------------------------------------------------------------
 
-#[test]
-fn bot_pr_filter_overlay_renders_repo_names() {
-    let mut app = make_two_bot_pr_app();
-    app.update(Message::StartBotPrRepoFilter);
-    assert_eq!(app.input.mode, InputMode::BotPrRepoFilter);
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "repo-a"),
-        "filter overlay must show repo names when in BotPrRepoFilter mode"
-    );
-}
-
-#[test]
-fn bot_pr_filter_overlay_shows_include_mode() {
-    let mut app = make_two_bot_pr_app();
-    app.update(Message::StartBotPrRepoFilter);
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "include"),
-        "filter overlay must show the current filter mode"
-    );
-}
-
-#[test]
-fn bot_pr_filter_overlay_shows_exclude_after_toggle() {
-    let mut app = make_two_bot_pr_app();
-    app.update(Message::StartBotPrRepoFilter);
-    app.update(Message::ToggleBotPrRepoFilterMode);
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "exclude"),
-        "filter overlay must show 'exclude' after mode toggle"
-    );
-}
+// Note: The dependabot PR sub-view (SecurityBoardMode::Dependabot) rendering has been
+// removed from the security board in favour of the unified 4-column alert view.
+// The overlay rendering tests for that sub-view have been removed accordingly.
 
 #[test]
 fn bot_pr_filter_overlay_hidden_when_not_in_filter_mode() {
@@ -18533,29 +18532,29 @@ fn card_severity_badge_low() {
 
 #[test]
 fn security_navigation_right_clamps_at_workflow_column_count() {
-    use crate::models::SecurityWorkflowColumn;
+    use crate::models::SecurityWorkflowState;
     let mut app = make_app();
     app.update(Message::SwitchToSecurityBoard);
-    // Switch to Alerts mode (key '2')
+    // Switch to unified Alerts mode so navigation goes to the right handler.
     app.handle_key(make_key(KeyCode::Char('2')));
     app.update(Message::SecurityAlertsLoaded(vec![make_security_alert(
         1,
         "org/repo",
         crate::models::AlertSeverity::Critical,
     )]));
-    // Mash right 10 times — should stop at COLUMN_COUNT - 1 = 2
+    // Mash right 10 times — should stop at COLUMN_COUNT - 1 = 3
     for _ in 0..10 {
         app.handle_key(make_key(KeyCode::Right));
     }
     let col = app.security_selection().unwrap().column();
-    assert_eq!(col, SecurityWorkflowColumn::COLUMN_COUNT - 1);
+    assert_eq!(col, SecurityWorkflowState::COLUMN_COUNT - 1);
 }
 
 #[test]
 fn security_navigation_left_clamps_at_zero() {
     let mut app = make_app();
     app.update(Message::SwitchToSecurityBoard);
-    // Switch to Alerts mode (key '2')
+    // Switch to unified Alerts mode so navigation goes to the right handler.
     app.handle_key(make_key(KeyCode::Char('2')));
     // Mash left 10 times from column 0
     for _ in 0..10 {

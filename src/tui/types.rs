@@ -5,8 +5,8 @@ use ratatui::widgets::ListState;
 
 use crate::models::{
     AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus, ReviewDecision,
-    SecurityAlert, SecurityWorkflowColumn, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage,
-    TipsShowMode, DEFAULT_BASE_BRANCH,
+    SecurityAlert, SecurityWorkflowColumn, SecurityWorkflowState, SubStatus, Task, TaskId,
+    TaskStatus, TaskTag, TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -1291,8 +1291,8 @@ impl Default for ReviewBoardSelection {
 #[derive(Debug, Clone)]
 pub struct SecurityBoardSelection {
     pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; SecurityWorkflowColumn::COLUMN_COUNT],
-    pub(in crate::tui) list_states: [ListState; SecurityWorkflowColumn::COLUMN_COUNT],
+    pub(in crate::tui) selected_row: [usize; SecurityWorkflowState::COLUMN_COUNT],
+    pub(in crate::tui) list_states: [ListState; SecurityWorkflowState::COLUMN_COUNT],
     pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
 }
 
@@ -1300,7 +1300,7 @@ impl SecurityBoardSelection {
     pub fn new() -> Self {
         Self {
             selected_column: 0,
-            selected_row: [0; SecurityWorkflowColumn::COLUMN_COUNT],
+            selected_row: [0; SecurityWorkflowState::COLUMN_COUNT],
             list_states: std::array::from_fn(|_| ListState::default()),
             anchor_pr: None,
         }

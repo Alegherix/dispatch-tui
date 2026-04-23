@@ -3,20 +3,14 @@ source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
  Tasks  │  Reviews  │  ▸ Security (3)   [Tab] tasks  [Esc] back                                                   🔕  [N]
-[1] Dependabot  [2] Alerts
-▸ Backlog (3)                           ◦ In Progress (0)                       ◦ Review (0)
+▸ Backlog (3)                 ◦ Ongoing (0)                 ◦ Action Required (0)         ◦ Done (0)
 Updated 0s ago  [r] refresh
-  ── alpha
-▌ #1 Alert 1
-  [CRIT] ⬡ Dependabot · some-pkg · <1h
-
-  ── beta
-▎ #2 Alert 2
-  [HIGH] ⬡ Dependabot · some-pkg · <1h
-
-  ── gamma
-▎ #3 Alert 3
-  [CRIT] ⬡ Dependabot · some-pkg · <1h
+▌ #1 Alert 1 [DEP]
+  [CRIT] some-pkg · <1h
+▎ #2 Alert 2 [DEP]
+  [HIGH] some-pkg · <1h
+▎ #3 Alert 3 [DEP]
+  [CRIT] some-pkg · <1h
 
 
 
@@ -41,4 +35,10 @@ Updated 0s ago  [r] refresh
 
 
 
-[Enter] detail  [d]ispatch  [p] open  [f]ilter  [t] kind:all  [Tab] tasks  [?] help  [q]uit
+
+
+
+
+
+
+[Enter] detail  [d]ispatch  [p] open  [m] forward  [M] back  [f]ilter  [Tab] tasks  [?] help  [q]uit

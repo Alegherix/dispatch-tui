@@ -2939,37 +2939,51 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn security_alert_card_line2_has_kind_prefix() {
+    fn security_alert_card_line1_has_kind_badge() {
         let alert = make_test_alert(
             3,
             crate::models::AlertKind::CodeScanning,
             Some("lodash"),
             None,
         );
-        let item = build_security_alert_item(&alert, false, 80, false);
+        let item = build_security_alert_item(
+            &alert,
+            crate::models::SecurityWorkflowState::Backlog,
+            None,
+            false,
+            false,
+            80,
+        );
         let buf = render_list_item_to_buf(item, 80, 2);
-        let row1 = buf_row(&buf, 1);
+        let row0 = buf_row(&buf, 0);
         assert!(
-            row1.contains('\u{2B21}'),
-            "line 2 should contain ⬡ kind indicator, got: {row1:?}"
+            row0.contains("[SCAN]"),
+            "line 1 should contain [SCAN] kind badge for CodeScanning, got: {row0:?}"
         );
     }
 
     #[test]
-    fn security_alert_card_line2_kind_prefix_colored() {
+    fn security_alert_card_line1_kind_badge_colored() {
         let alert = make_test_alert(
             3,
             crate::models::AlertKind::CodeScanning,
             Some("lodash"),
             None,
         );
-        let item = build_security_alert_item(&alert, false, 80, false);
+        let item = build_security_alert_item(
+            &alert,
+            crate::models::SecurityWorkflowState::Backlog,
+            None,
+            false,
+            false,
+            80,
+        );
         let buf = render_list_item_to_buf(item, 80, 2);
         let area = buf.area();
-        let has_cyan = (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(CYAN));
+        let has_cyan = (area.left()..area.right()).any(|x| buf[(x, 0)].style().fg == Some(CYAN));
         assert!(
             has_cyan,
-            "CodeScanning kind should render with CYAN on line 2"
+            "CodeScanning kind badge should render with CYAN on line 1"
         );
     }
 
@@ -2981,7 +2995,14 @@ mod tests {
             Some("lodash"),
             None,
         );
-        let item = build_security_alert_item(&alert, false, 80, false);
+        let item = build_security_alert_item(
+            &alert,
+            crate::models::SecurityWorkflowState::Backlog,
+            None,
+            false,
+            false,
+            80,
+        );
         let buf = render_list_item_to_buf(item, 80, 2);
         let row1 = buf_row(&buf, 1);
         assert!(
@@ -2998,7 +3019,14 @@ mod tests {
             Some("lodash"),
             Some(8.1),
         );
-        let item = build_security_alert_item(&alert, false, 80, false);
+        let item = build_security_alert_item(
+            &alert,
+            crate::models::SecurityWorkflowState::Backlog,
+            None,
+            false,
+            false,
+            80,
+        );
         let buf = render_list_item_to_buf(item, 80, 2);
         let row1 = buf_row(&buf, 1);
         assert!(

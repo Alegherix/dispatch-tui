@@ -440,11 +440,43 @@ impl App {
         self.security.filtered_alerts()
     }
 
-    /// Return alerts for a specific workflow column using the active filter.
+    /// Return alerts for a specific workflow column (0=Backlog, 1=Ongoing, 2=ActionRequired, 3=Done)
+    /// using `security_workflow_states` for placement.
     pub fn security_alerts_for_column(&self, col: usize) -> Vec<&crate::models::SecurityAlert> {
-        let workflow_col = crate::models::SecurityWorkflowColumn::from_column_index(col)
-            .unwrap_or(crate::models::SecurityWorkflowColumn::Backlog);
-        self.security.alerts_for_workflow_column(workflow_col)
+        use crate::models::SecurityWorkflowState;
+        use crate::tui::types::WorkflowKey;
+        let wf_state = match col {
+            0 => SecurityWorkflowState::Backlog,
+            1 => SecurityWorkflowState::Ongoing,
+            2 => SecurityWorkflowState::ActionRequired,
+            3 => SecurityWorkflowState::Done,
+            _ => SecurityWorkflowState::Backlog,
+        };
+        let mut alerts: Vec<_> = self
+            .security
+            .filtered_alerts()
+            .into_iter()
+            .filter(|a| {
+                let kind = match a.kind {
+                    crate::models::AlertKind::Dependabot => {
+                        crate::models::WorkflowItemKind::DependabotAlert
+                    }
+                    crate::models::AlertKind::CodeScanning => {
+                        crate::models::WorkflowItemKind::CodeScanAlert
+                    }
+                };
+                let key = WorkflowKey::new(a.repo.clone(), a.number, kind);
+                let (state, _) = self
+                    .security
+                    .security_workflow_states
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((SecurityWorkflowState::Backlog, None));
+                state == wf_state
+            })
+            .collect();
+        alerts.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.number.cmp(&b.number)));
+        alerts
     }
 
     pub fn bot_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
@@ -504,7 +536,7 @@ impl App {
     }
 
     pub(in crate::tui) fn clamp_security_selection(&mut self) {
-        let counts: [usize; crate::models::SecurityWorkflowColumn::COLUMN_COUNT] =
+        let counts: [usize; crate::models::SecurityWorkflowState::COLUMN_COUNT] =
             std::array::from_fn(|col| self.security_alerts_for_column(col).len());
         if let Some(sel) = self.security_selection_mut() {
             for (col, &count) in counts.iter().enumerate() {
@@ -527,11 +559,11 @@ impl App {
             return self.clamp_security_selection();
         };
 
-        let counts: [usize; crate::models::SecurityWorkflowColumn::COLUMN_COUNT] =
+        let counts: [usize; crate::models::SecurityWorkflowState::COLUMN_COUNT] =
             std::array::from_fn(|col| self.security_alerts_for_column(col).len());
 
         let mut found: Option<(usize, usize)> = None;
-        'outer: for col in 0..crate::models::SecurityWorkflowColumn::COLUMN_COUNT {
+        'outer: for col in 0..crate::models::SecurityWorkflowState::COLUMN_COUNT {
             let alerts = self.security_alerts_for_column(col);
             for (row, alert) in alerts.iter().enumerate() {
                 if anchor_pr.matches(alert.number, &alert.repo) {

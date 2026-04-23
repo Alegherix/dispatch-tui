@@ -899,6 +899,14 @@ pub enum SecurityWorkflowState {
 }
 
 impl SecurityWorkflowState {
+    pub const COLUMN_COUNT: usize = 4;
+    pub const ALL: [Self; 4] = [
+        Self::Backlog,
+        Self::Ongoing,
+        Self::ActionRequired,
+        Self::Done,
+    ];
+
     pub fn as_db_str(self) -> &'static str {
         match self {
             Self::Backlog => "backlog",

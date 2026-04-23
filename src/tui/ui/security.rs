@@ -1,15 +1,15 @@
 use super::palette::{BORDER, CYAN, DIM_META, FG, MUTED, MUTED_LIGHT, YELLOW};
-use super::review::{build_dependabot_pr_item, dependabot_column_bg_color, dependabot_column_color};
 use super::shared::{
     push_hint_spans, refresh_status, render_substatus_header, render_tab_bar, staleness_color,
     truncate,
 };
 
 use crate::models::{
-    format_age, AlertKind, AlertSeverity, ReviewDecision, ReviewPr, SecurityAlert,
-    SecurityWorkflowColumn, Staleness,
+    format_age, AlertKind, AlertSeverity, SecurityAlert, SecurityWorkflowState,
+    SecurityWorkflowSubState, Staleness,
 };
-use crate::tui::{App, InputMode, SecurityBoardMode, ViewMode};
+use crate::tui::types::{FixDispatchKey, WorkflowKey};
+use crate::tui::{App, InputMode};
 use chrono::Utc;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -20,10 +20,28 @@ use ratatui::{
 };
 
 // ---------------------------------------------------------------------------
-// Security board rendering
+// Column color helpers — keyed on SecurityWorkflowState (4-column)
 // ---------------------------------------------------------------------------
 
-fn security_column_color(severity: AlertSeverity) -> Color {
+fn security_column_color(state: SecurityWorkflowState) -> Color {
+    match state {
+        SecurityWorkflowState::Backlog => MUTED,
+        SecurityWorkflowState::Ongoing => CYAN,
+        SecurityWorkflowState::ActionRequired => YELLOW,
+        SecurityWorkflowState::Done => Color::Rgb(80, 160, 80),
+    }
+}
+
+fn security_column_bg_color(state: SecurityWorkflowState) -> Color {
+    match state {
+        SecurityWorkflowState::Backlog => Color::Rgb(26, 26, 36),
+        SecurityWorkflowState::Ongoing => Color::Rgb(24, 32, 48),
+        SecurityWorkflowState::ActionRequired => Color::Rgb(36, 34, 26),
+        SecurityWorkflowState::Done => Color::Rgb(27, 36, 30),
+    }
+}
+
+fn severity_stripe_color(severity: AlertSeverity) -> Color {
     match severity {
         AlertSeverity::Critical => Color::Red,
         AlertSeverity::High => YELLOW,
@@ -32,7 +50,7 @@ fn security_column_color(severity: AlertSeverity) -> Color {
     }
 }
 
-fn security_cursor_bg_color(severity: AlertSeverity) -> Color {
+fn severity_cursor_bg_color(severity: AlertSeverity) -> Color {
     match severity {
         AlertSeverity::Critical => Color::Rgb(56, 28, 28),
         AlertSeverity::High => Color::Rgb(52, 44, 20),
@@ -41,24 +59,47 @@ fn security_cursor_bg_color(severity: AlertSeverity) -> Color {
     }
 }
 
-pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
-    let mode = match app.view_mode() {
-        ViewMode::SecurityBoard { mode, .. } => *mode,
-        _ => SecurityBoardMode::Dependabot,
-    };
-    match mode {
-        SecurityBoardMode::Dependabot => render_dependabot_board(frame, app, area),
-        SecurityBoardMode::Alerts => render_security_alerts_board(frame, app, area),
+// ---------------------------------------------------------------------------
+// Sub-state sort key for security workflow
+// ---------------------------------------------------------------------------
+
+fn security_sub_state_sort_key(sub: Option<SecurityWorkflowSubState>) -> u8 {
+    match sub {
+        Some(SecurityWorkflowSubState::Investigating) => 0,
+        Some(SecurityWorkflowSubState::Idle) => 1,
+        Some(SecurityWorkflowSubState::Stale) => 2,
+        Some(SecurityWorkflowSubState::FindingsReady) => 3,
+        Some(SecurityWorkflowSubState::NeedsManualFix) => 4,
+        Some(SecurityWorkflowSubState::PrOpen) => 5,
+        Some(SecurityWorkflowSubState::ChangesRequested) => 6,
+        Some(SecurityWorkflowSubState::CiFailing) => 7,
+        Some(SecurityWorkflowSubState::ReadyToMerge) => 8,
+        None => 9,
     }
 }
 
-fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
+// ---------------------------------------------------------------------------
+// Workflow key for an alert
+// ---------------------------------------------------------------------------
+
+fn workflow_key_for_alert(alert: &SecurityAlert) -> WorkflowKey {
+    let kind = match alert.kind {
+        AlertKind::Dependabot => crate::models::WorkflowItemKind::DependabotAlert,
+        AlertKind::CodeScanning => crate::models::WorkflowItemKind::CodeScanAlert,
+    };
+    WorkflowKey::new(alert.repo.clone(), alert.number, kind)
+}
+
+// ---------------------------------------------------------------------------
+// Security board rendering — unified 4-column view
+// ---------------------------------------------------------------------------
+
+pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
     let detail_height = if app.security_detail_visible() { 8 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),             // tab bar
-            Constraint::Length(1),             // mode header
             Constraint::Length(1),             // summary row
             Constraint::Length(1),             // refresh status row
             Constraint::Min(1),                // board
@@ -68,7 +109,6 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
         .split(area);
 
     render_tab_bar(frame, app, chunks[0]);
-    render_security_mode_header(frame, SecurityBoardMode::Alerts, chunks[1]);
 
     if app.security.unconfigured {
         let prompt = "No repositories configured — press [e] to set up security alert queries";
@@ -76,13 +116,12 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
             Paragraph::new(prompt)
                 .alignment(Alignment::Center)
                 .style(Style::default().fg(Color::DarkGray)),
-            chunks[4],
+            chunks[3],
         );
-        // Status bar: show transient message or an unconfigured-specific hint line
         if let Some(msg) = app.status.message.as_deref() {
             frame.render_widget(
                 Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow)),
-                chunks[6],
+                chunks[5],
             );
         } else {
             let key_color = Color::Cyan;
@@ -91,18 +130,16 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
             push_hint_spans(&mut hints, "e", "edit queries", key_color, label_style);
             push_hint_spans(&mut hints, "Tab", "tasks", key_color, label_style);
             push_hint_spans(&mut hints, "q", "quit", key_color, label_style);
-            frame.render_widget(Paragraph::new(Line::from(hints)), chunks[6]);
+            frame.render_widget(Paragraph::new(Line::from(hints)), chunks[5]);
         }
-        // Filter overlay still available when unconfigured
         if matches!(app.mode(), InputMode::SecurityRepoFilter) {
             render_security_repo_filter_overlay(frame, app, area);
         }
         return;
     }
 
-    render_security_summary_row(frame, app, chunks[2]);
+    render_security_summary_row(frame, app, chunks[1]);
 
-    // Refresh status row
     let (status_text, status_color) = refresh_status(
         app.security_last_fetch(),
         app.security_loading(),
@@ -110,205 +147,126 @@ fn render_security_alerts_board(frame: &mut Frame, app: &mut App, area: Rect) {
     );
     frame.render_widget(
         Paragraph::new(status_text).style(Style::default().fg(status_color)),
-        chunks[3],
+        chunks[2],
     );
 
     let filtered = app.filtered_security_alerts();
     if filtered.is_empty() {
-        let msg = if app.filtered_security_alerts().is_empty() && !app.security.alerts.is_empty() {
-            "All alerts filtered out."
-        } else {
+        let msg = if app.security.alerts.is_empty() {
             "No security alerts found"
+        } else {
+            "All alerts filtered out."
         };
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[4]);
+        frame.render_widget(p, chunks[3]);
     } else {
-        render_security_columns(frame, app, chunks[4]);
+        render_security_columns(frame, app, chunks[3]);
     }
 
-    render_security_detail(frame, app, chunks[5]);
+    render_security_detail(frame, app, chunks[4]);
 
     // Status bar
     if let Some(msg) = app.status.message.as_deref() {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[6]);
+        frame.render_widget(status, chunks[5]);
     } else if let Some(err) = app.last_security_error() {
-        let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, chunks[6]);
+        let status =
+            Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
+        frame.render_widget(status, chunks[5]);
     } else {
         let has_alert = app.selected_security_alert().is_some();
         let agent_status = app
             .selected_security_alert()
             .and_then(|a| app.alert_agent(a).map(|h| h.status));
-        let hints = Paragraph::new(Line::from(security_action_hints(
-            app,
-            has_alert,
-            agent_status,
-        )));
-        frame.render_widget(hints, chunks[6]);
+        let hints =
+            Paragraph::new(Line::from(security_action_hints(app, has_alert, agent_status)));
+        frame.render_widget(hints, chunks[5]);
     }
 
-    // Filter overlay
     if matches!(app.mode(), InputMode::SecurityRepoFilter) {
         render_security_repo_filter_overlay(frame, app, area);
     }
 }
 
-fn render_security_mode_header(frame: &mut Frame, current_mode: SecurityBoardMode, area: Rect) {
-    let active_style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
-    let inactive_style = Style::default().fg(MUTED);
-
-    let (dep_style, alerts_style) = match current_mode {
-        SecurityBoardMode::Dependabot => (active_style, inactive_style),
-        SecurityBoardMode::Alerts => (inactive_style, active_style),
+pub(in crate::tui) fn security_action_hints(
+    _app: &App,
+    has_alert: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+) -> Vec<Span<'static>> {
+    use crate::models::ReviewAgentStatus;
+    let key_color = Color::Cyan;
+    let label_style = Style::default().fg(MUTED);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: &'static str| {
+        push_hint_spans(spans, key, label, key_color, label_style);
     };
-
-    let line = Line::from(vec![
-        Span::styled("[1] Dependabot", dep_style),
-        Span::styled("  ", Style::default()),
-        Span::styled("[2] Alerts", alerts_style),
-    ]);
-    frame.render_widget(Paragraph::new(line), area);
+    if has_alert {
+        push_hint(&mut spans, "Enter", "detail");
+        match agent_status {
+            Some(ReviewAgentStatus::Idle) => {
+                push_hint(&mut spans, "g", "go to");
+                push_hint(&mut spans, "d", "resume");
+                push_hint(&mut spans, "T", "detach");
+            }
+            Some(_) => {
+                push_hint(&mut spans, "g", "go to");
+                push_hint(&mut spans, "T", "detach");
+            }
+            None => {
+                push_hint(&mut spans, "d", "dispatch");
+            }
+        }
+        push_hint(&mut spans, "p", "open");
+        push_hint(&mut spans, "m", "forward");
+        push_hint(&mut spans, "M", "back");
+    }
+    push_hint(&mut spans, "f", "filter");
+    push_hint(&mut spans, "Tab", "tasks");
+    push_hint(&mut spans, "?", "help");
+    push_hint(&mut spans, "q", "quit");
+    spans
 }
 
-fn render_dependabot_board(frame: &mut Frame, app: &mut App, area: Rect) {
-    let detail_height = if app.security.dependabot.detail_visible {
-        8
-    } else {
-        0
-    };
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),             // tab bar
-            Constraint::Length(1),             // mode header
-            Constraint::Length(1),             // column summary row
-            Constraint::Length(1),             // refresh status row
-            Constraint::Min(1),                // board
-            Constraint::Length(detail_height), // detail panel (placeholder)
-            Constraint::Length(1),             // status bar
-        ])
-        .split(area);
-
-    render_tab_bar(frame, app, chunks[0]);
-    render_security_mode_header(frame, SecurityBoardMode::Dependabot, chunks[1]);
-    render_dependabot_summary_row(frame, app, chunks[2]);
-
-    // Refresh status row
-    let (status_text, status_color) = refresh_status(
-        app.bot_prs_last_fetch(),
-        app.bot_prs_loading(),
-        crate::tui::REVIEW_REFRESH_INTERVAL,
-    );
-    frame.render_widget(
-        Paragraph::new(status_text).style(Style::default().fg(status_color)),
-        chunks[3],
-    );
-
-    let bot_prs = app.filtered_bot_prs();
-    if bot_prs.is_empty() {
-        let msg = if app.security.dependabot.prs.last_error.is_some() {
-            "Failed to load PRs."
-        } else {
-            "No Dependabot PRs found"
-        };
-        let p = Paragraph::new(msg)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(p, chunks[4]);
-    } else {
-        render_dependabot_columns(frame, app, chunks[4]);
-    }
-
-    // Detail panel placeholder (currently empty)
-    let detail_block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(Style::default().fg(BORDER));
-    frame.render_widget(detail_block, chunks[5]);
-
-    // Status bar
-    if let Some(msg) = app.status.message.as_deref() {
-        let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(status, chunks[6]);
-    } else if let Some(err) = app.security.dependabot.prs.last_error.as_deref() {
-        let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
-        frame.render_widget(status, chunks[6]);
-    } else {
-        let has_selected = !app.selected_bot_prs().is_empty();
-        let col = match app.view_mode() {
-            ViewMode::SecurityBoard {
-                dependabot_selection,
-                ..
-            } => dependabot_selection.selected_column,
-            _ => 0,
-        };
-        let row = match app.view_mode() {
-            ViewMode::SecurityBoard {
-                dependabot_selection,
-                ..
-            } => dependabot_selection.selected_row[col],
-            _ => 0,
-        };
-        let selected_pr = app
-            .filtered_bot_prs()
-            .into_iter()
-            .filter(|pr| crate::tui::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == col)
-            .nth(row);
-        let pr_agent_status = selected_pr.and_then(|pr| app.pr_agent(pr).map(|h| h.status));
-        let hints = Paragraph::new(Line::from(dependabot_action_hints(
-            has_selected,
-            selected_pr,
-            pr_agent_status,
-        )));
-        frame.render_widget(hints, chunks[6]);
-    }
-
-    if matches!(app.mode(), InputMode::BotPrRepoFilter) {
-        render_bot_pr_repo_filter_overlay(frame, app, area);
-    }
-}
-
-fn render_dependabot_summary_row(frame: &mut Frame, app: &App, area: Rect) {
-    let col_count = 3usize;
-    let col_labels = ["Backlog", "In Review", "Approved"];
-    let col_colors = [
-        dependabot_column_color(ReviewDecision::ReviewRequired),
-        dependabot_column_color(ReviewDecision::ChangesRequested),
-        dependabot_column_color(ReviewDecision::Approved),
+fn render_security_summary_row(frame: &mut Frame, app: &App, area: Rect) {
+    let sel_col = app.security_selection().map(|s| s.column()).unwrap_or(0);
+    let col_count = 4usize;
+    let workflow_states = [
+        SecurityWorkflowState::Backlog,
+        SecurityWorkflowState::Ongoing,
+        SecurityWorkflowState::ActionRequired,
+        SecurityWorkflowState::Done,
     ];
-
-    let sel_col = match app.view_mode() {
-        ViewMode::SecurityBoard {
-            dependabot_selection,
-            ..
-        } => dependabot_selection.selected_column,
-        _ => 0,
-    };
-
-    let prs = app.filtered_bot_prs();
 
     let segments = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
         .split(area);
 
-    for i in 0..col_count {
-        let count = prs
+    let filtered = app.filtered_security_alerts();
+
+    for (i, wf_state) in workflow_states.iter().enumerate() {
+        let count = filtered
             .iter()
-            .filter(|pr| crate::tui::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == i)
+            .filter(|a| {
+                let key = workflow_key_for_alert(a);
+                let (state, _) = app
+                    .security
+                    .security_workflow_states
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((SecurityWorkflowState::Backlog, None));
+                state == *wf_state
+            })
             .count();
         let is_focused = i == sel_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
-        let label = format!("{prefix}{} ({count})", col_labels[i]);
+        let label = format!("{prefix}{} ({count})", wf_state.column_label());
 
+        let color = security_column_color(*wf_state);
         let style = if is_focused {
-            Style::default()
-                .fg(col_colors[i])
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
@@ -317,211 +275,15 @@ fn render_dependabot_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
-    let col_count = 3usize;
-    let col_decisions = [
-        ReviewDecision::ReviewRequired,
-        ReviewDecision::ChangesRequested,
-        ReviewDecision::Approved,
-    ];
-
-    let (sel_col, sel_rows) = match app.view_mode() {
-        ViewMode::SecurityBoard {
-            dependabot_selection,
-            ..
-        } => (
-            dependabot_selection.selected_column,
-            dependabot_selection.selected_row,
-        ),
-        _ => (0, [0; ReviewDecision::COLUMN_COUNT]),
-    };
-
-    let col_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
-        .split(area);
-
-    let selected_prs: std::collections::HashSet<String> =
-        app.selected_bot_prs().iter().cloned().collect();
-
-    for i in 0..col_count {
-        let is_focused = i == sel_col;
-        let decision_for_color = col_decisions[i];
-        let selected_row = sel_rows[i];
-
-        let mut prs: Vec<&ReviewPr> = app
-            .filtered_bot_prs()
-            .into_iter()
-            .filter(|pr| crate::tui::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == i)
-            .collect();
-        crate::tui::sort_prs_for_display(&mut prs);
-
-        let mut list_items: Vec<ListItem> = Vec::new();
-        let mut list_selection_idx: Option<usize> = None;
-        let mut current_repo: Option<&str> = None;
-
-        for (item_idx, pr) in prs.iter().enumerate() {
-            if current_repo != Some(pr.repo.as_str()) {
-                current_repo = Some(pr.repo.as_str());
-                let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-                list_items.push(render_substatus_header(repo_short, list_items.is_empty()));
-            }
-
-            if item_idx == selected_row {
-                list_selection_idx = Some(list_items.len());
-            }
-
-            let is_selected = selected_prs.contains(&pr.url);
-            list_items.push(build_dependabot_pr_item(
-                pr,
-                decision_for_color,
-                is_focused && item_idx == selected_row,
-                app.pr_agent(pr).map(|h| h.status),
-                is_selected,
-                col_areas[i].width,
-            ));
-        }
-
-        let bg = if is_focused {
-            dependabot_column_bg_color(decision_for_color)
-        } else {
-            Color::Reset
-        };
-
-        let list = List::new(list_items).block(Block::default().style(Style::default().bg(bg)));
-
-        let mut list_state = ListState::default();
-        if is_focused {
-            list_state.select(list_selection_idx);
-        }
-
-        frame.render_stateful_widget(list, col_areas[i], &mut list_state);
-
-        // Write back list state for scroll tracking
-        if let ViewMode::SecurityBoard {
-            dependabot_selection,
-            ..
-        } = &mut app.board.view_mode
-        {
-            dependabot_selection.list_states[i] = list_state;
-        }
-    }
-}
-
-pub(in crate::tui) fn dependabot_action_hints(
-    has_selected: bool,
-    selected_pr: Option<&crate::models::ReviewPr>,
-    agent_status: Option<crate::models::ReviewAgentStatus>,
-) -> Vec<Span<'static>> {
-    use crate::models::ReviewAgentStatus;
-    let key_color = Color::Cyan;
-    let label_style = Style::default().fg(MUTED);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: String| {
-        push_hint_spans(spans, key, &label, key_color, label_style);
-    };
-
-    if has_selected {
-        push_hint(&mut spans, "a", "approve".into());
-        push_hint(&mut spans, "m", "merge".into());
-        push_hint(&mut spans, "Esc", "clear".into());
-    } else if selected_pr.is_some() {
-        push_hint(&mut spans, "Space", "select".into());
-        match agent_status {
-            Some(ReviewAgentStatus::Idle) => {
-                push_hint(&mut spans, "g", "go to".into());
-                push_hint(&mut spans, "d", "resume".into());
-                push_hint(&mut spans, "T", "detach".into());
-            }
-            Some(_) => {
-                push_hint(&mut spans, "g", "go to".into());
-                push_hint(&mut spans, "T", "detach".into());
-            }
-            None => {
-                push_hint(&mut spans, "d", "dispatch".into());
-            }
-        }
-        push_hint(&mut spans, "p", "open".into());
-    }
-    push_hint(&mut spans, "Tab", "tasks".into());
-    push_hint(&mut spans, "?", "help".into());
-    push_hint(&mut spans, "q", "quit".into());
-    spans
-}
-
-pub(in crate::tui) fn security_action_hints(
-    app: &App,
-    has_alert: bool,
-    agent_status: Option<crate::models::ReviewAgentStatus>,
-) -> Vec<Span<'static>> {
-    use crate::models::ReviewAgentStatus;
-    let key_color = Color::Cyan;
-    let label_style = Style::default().fg(MUTED);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: String| {
-        push_hint_spans(spans, key, &label, key_color, label_style);
-    };
-    if has_alert {
-        push_hint(&mut spans, "Enter", "detail".into());
-        match agent_status {
-            Some(ReviewAgentStatus::Idle) => {
-                push_hint(&mut spans, "g", "go to".into());
-                push_hint(&mut spans, "d", "resume".into());
-                push_hint(&mut spans, "T", "detach".into());
-            }
-            Some(_) => {
-                push_hint(&mut spans, "g", "go to".into());
-                push_hint(&mut spans, "T", "detach".into());
-            }
-            None => {
-                push_hint(&mut spans, "d", "dispatch".into());
-            }
-        }
-        push_hint(&mut spans, "p", "open".into());
-    }
-    push_hint(&mut spans, "f", "filter".into());
-    let kind_label = match app.security_kind_filter() {
-        None => "all",
-        Some(AlertKind::Dependabot) => "deps",
-        Some(AlertKind::CodeScanning) => "code",
-    };
-    push_hint(&mut spans, "t", format!("kind:{kind_label}"));
-    push_hint(&mut spans, "Tab", "tasks".into());
-    push_hint(&mut spans, "?", "help".into());
-    push_hint(&mut spans, "q", "quit".into());
-    spans
-}
-
-fn render_security_summary_row(frame: &mut Frame, app: &App, area: Rect) {
-    let sel = app.security_selection();
-    let selected_col = sel.map(|s| s.column()).unwrap_or(0);
-    let col_count = SecurityWorkflowColumn::COLUMN_COUNT;
-
-    let segments = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
-        .split(area);
-
-    for (i, workflow_col) in SecurityWorkflowColumn::ALL.iter().enumerate() {
-        let count = app.security_alerts_for_column(i).len();
-        let is_focused = i == selected_col;
-        let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
-        let label = format!("{prefix}{} ({count})", workflow_col.label());
-
-        let style = if is_focused {
-            Style::default().fg(FG).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-
-        let p = Paragraph::new(label).style(style);
-        frame.render_widget(p, segments[i]);
-    }
-}
-
 fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.security_selection().map(|s| s.column()).unwrap_or(0);
-    let col_count = SecurityWorkflowColumn::COLUMN_COUNT;
+    let col_count = 4usize;
+    let workflow_states = [
+        SecurityWorkflowState::Backlog,
+        SecurityWorkflowState::Ongoing,
+        SecurityWorkflowState::ActionRequired,
+        SecurityWorkflowState::Done,
+    ];
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
@@ -530,35 +292,78 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
 
     for i in 0..col_count {
         let is_focused = i == sel_col;
-        let alerts: Vec<&SecurityAlert> = app.security_alerts_for_column(i);
-        let is_in_progress_col = i == SecurityWorkflowColumn::InProgress.column_index();
+        let wf_state = workflow_states[i];
+
+        // Collect alerts for this workflow column, with sub-states
+        let mut col_alerts: Vec<(&SecurityAlert, Option<SecurityWorkflowSubState>)> = app
+            .filtered_security_alerts()
+            .into_iter()
+            .filter_map(|a| {
+                let key = workflow_key_for_alert(a);
+                let (state, sub) = app
+                    .security
+                    .security_workflow_states
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((SecurityWorkflowState::Backlog, None));
+                if state == wf_state {
+                    Some((a, sub))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by sub-state, then repo, then number
+        col_alerts.sort_by(|(a, a_sub), (b, b_sub)| {
+            security_sub_state_sort_key(*a_sub)
+                .cmp(&security_sub_state_sort_key(*b_sub))
+                .then(a.repo.cmp(&b.repo))
+                .then(a.number.cmp(&b.number))
+        });
 
         let selected_row = app.security_selection().map(|s| s.row(i)).unwrap_or(0);
         let mut list_items: Vec<ListItem> = Vec::new();
         let mut list_selection_idx: Option<usize> = None;
-        let mut current_repo: Option<&str> = None;
+        let mut current_sub: Option<Option<SecurityWorkflowSubState>> = None;
 
-        for (item_idx, alert) in alerts.iter().enumerate() {
-            if current_repo != Some(alert.repo.as_str()) {
-                current_repo = Some(alert.repo.as_str());
-                let repo_short = alert.repo.split('/').next_back().unwrap_or(&alert.repo);
-                list_items.push(render_substatus_header(repo_short, list_items.is_empty()));
+        for (item_idx, (alert, sub)) in col_alerts.iter().enumerate() {
+            // Section header when sub-state changes within column
+            if current_sub != Some(*sub) {
+                current_sub = Some(*sub);
+                if let Some(sub_state) = sub {
+                    let label = sub_state.section_label();
+                    list_items.push(render_substatus_header(label, list_items.is_empty()));
+                } else if !list_items.is_empty() {
+                    list_items.push(render_substatus_header("other", false));
+                }
             }
 
             if item_idx == selected_row {
                 list_selection_idx = Some(list_items.len());
             }
 
+            // Tmux circle: filled if a fix agent has an active tmux window
+            let fix_key = FixDispatchKey::new(alert.repo.clone(), alert.number, alert.kind);
+            let tmux_alive = app
+                .security
+                .fix_agents
+                .get(&fix_key)
+                .map(|h| !h.tmux_window.is_empty())
+                .unwrap_or(false);
+
             list_items.push(build_security_alert_item(
                 alert,
+                wf_state,
+                *sub,
                 is_focused && item_idx == selected_row,
+                tmux_alive,
                 col_areas[i].width,
-                is_in_progress_col,
             ));
         }
 
         let bg = if is_focused {
-            Color::Rgb(24, 26, 32)
+            security_column_bg_color(wf_state)
         } else {
             Color::Reset
         };
@@ -578,95 +383,78 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Test helper: returns concatenated text content of the card for assertions.
-#[cfg(test)]
-pub(in crate::tui) fn build_security_alert_item_for_test(
-    alert: &SecurityAlert,
-    is_cursor: bool,
-    col_width: u16,
-    is_running: bool,
-) -> String {
-    let _item = build_security_alert_item(alert, is_cursor, col_width, is_running);
-    // Extract text via rendering to Text — ListItem wraps a Text internally.
-    // We reconstruct text by converting via the widget's Text representation.
-    // Simplest: build the same lines as the function and concatenate spans.
-    let now = chrono::Utc::now();
-    let age = format_age(alert.created_at, now);
-    let severity_color = security_column_color(alert.severity);
-    let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
-    let running_badge = if is_running { "\u{25c9} " } else { "" };
-    let header = format!("#{} {}", alert.number, alert.title);
-    let reserved = 2 + if is_running { 2 } else { 0 };
-    let max_header = (col_width as usize).saturating_sub(reserved);
-    let header_truncated = truncate(&header, max_header);
-    let (sev_badge, _) = match alert.severity {
-        AlertSeverity::Critical => ("[CRIT]", Color::Red),
-        AlertSeverity::High => ("[HIGH]", YELLOW),
-        AlertSeverity::Medium => ("[MED] ", Color::Rgb(86, 152, 194)),
-        AlertSeverity::Low => ("[LOW] ", Color::DarkGray),
-    };
-    let kind_label = match alert.kind {
-        AlertKind::Dependabot => "\u{2b21} Dependabot",
-        AlertKind::CodeScanning => "\u{2b21} CodeScanning",
-    };
-    let pkg = alert.package.as_deref().unwrap_or("-");
-    let cvss_str = alert
-        .cvss_score
-        .map(|s| format!(" \u{b7} CVSS:{s:.1}"))
-        .unwrap_or_default();
-    format!(
-        "{stripe}{running_badge}{header_truncated}  {sev_badge} {kind_label} \u{b7} {pkg}{cvss_str} \u{b7} {age}",
-    )
-}
-
+/// Build a 2-line list item for a security alert card.
+///
+/// Line 1: `<severity_stripe> [circle] #<number> <title> [DEP]/[SCAN]`
+///   - Severity stripe: colored at far left
+///   - Circle: omitted in Backlog; ◉ (cyan) if tmux alive, ○ (dim) if not
+///   - Kind badge: `[DEP]` in yellow for Dependabot, `[SCAN]` in cyan for CodeScanning
+///
+/// Line 2: `[CRIT]/[HIGH]/[MED]/[LOW] <package> CVSS:<score> <age>`
 pub(in crate::tui::ui) fn build_security_alert_item(
     alert: &SecurityAlert,
+    state: SecurityWorkflowState,
+    _sub: Option<SecurityWorkflowSubState>,
     is_cursor: bool,
+    tmux_alive: bool,
     col_width: u16,
-    is_running: bool,
 ) -> ListItem<'static> {
-    let severity_color = security_column_color(alert.severity);
+    let stripe_color = severity_stripe_color(alert.severity);
     let now = Utc::now();
     let age = format_age(alert.created_at, now);
 
-    // Line 1: severity-colored stripe + optional ◉ running badge + #number + title
+    // Stripe (cursor vs. not)
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
-    let running_badge = if is_running { "\u{25c9} " } else { "" };
-    let header = format!("#{} {}", alert.number, alert.title);
-    // stripe(2) + running_badge(2 if present) + header
-    let reserved = 2 + if is_running { 2 } else { 0 };
-    let max_header = (col_width as usize).saturating_sub(reserved);
-    let header_truncated = truncate(&header, max_header);
+
+    // Circle indicator — omitted in Backlog, filled/empty otherwise
+    let (circle_text, circle_color): (&'static str, Color) =
+        if state == SecurityWorkflowState::Backlog {
+            ("", Color::Reset)
+        } else if tmux_alive {
+            ("\u{25c9} ", CYAN) // ◉
+        } else {
+            ("\u{25cb} ", Color::DarkGray) // ○
+        };
+
+    // Kind badge
+    let (kind_badge, kind_color): (&'static str, Color) = match alert.kind {
+        AlertKind::Dependabot => (" [DEP]", YELLOW),
+        AlertKind::CodeScanning => (" [SCAN]", CYAN),
+    };
+
+    // Calculate width for title
+    let circle_w = if circle_text.is_empty() { 0usize } else { 2 };
+    let number_prefix = format!("#{} ", alert.number);
+    let badge_w = kind_badge.len();
+    let overhead = 2 + circle_w + number_prefix.len() + badge_w;
+    let max_title = (col_width as usize).saturating_sub(overhead).max(1);
+    let title_truncated = truncate(&alert.title, max_title);
 
     let line1_style = if is_cursor {
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(severity_color)
+        Style::default().fg(FG)
     };
 
-    let mut line1_spans = vec![Span::styled(stripe, Style::default().fg(severity_color))];
-    if is_running {
-        line1_spans.push(Span::styled(running_badge, Style::default().fg(CYAN)));
+    let mut spans1: Vec<Span> = vec![Span::styled(stripe.to_string(), Style::default().fg(stripe_color))];
+    if !circle_text.is_empty() {
+        spans1.push(Span::styled(circle_text.to_string(), Style::default().fg(circle_color)));
     }
-    line1_spans.push(Span::styled(header_truncated, line1_style));
-    let line1 = Line::from(line1_spans);
+    spans1.push(Span::styled(
+        format!("{number_prefix}{title_truncated}"),
+        line1_style,
+    ));
+    spans1.push(Span::styled(kind_badge.to_string(), Style::default().fg(kind_color)));
+    let line1 = Line::from(spans1);
 
-    // Line 2: [severity] ⬡ kind · package · CVSS · age
-    let staleness = Staleness::from_age(alert.created_at, now);
-    let age_color = staleness_color(staleness);
-
+    // Line 2: severity badge + package + CVSS + age
     let (sev_badge, sev_color) = match alert.severity {
         AlertSeverity::Critical => ("[CRIT]", Color::Red),
         AlertSeverity::High => ("[HIGH]", YELLOW),
         AlertSeverity::Medium => ("[MED] ", Color::Rgb(86, 152, 194)),
         AlertSeverity::Low => ("[LOW] ", Color::DarkGray),
-    };
-
-    let (kind_color, kind_label) = match alert.kind {
-        AlertKind::Dependabot => (YELLOW, "\u{2b21} Dependabot"),
-        AlertKind::CodeScanning => (CYAN, "\u{2b21} CodeScanning"),
     };
     let pkg = alert.package.as_deref().unwrap_or("-");
     let cvss_str = alert
@@ -674,19 +462,19 @@ pub(in crate::tui::ui) fn build_security_alert_item(
         .map(|s| format!(" \u{b7} CVSS:{s:.1}"))
         .unwrap_or_default();
 
+    let staleness = Staleness::from_age(alert.created_at, now);
+    let age_color = staleness_color(staleness);
     let meta_style = Style::default().fg(DIM_META);
 
     let line2 = Line::from(vec![
         Span::raw("  "),
         Span::styled(sev_badge, Style::default().fg(sev_color)),
-        Span::raw(" "),
-        Span::styled(kind_label, Style::default().fg(kind_color)),
-        Span::styled(format!(" \u{b7} {pkg}{cvss_str} \u{b7} "), meta_style),
+        Span::styled(format!(" {pkg}{cvss_str} \u{b7} "), meta_style),
         Span::styled(age, Style::default().fg(age_color)),
     ]);
 
     let bg = if is_cursor {
-        security_cursor_bg_color(alert.severity)
+        severity_cursor_bg_color(alert.severity)
     } else {
         Color::Reset
     };
@@ -711,7 +499,7 @@ fn render_security_detail(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    let color = security_column_color(alert.severity);
+    let color = severity_stripe_color(alert.severity);
     let now = Utc::now();
     let age = format_age(alert.created_at, now);
 
@@ -772,19 +560,61 @@ fn render_security_detail(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+/// Test helper: returns concatenated text content of the card for assertions.
+#[cfg(test)]
+pub(in crate::tui) fn build_security_alert_item_for_test(
+    alert: &SecurityAlert,
+    is_cursor: bool,
+    col_width: u16,
+    is_running: bool,
+) -> String {
+    use crate::models::format_age;
+    let now = chrono::Utc::now();
+    let age = format_age(alert.created_at, now);
+    let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
+    let state = if is_running {
+        SecurityWorkflowState::Ongoing
+    } else {
+        SecurityWorkflowState::Backlog
+    };
+    let circle = if state == SecurityWorkflowState::Backlog {
+        ""
+    } else if is_running {
+        "\u{25c9} "
+    } else {
+        "\u{25cb} "
+    };
+    let (kind_badge, _) = match alert.kind {
+        AlertKind::Dependabot => (" [DEP]", YELLOW),
+        AlertKind::CodeScanning => (" [SCAN]", CYAN),
+    };
+    let number_prefix = format!("#{} ", alert.number);
+    let badge_w = kind_badge.len();
+    let circle_w = if circle.is_empty() { 0usize } else { 2 };
+    let overhead = 2 + circle_w + number_prefix.len() + badge_w;
+    let max_title = (col_width as usize).saturating_sub(overhead).max(1);
+    let title_truncated = truncate(&alert.title, max_title);
+    let (sev_badge, _) = match alert.severity {
+        AlertSeverity::Critical => ("[CRIT]", Color::Red),
+        AlertSeverity::High => ("[HIGH]", YELLOW),
+        AlertSeverity::Medium => ("[MED] ", Color::Rgb(86, 152, 194)),
+        AlertSeverity::Low => ("[LOW] ", Color::DarkGray),
+    };
+    let pkg = alert.package.as_deref().unwrap_or("-");
+    let cvss_str = alert
+        .cvss_score
+        .map(|s| format!(" \u{b7} CVSS:{s:.1}"))
+        .unwrap_or_default();
+    format!(
+        "{stripe}{circle}{number_prefix}{title_truncated}{kind_badge}  {sev_badge} {pkg}{cvss_str} \u{b7} {age}",
+    )
+}
+
 fn render_security_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let repos = app.active_security_repos();
     let mode_str = app.security.repo_filter_mode.as_str();
     render_security_filter_overlay_inner(frame, area, repos, mode_str, |r| {
         app.security.repo_filter.contains(r)
-    });
-}
-
-fn render_bot_pr_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
-    let repos = app.active_bot_pr_repos();
-    let mode_str = app.security.dependabot.prs.repo_filter_mode.as_str();
-    render_security_filter_overlay_inner(frame, area, repos, mode_str, |r| {
-        app.security.dependabot.prs.repo_filter.contains(r)
     });
 }
 
@@ -848,4 +678,49 @@ fn render_security_filter_overlay_inner(
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
+}
+
+// ---------------------------------------------------------------------------
+// Dependabot PR action hints — kept for use from input/mod.rs
+// ---------------------------------------------------------------------------
+
+pub(in crate::tui) fn dependabot_action_hints(
+    has_selected: bool,
+    selected_pr: Option<&crate::models::ReviewPr>,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+) -> Vec<Span<'static>> {
+    use crate::models::ReviewAgentStatus;
+    let key_color = Color::Cyan;
+    let label_style = Style::default().fg(MUTED);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let push_hint = |spans: &mut Vec<Span<'static>>, key: &'static str, label: String| {
+        push_hint_spans(spans, key, &label, key_color, label_style);
+    };
+
+    if has_selected {
+        push_hint(&mut spans, "a", "approve".into());
+        push_hint(&mut spans, "m", "merge".into());
+        push_hint(&mut spans, "Esc", "clear".into());
+    } else if selected_pr.is_some() {
+        push_hint(&mut spans, "Space", "select".into());
+        match agent_status {
+            Some(ReviewAgentStatus::Idle) => {
+                push_hint(&mut spans, "g", "go to".into());
+                push_hint(&mut spans, "d", "resume".into());
+                push_hint(&mut spans, "T", "detach".into());
+            }
+            Some(_) => {
+                push_hint(&mut spans, "g", "go to".into());
+                push_hint(&mut spans, "T", "detach".into());
+            }
+            None => {
+                push_hint(&mut spans, "d", "dispatch".into());
+            }
+        }
+        push_hint(&mut spans, "p", "open".into());
+    }
+    push_hint(&mut spans, "Tab", "tasks".into());
+    push_hint(&mut spans, "?", "help".into());
+    push_hint(&mut spans, "q", "quit".into());
+    spans
 }

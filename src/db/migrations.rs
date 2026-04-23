@@ -40,6 +40,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (34, migrate_v34_add_parent_epic_id),
     (35, migrate_v35_add_self_ref_check),
     (36, migrate_v36_tips_state),
+    (37, migrate_v37_pr_workflow_states),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -779,6 +780,21 @@ fn migrate_v35_add_self_ref_check(conn: &Connection) -> Result<()> {
          PRAGMA foreign_keys = ON;",
     )
     .context("Failed to rebuild epics table for migration v35 (self-ref CHECK)")
+}
+
+fn migrate_v37_pr_workflow_states(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE pr_workflow_states (
+            repo       TEXT    NOT NULL,
+            number     INTEGER NOT NULL,
+            kind       TEXT    NOT NULL,
+            state      TEXT    NOT NULL DEFAULT 'backlog',
+            sub_state  TEXT,
+            updated_at TEXT    NOT NULL,
+            PRIMARY KEY (repo, number, kind)
+        );",
+    )
+    .context("Failed to create pr_workflow_states table (migration v37)")
 }
 
 fn migrate_v36_tips_state(conn: &Connection) -> Result<()> {

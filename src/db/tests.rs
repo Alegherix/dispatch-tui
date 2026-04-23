@@ -321,7 +321,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 }
 
 #[test]
@@ -408,7 +408,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 }
 
 #[test]
@@ -497,7 +497,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 }
 
 #[test]
@@ -608,7 +608,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 }
 
 #[test]
@@ -2101,7 +2101,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -2381,7 +2381,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -4448,7 +4448,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 }
 
 #[test]
@@ -4524,7 +4524,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 36);
+    assert_eq!(version, 37);
 }
 
 #[test]
@@ -4910,4 +4910,42 @@ fn load_alert_agent_states_returns_active_agents() {
     assert_eq!(handle.tmux_window, "dispatch:fix-7");
     assert_eq!(handle.worktree, "/tmp/wt-7");
     assert_eq!(handle.status, ReviewAgentStatus::Reviewing);
+}
+
+#[test]
+fn migrate_v37_creates_pr_workflow_states_table() {
+    let db = in_memory_db();
+    let conn = db.conn().unwrap();
+
+    // Table must exist
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pr_workflow_states'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+
+    // Primary key enforced: duplicate (repo, number, kind) must fail
+    conn.execute(
+        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+         VALUES ('org/repo', 1, 'reviewer_pr', 'backlog', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    let result = conn.execute(
+        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+         VALUES ('org/repo', 1, 'reviewer_pr', 'ongoing', '2026-01-01T00:00:00Z')",
+        [],
+    );
+    assert!(result.is_err());
+
+    // sub_state nullable: NULL is allowed
+    conn.execute(
+        "INSERT INTO pr_workflow_states (repo, number, kind, state, sub_state, updated_at)
+         VALUES ('org/repo', 2, 'reviewer_pr', 'ongoing', NULL, '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
 }

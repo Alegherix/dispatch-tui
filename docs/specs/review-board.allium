@@ -88,7 +88,7 @@ entity ReviewPr {
 --   Line 2:   ● <ci_state> · @<author> · +<additions>/-<deletions> · <age>
 --
 -- selection marker:  "* " when the PR is in multi-select, "" otherwise
--- agent badge:       ◆ reviewing | ✔ findings_ready | ○ idle | "" none
+-- agent badge:       ◉ reviewing (cyan) | ✔ findings_ready | ○ idle | "" none
 -- CI dot:            colored dot right-aligned on line 1 (see dep/CiBadge)
 -- ci_state prefix:   colored text label first on line 2 (see CiStatePrefix below)
 -- age is last as a trailing staleness signal

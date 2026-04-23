@@ -191,16 +191,6 @@ impl TuiRuntime {
         // Also refresh epics
         self.exec_refresh_epics_from_db(app);
         self.exec_refresh_usage_from_db(app);
-        // Load pr_workflow_states
-        match self.database.list_pr_workflows() {
-            Ok(rows) => {
-                let extra = app.update(Message::WorkflowStatesLoaded(rows));
-                cmds.extend(extra);
-            }
-            Err(e) => {
-                tracing::warn!("Failed to load workflow states: {e}");
-            }
-        }
         cmds
     }
 

@@ -427,6 +427,13 @@ pub trait PrWorkflowStore: Send + Sync {
 
     fn list_pr_workflows(&self) -> anyhow::Result<Vec<PrWorkflowRow>>;
 
+    /// Return the kind of the first workflow row for (repo, number), or None if absent.
+    fn find_pr_workflow_kind(
+        &self,
+        repo: &str,
+        number: i64,
+    ) -> anyhow::Result<Option<crate::models::WorkflowItemKind>>;
+
     /// Delete rows where state = 'done' AND updated_at < (now - older_than).
     fn prune_done_pr_workflows(
         &self,

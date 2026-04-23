@@ -1351,6 +1351,9 @@ impl App {
             Message::WorkflowStatesLoaded(rows) => {
                 use crate::models::WorkflowItemKind::{CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr};
                 use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, SecurityWorkflowState, SecurityWorkflowSubState};
+                // Replace maps entirely so pruned rows don't linger in memory.
+                self.review.review_workflow_states.clear();
+                self.security.security_workflow_states.clear();
                 for row in rows {
                     let key = WorkflowKey::new(row.repo.clone(), row.number, row.kind);
                     match row.kind {

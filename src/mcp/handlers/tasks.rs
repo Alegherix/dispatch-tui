@@ -840,8 +840,8 @@ pub(super) fn handle_update_review_status(
                         &parsed.repo,
                         parsed.number,
                         kind,
-                        "action_required",
-                        Some("findings_ready"),
+                        crate::models::ReviewWorkflowState::ActionRequired.as_db_str(),
+                        Some(crate::models::ReviewWorkflowSubState::FindingsReady.as_db_str()),
                     );
                 }
                 state.notify_review_ready(parsed.repo.clone(), parsed.number);
@@ -863,10 +863,7 @@ fn find_workflow_kind_for(
     repo: &str,
     number: i64,
 ) -> Option<crate::models::WorkflowItemKind> {
-    use crate::models::WorkflowItemKind::{CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr};
-    [ReviewerPr, DependabotPr, DependabotAlert, CodeScanAlert]
-        .into_iter()
-        .find(|&kind| db.get_pr_workflow(repo, number, kind).ok().flatten().is_some())
+    db.find_pr_workflow_kind(repo, number).ok().flatten()
 }
 
 pub(super) fn handle_report_usage(

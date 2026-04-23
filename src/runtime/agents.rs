@@ -17,7 +17,6 @@ impl TuiRuntime {
             return app.update(Message::Error(Self::db_error("persisting fix agent", e)));
         }
 
-        // Also persist workflow state: Ongoing/Investigating
         use crate::models::{SecurityWorkflowState, SecurityWorkflowSubState, WorkflowItemKind};
         use crate::tui::types::WorkflowKey;
 
@@ -26,13 +25,15 @@ impl TuiRuntime {
             models::AlertKind::CodeScanning => WorkflowItemKind::CodeScanAlert,
         };
         let key = WorkflowKey::new(github_repo.to_string(), number, workflow_kind);
-        let _ = self.database.upsert_pr_workflow(
+        if let Err(e) = self.database.upsert_pr_workflow(
             github_repo,
             number,
             workflow_kind,
             SecurityWorkflowState::Ongoing.as_db_str(),
             Some(SecurityWorkflowSubState::Investigating.as_db_str()),
-        );
+        ) {
+            tracing::warn!("Failed to persist security workflow state on dispatch: {e}");
+        }
         app.update(Message::SecurityWorkflowUpdated {
             key,
             state: SecurityWorkflowState::Ongoing,

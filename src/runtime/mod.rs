@@ -791,11 +791,6 @@ async fn execute_commands(
                     tracing::error!("Failed to persist security workflow state: {e}");
                 }
             }
-            Command::PruneDonePrWorkflows => {
-                if let Err(e) = rt.database.prune_done_pr_workflows(chrono::Duration::days(7)) {
-                    tracing::error!("Failed to prune done pr workflows: {e}");
-                }
-            }
         }
     }
 

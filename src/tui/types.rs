@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus, ReviewDecision,
+    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus,
     SecurityAlert, SecurityWorkflowColumn, SecurityWorkflowState, SubStatus, Task, TaskId,
     TaskStatus, TaskTag, TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
 };
@@ -725,8 +725,6 @@ pub enum Command {
         state: crate::models::SecurityWorkflowState,
         sub_state: Option<crate::models::SecurityWorkflowSubState>,
     },
-    // Prune Done rows older than 7 days (run on startup)
-    PruneDonePrWorkflows,
 }
 
 // ---------------------------------------------------------------------------
@@ -1242,8 +1240,8 @@ impl Default for BoardSelection {
 #[derive(Debug, Clone)]
 pub struct ReviewBoardSelection {
     pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; ReviewDecision::COLUMN_COUNT],
-    pub(in crate::tui) list_states: [ListState; ReviewDecision::COLUMN_COUNT],
+    pub(in crate::tui) selected_row: [usize; crate::models::ReviewWorkflowState::COLUMN_COUNT],
+    pub(in crate::tui) list_states: [ListState; crate::models::ReviewWorkflowState::COLUMN_COUNT],
     pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
 }
 
@@ -1251,7 +1249,7 @@ impl ReviewBoardSelection {
     pub fn new() -> Self {
         Self {
             selected_column: 0,
-            selected_row: [0; ReviewDecision::COLUMN_COUNT],
+            selected_row: [0; crate::models::ReviewWorkflowState::COLUMN_COUNT],
             list_states: std::array::from_fn(|_| ListState::default()),
             anchor_pr: None,
         }

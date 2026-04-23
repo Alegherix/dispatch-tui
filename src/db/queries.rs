@@ -1190,6 +1190,24 @@ impl super::PrWorkflowStore for Database {
         Ok(rows)
     }
 
+    fn find_pr_workflow_kind(
+        &self,
+        repo: &str,
+        number: i64,
+    ) -> anyhow::Result<Option<crate::models::WorkflowItemKind>> {
+        let conn = self.conn()?;
+        let kind_str: Option<String> = conn
+            .query_row(
+                "SELECT kind FROM pr_workflow_states WHERE repo = ?1 AND number = ?2 LIMIT 1",
+                params![repo, number],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(kind_str
+            .as_deref()
+            .and_then(crate::models::WorkflowItemKind::from_db_str))
+    }
+
     fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()> {
         let conn = self.conn()?;
         let cutoff = chrono::Utc::now() - older_than;

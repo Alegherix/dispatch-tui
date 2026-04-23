@@ -218,6 +218,29 @@ impl TuiRuntime {
         {
             return app.update(Message::Error(Self::db_error("persisting review agent", e)));
         }
+
+        // Also persist workflow state: Ongoing/Reviewing
+        use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind};
+        use crate::tui::types::WorkflowKey;
+
+        let workflow_kind = match pr_kind {
+            db::PrKind::Bot => WorkflowItemKind::DependabotPr,
+            _ => WorkflowItemKind::ReviewerPr,
+        };
+        let key = WorkflowKey::new(github_repo.to_string(), number, workflow_kind);
+        let _ = self.database.upsert_pr_workflow(
+            github_repo,
+            number,
+            workflow_kind,
+            ReviewWorkflowState::Ongoing.as_db_str(),
+            Some(ReviewWorkflowSubState::Reviewing.as_db_str()),
+        );
+        app.update(Message::ReviewWorkflowUpdated {
+            key,
+            state: ReviewWorkflowState::Ongoing,
+            sub_state: Some(ReviewWorkflowSubState::Reviewing),
+        });
+
         vec![]
     }
 

@@ -16,6 +16,29 @@ impl TuiRuntime {
         {
             return app.update(Message::Error(Self::db_error("persisting fix agent", e)));
         }
+
+        // Also persist workflow state: Ongoing/Investigating
+        use crate::models::{SecurityWorkflowState, SecurityWorkflowSubState, WorkflowItemKind};
+        use crate::tui::types::WorkflowKey;
+
+        let workflow_kind = match kind {
+            models::AlertKind::Dependabot => WorkflowItemKind::DependabotAlert,
+            models::AlertKind::CodeScanning => WorkflowItemKind::CodeScanAlert,
+        };
+        let key = WorkflowKey::new(github_repo.to_string(), number, workflow_kind);
+        let _ = self.database.upsert_pr_workflow(
+            github_repo,
+            number,
+            workflow_kind,
+            SecurityWorkflowState::Ongoing.as_db_str(),
+            Some(SecurityWorkflowSubState::Investigating.as_db_str()),
+        );
+        app.update(Message::SecurityWorkflowUpdated {
+            key,
+            state: SecurityWorkflowState::Ongoing,
+            sub_state: Some(SecurityWorkflowSubState::Investigating),
+        });
+
         vec![]
     }
 

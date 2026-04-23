@@ -23,7 +23,7 @@ const TICK_INTERVAL: Duration = Duration::from_secs(2);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::{SettingsStore, TaskCrud};
+use crate::db::{PrWorkflowStore, SettingsStore, TaskCrud};
 use crate::editor::{
     format_description_for_editor, format_editor_content, format_epic_for_editor,
     parse_description_editor_output, parse_editor_content, parse_epic_editor_output,
@@ -100,12 +100,18 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         load_cached_security_alerts(&*database, &mut app),
         load_pr_agent_states(&*database, &mut app),
         load_alert_agent_states(&*database, &mut app),
+        load_workflow_states(&*database, &mut app),
         apply_tmux_focus_warning(&*runner),
     ]
     .into_iter()
     .flatten()
     {
         app.update(msg);
+    }
+
+    // Prune stale "done" workflow rows on startup (best-effort)
+    if let Err(e) = database.prune_done_pr_workflows(chrono::Duration::days(7)) {
+        tracing::warn!("Failed to prune done pr workflows on startup: {e}");
     }
 
     // Load tips and show popup if appropriate
@@ -759,10 +765,36 @@ async fn execute_commands(
                     tracing::warn!("Failed to save tips state: {e:#}");
                 }
             }
-            Command::PersistReviewWorkflow { .. }
-            | Command::PersistSecurityWorkflow { .. }
-            | Command::PruneDonePrWorkflows => {
-                // TODO Task 7: implement workflow state persistence
+            Command::PersistReviewWorkflow { key, state, sub_state } => {
+                let state_str = state.as_db_str().to_string();
+                let sub_str = sub_state.map(|s| s.as_db_str().to_string());
+                if let Err(e) = rt.database.upsert_pr_workflow(
+                    &key.repo,
+                    key.number,
+                    key.kind,
+                    &state_str,
+                    sub_str.as_deref(),
+                ) {
+                    tracing::error!("Failed to persist review workflow state: {e}");
+                }
+            }
+            Command::PersistSecurityWorkflow { key, state, sub_state } => {
+                let state_str = state.as_db_str().to_string();
+                let sub_str = sub_state.map(|s| s.as_db_str().to_string());
+                if let Err(e) = rt.database.upsert_pr_workflow(
+                    &key.repo,
+                    key.number,
+                    key.kind,
+                    &state_str,
+                    sub_str.as_deref(),
+                ) {
+                    tracing::error!("Failed to persist security workflow state: {e}");
+                }
+            }
+            Command::PruneDonePrWorkflows => {
+                if let Err(e) = rt.database.prune_done_pr_workflows(chrono::Duration::days(7)) {
+                    tracing::error!("Failed to prune done pr workflows: {e}");
+                }
             }
         }
     }
@@ -874,6 +906,18 @@ fn load_alert_agent_states(db: &dyn db::AlertStore, app: &mut App) -> Option<Mes
         }
         Err(e) => Some(Message::StatusInfo(format!(
             "Failed to load alert agent states: {e}"
+        ))),
+    }
+}
+
+fn load_workflow_states(db: &dyn db::PrWorkflowStore, app: &mut App) -> Option<Message> {
+    match db.list_pr_workflows() {
+        Ok(rows) => {
+            app.update(Message::WorkflowStatesLoaded(rows));
+            None
+        }
+        Err(e) => Some(Message::StatusInfo(format!(
+            "Failed to load workflow states: {e}"
         ))),
     }
 }

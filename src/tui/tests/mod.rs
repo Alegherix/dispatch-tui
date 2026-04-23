@@ -18538,3 +18538,101 @@ fn review_board_mode_column_labels_v2() {
     assert_eq!(ReviewBoardMode::column_label(ActionRequired), "Action Required");
     assert_eq!(ReviewBoardMode::column_label(Done), "Done");
 }
+
+#[test]
+fn workflow_states_loaded_populates_review_board() {
+    use crate::db::PrWorkflowRow;
+    use crate::models::{WorkflowItemKind, ReviewWorkflowState};
+    use crate::tui::types::WorkflowKey;
+
+    let mut app = make_app();
+    let rows = vec![PrWorkflowRow {
+        repo: "org/repo".into(),
+        number: 1,
+        kind: WorkflowItemKind::ReviewerPr,
+        state: "ongoing".into(),
+        sub_state: Some("reviewing".into()),
+        updated_at: chrono::Utc::now(),
+    }];
+    app.update(Message::WorkflowStatesLoaded(rows));
+
+    let key = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::ReviewerPr);
+    let (state, _) = app.review.review_workflow_states[&key];
+    assert_eq!(state, ReviewWorkflowState::Ongoing);
+}
+
+#[test]
+fn workflow_states_loaded_populates_security_board() {
+    use crate::db::PrWorkflowRow;
+    use crate::models::{WorkflowItemKind, SecurityWorkflowState};
+    use crate::tui::types::WorkflowKey;
+
+    let mut app = make_app();
+    let rows = vec![PrWorkflowRow {
+        repo: "org/repo".into(),
+        number: 42,
+        kind: WorkflowItemKind::DependabotAlert,
+        state: "ongoing".into(),
+        sub_state: None,
+        updated_at: chrono::Utc::now(),
+    }];
+    app.update(Message::WorkflowStatesLoaded(rows));
+
+    let key = WorkflowKey::new("org/repo".into(), 42, WorkflowItemKind::DependabotAlert);
+    let (state, _) = app.security.security_workflow_states[&key];
+    assert_eq!(state, SecurityWorkflowState::Ongoing);
+}
+
+#[test]
+fn review_workflow_updated_sets_state() {
+    use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState};
+    use crate::tui::types::WorkflowKey;
+    use crate::models::WorkflowItemKind;
+
+    let mut app = make_app();
+    let key = WorkflowKey::new("org/repo".into(), 5, WorkflowItemKind::ReviewerPr);
+    app.update(Message::ReviewWorkflowUpdated {
+        key: key.clone(),
+        state: ReviewWorkflowState::ActionRequired,
+        sub_state: Some(ReviewWorkflowSubState::ChangesRequested),
+    });
+
+    let (state, sub) = app.review.review_workflow_states[&key];
+    assert_eq!(state, ReviewWorkflowState::ActionRequired);
+    assert_eq!(sub, Some(ReviewWorkflowSubState::ChangesRequested));
+}
+
+#[test]
+fn security_workflow_updated_sets_state() {
+    use crate::models::{SecurityWorkflowState, SecurityWorkflowSubState};
+    use crate::tui::types::WorkflowKey;
+    use crate::models::WorkflowItemKind;
+
+    let mut app = make_app();
+    let key = WorkflowKey::new("org/repo".into(), 7, WorkflowItemKind::CodeScanAlert);
+    app.update(Message::SecurityWorkflowUpdated {
+        key: key.clone(),
+        state: SecurityWorkflowState::ActionRequired,
+        sub_state: Some(SecurityWorkflowSubState::FindingsReady),
+    });
+
+    let (state, sub) = app.security.security_workflow_states[&key];
+    assert_eq!(state, SecurityWorkflowState::ActionRequired);
+    assert_eq!(sub, Some(SecurityWorkflowSubState::FindingsReady));
+}
+
+#[test]
+fn move_review_item_forward_noop_when_not_in_review_board() {
+    let mut app = make_app();
+    // Not in review board mode — should be a no-op
+    let cmds = app.update(Message::MoveReviewItemForward);
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn move_security_item_forward_noop_when_not_in_security_board() {
+    let mut app = make_app();
+    // Not in security board mode — should be a no-op
+    let cmds = app.update(Message::MoveSecurityItemForward);
+    assert!(cmds.is_empty());
+}

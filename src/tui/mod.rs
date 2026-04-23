@@ -1300,12 +1300,34 @@ impl App {
                     vec![]
                 }
             }
-            // TODO Task 6: implement workflow state handlers
-            Message::WorkflowStatesLoaded(_) => vec![],
-            Message::MoveReviewItemForward => vec![],
-            Message::MoveReviewItemBack => vec![],
-            Message::MoveSecurityItemForward => vec![],
-            Message::MoveSecurityItemBack => vec![],
+            Message::WorkflowStatesLoaded(rows) => {
+                use crate::models::WorkflowItemKind::{CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr};
+                use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, SecurityWorkflowState, SecurityWorkflowSubState};
+                for row in rows {
+                    let key = WorkflowKey::new(row.repo.clone(), row.number, row.kind);
+                    match row.kind {
+                        ReviewerPr | DependabotPr => {
+                            let state = ReviewWorkflowState::from_db_str(&row.state)
+                                .unwrap_or(ReviewWorkflowState::Backlog);
+                            let sub = row.sub_state.as_deref()
+                                .and_then(ReviewWorkflowSubState::from_db_str);
+                            self.review.review_workflow_states.insert(key, (state, sub));
+                        }
+                        DependabotAlert | CodeScanAlert => {
+                            let state = SecurityWorkflowState::from_db_str(&row.state)
+                                .unwrap_or(SecurityWorkflowState::Backlog);
+                            let sub = row.sub_state.as_deref()
+                                .and_then(SecurityWorkflowSubState::from_db_str);
+                            self.security.security_workflow_states.insert(key, (state, sub));
+                        }
+                    }
+                }
+                vec![]
+            }
+            Message::MoveReviewItemForward => self.handle_move_review_item_forward(),
+            Message::MoveReviewItemBack => self.handle_move_review_item_back(),
+            Message::MoveSecurityItemForward => self.handle_move_security_item_forward(),
+            Message::MoveSecurityItemBack => self.handle_move_security_item_back(),
             Message::ReviewWorkflowUpdated { key, state, sub_state } => {
                 self.review.review_workflow_states.insert(key, (state, sub_state));
                 vec![]
@@ -4250,6 +4272,120 @@ impl App {
         let col = sel.column();
         let row = sel.row(col);
         self.active_prs_for_column(col).into_iter().nth(row)
+    }
+
+    /// Get the currently selected ReviewPr along with its workflow kind,
+    /// based on the current ReviewBoardMode.
+    fn selected_review_pr_with_kind(
+        &self,
+    ) -> Option<(&crate::models::ReviewPr, crate::models::WorkflowItemKind)> {
+        let mode = match &self.board.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => *mode,
+            _ => return None,
+        };
+        let kind = mode.workflow_item_kind();
+        let pr = self.selected_review_pr()?;
+        Some((pr, kind))
+    }
+
+    /// Get the currently selected SecurityAlert along with its workflow kind.
+    fn selected_alert_with_kind(
+        &self,
+    ) -> Option<(&crate::models::SecurityAlert, crate::models::WorkflowItemKind)> {
+        let alert = self.selected_security_alert()?;
+        let kind = match alert.kind {
+            crate::models::AlertKind::Dependabot => crate::models::WorkflowItemKind::DependabotAlert,
+            crate::models::AlertKind::CodeScanning => crate::models::WorkflowItemKind::CodeScanAlert,
+        };
+        Some((alert, kind))
+    }
+
+    fn handle_move_review_item_forward(&mut self) -> Vec<Command> {
+        use crate::models::ReviewWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
+        let Some((pr, kind)) = self.selected_review_pr_with_kind() else {
+            return vec![];
+        };
+        let key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
+        let (current, _) = self
+            .review
+            .review_workflow_states
+            .get(&key)
+            .copied()
+            .unwrap_or((Backlog, None));
+        let next = match current {
+            Backlog => Ongoing,
+            Ongoing => ActionRequired,
+            ActionRequired => Done,
+            Done => Done,
+        };
+        self.review.review_workflow_states.insert(key.clone(), (next, None));
+        vec![Command::PersistReviewWorkflow { key, state: next, sub_state: None }]
+    }
+
+    fn handle_move_review_item_back(&mut self) -> Vec<Command> {
+        use crate::models::ReviewWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
+        let Some((pr, kind)) = self.selected_review_pr_with_kind() else {
+            return vec![];
+        };
+        let key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
+        let (current, _) = self
+            .review
+            .review_workflow_states
+            .get(&key)
+            .copied()
+            .unwrap_or((Backlog, None));
+        let prev = match current {
+            Backlog => Backlog,
+            Ongoing => Backlog,
+            ActionRequired => Ongoing,
+            Done => ActionRequired,
+        };
+        self.review.review_workflow_states.insert(key.clone(), (prev, None));
+        vec![Command::PersistReviewWorkflow { key, state: prev, sub_state: None }]
+    }
+
+    fn handle_move_security_item_forward(&mut self) -> Vec<Command> {
+        use crate::models::SecurityWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
+        let Some((alert, kind)) = self.selected_alert_with_kind() else {
+            return vec![];
+        };
+        let key = WorkflowKey::new(alert.repo.clone(), alert.number, kind);
+        let (current, _) = self
+            .security
+            .security_workflow_states
+            .get(&key)
+            .copied()
+            .unwrap_or((Backlog, None));
+        let next = match current {
+            Backlog => Ongoing,
+            Ongoing => ActionRequired,
+            ActionRequired => Done,
+            Done => Done,
+        };
+        self.security.security_workflow_states.insert(key.clone(), (next, None));
+        vec![Command::PersistSecurityWorkflow { key, state: next, sub_state: None }]
+    }
+
+    fn handle_move_security_item_back(&mut self) -> Vec<Command> {
+        use crate::models::SecurityWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
+        let Some((alert, kind)) = self.selected_alert_with_kind() else {
+            return vec![];
+        };
+        let key = WorkflowKey::new(alert.repo.clone(), alert.number, kind);
+        let (current, _) = self
+            .security
+            .security_workflow_states
+            .get(&key)
+            .copied()
+            .unwrap_or((Backlog, None));
+        let prev = match current {
+            Backlog => Backlog,
+            Ongoing => Backlog,
+            ActionRequired => Ongoing,
+            Done => ActionRequired,
+        };
+        self.security.security_workflow_states.insert(key.clone(), (prev, None));
+        vec![Command::PersistSecurityWorkflow { key, state: prev, sub_state: None }]
     }
 
     pub(in crate::tui) fn navigate_review_row(&mut self, delta: isize) {

@@ -18261,6 +18261,116 @@ fn workflow_states_loaded_populates_security_board() {
 }
 
 #[test]
+fn workflow_states_loaded_clears_pruned_review_rows() {
+    use crate::db::PrWorkflowRow;
+    use crate::models::{WorkflowItemKind, ReviewWorkflowState};
+    use crate::tui::types::WorkflowKey;
+
+    let mut app = make_app();
+
+    // First load: insert two review PRs
+    let key1 = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::ReviewerPr);
+    let key2 = WorkflowKey::new("org/repo".into(), 2, WorkflowItemKind::ReviewerPr);
+    let rows = vec![
+        PrWorkflowRow {
+            repo: "org/repo".into(),
+            number: 1,
+            kind: WorkflowItemKind::ReviewerPr,
+            state: "ongoing".into(),
+            sub_state: Some("reviewing".into()),
+            updated_at: chrono::Utc::now(),
+        },
+        PrWorkflowRow {
+            repo: "org/repo".into(),
+            number: 2,
+            kind: WorkflowItemKind::ReviewerPr,
+            state: "backlog".into(),
+            sub_state: None,
+            updated_at: chrono::Utc::now(),
+        },
+    ];
+    app.update(Message::WorkflowStatesLoaded(rows));
+
+    // Both should be in the map
+    assert!(app.review.review_workflow_states.contains_key(&key1));
+    assert!(app.review.review_workflow_states.contains_key(&key2));
+    let (state1, _) = app.review.review_workflow_states[&key1];
+    assert_eq!(state1, ReviewWorkflowState::Ongoing);
+
+    // Second load: only include PR 1 (PR 2 is pruned from the DB)
+    let rows = vec![PrWorkflowRow {
+        repo: "org/repo".into(),
+        number: 1,
+        kind: WorkflowItemKind::ReviewerPr,
+        state: "action_required".into(),
+        sub_state: Some("changes_requested".into()),
+        updated_at: chrono::Utc::now(),
+    }];
+    app.update(Message::WorkflowStatesLoaded(rows));
+
+    // PR 1 should be updated
+    let (state1, _) = app.review.review_workflow_states[&key1];
+    assert_eq!(state1, ReviewWorkflowState::ActionRequired);
+
+    // PR 2 should be removed (pruned from the fresh load)
+    assert!(!app.review.review_workflow_states.contains_key(&key2));
+}
+
+#[test]
+fn workflow_states_loaded_clears_pruned_security_rows() {
+    use crate::db::PrWorkflowRow;
+    use crate::models::{WorkflowItemKind, SecurityWorkflowState};
+    use crate::tui::types::WorkflowKey;
+
+    let mut app = make_app();
+
+    // First load: insert two security alerts
+    let key1 = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::DependabotAlert);
+    let key2 = WorkflowKey::new("org/repo".into(), 2, WorkflowItemKind::CodeScanAlert);
+    let rows = vec![
+        PrWorkflowRow {
+            repo: "org/repo".into(),
+            number: 1,
+            kind: WorkflowItemKind::DependabotAlert,
+            state: "ongoing".into(),
+            sub_state: None,
+            updated_at: chrono::Utc::now(),
+        },
+        PrWorkflowRow {
+            repo: "org/repo".into(),
+            number: 2,
+            kind: WorkflowItemKind::CodeScanAlert,
+            state: "backlog".into(),
+            sub_state: None,
+            updated_at: chrono::Utc::now(),
+        },
+    ];
+    app.update(Message::WorkflowStatesLoaded(rows));
+
+    // Both should be in the map
+    assert!(app.security.security_workflow_states.contains_key(&key1));
+    assert!(app.security.security_workflow_states.contains_key(&key2));
+
+    // Second load: only include alert 1 (alert 2 is pruned)
+    let rows = vec![PrWorkflowRow {
+        repo: "org/repo".into(),
+        number: 1,
+        kind: WorkflowItemKind::DependabotAlert,
+        state: "action_required".into(),
+        sub_state: None,
+        updated_at: chrono::Utc::now(),
+    }];
+    app.update(Message::WorkflowStatesLoaded(rows));
+
+    // Alert 1 should be updated
+    let (state1, _) = app.security.security_workflow_states[&key1];
+    assert_eq!(state1, SecurityWorkflowState::ActionRequired);
+
+    // Alert 2 should be removed (pruned from the fresh load)
+    assert!(!app.security.security_workflow_states.contains_key(&key2));
+}
+
+#[test]
 fn review_workflow_updated_sets_state() {
     use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState};
     use crate::tui::types::WorkflowKey;

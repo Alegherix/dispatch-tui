@@ -2926,6 +2926,34 @@ mod security_tests {
         assert_eq!(Done.column_index(), 3);
     }
 
+    #[test]
+    fn review_workflow_state_column_count_matches_all() {
+        use ReviewWorkflowState::*;
+        assert_eq!(ReviewWorkflowState::COLUMN_COUNT, 4);
+        assert_eq!(ReviewWorkflowState::ALL.len(), 4);
+        assert_eq!(ReviewWorkflowState::COLUMN_COUNT, ReviewWorkflowState::ALL.len());
+        // Verify that the 4 variants are in the ALL array
+        let all_states = ReviewWorkflowState::ALL.to_vec();
+        assert!(all_states.contains(&Backlog));
+        assert!(all_states.contains(&Ongoing));
+        assert!(all_states.contains(&ActionRequired));
+        assert!(all_states.contains(&Done));
+    }
+
+    #[test]
+    fn security_workflow_state_column_count_matches_all() {
+        use SecurityWorkflowState::*;
+        assert_eq!(SecurityWorkflowState::COLUMN_COUNT, 4);
+        assert_eq!(SecurityWorkflowState::ALL.len(), 4);
+        assert_eq!(SecurityWorkflowState::COLUMN_COUNT, SecurityWorkflowState::ALL.len());
+        // Verify that the 4 variants are in the ALL array
+        let all_states = SecurityWorkflowState::ALL.to_vec();
+        assert!(all_states.contains(&Backlog));
+        assert!(all_states.contains(&Ongoing));
+        assert!(all_states.contains(&ActionRequired));
+        assert!(all_states.contains(&Done));
+    }
+
     // --- SecurityWorkflowState + SecurityWorkflowSubState ---
 
     #[test]

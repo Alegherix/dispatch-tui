@@ -5066,3 +5066,44 @@ fn pr_workflow_kind_roundtrip_in_db() {
         assert_eq!(row.kind, kind);
     }
 }
+
+#[test]
+fn find_pr_workflow_kind_returns_kind_when_row_exists() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+
+    // Insert a workflow row for ReviewerPr
+    db.insert_pr_workflow_if_absent("org/repo", 42, ReviewerPr)
+        .unwrap();
+
+    // find_pr_workflow_kind should return the kind
+    let kind = db.find_pr_workflow_kind("org/repo", 42).unwrap();
+    assert_eq!(kind, Some(ReviewerPr));
+}
+
+#[test]
+fn find_pr_workflow_kind_returns_none_when_no_row_exists() {
+    let db = in_memory_db();
+
+    // No workflow row exists for this (repo, number) pair
+    let kind = db.find_pr_workflow_kind("org/repo", 99).unwrap();
+    assert_eq!(kind, None);
+}
+
+#[test]
+fn find_pr_workflow_kind_with_multiple_kinds_returns_first() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+
+    // Insert multiple workflow rows for the same (repo, number) with different kinds
+    db.insert_pr_workflow_if_absent("org/repo", 5, ReviewerPr)
+        .unwrap();
+    db.insert_pr_workflow_if_absent("org/repo", 5, DependabotAlert)
+        .unwrap();
+
+    // find_pr_workflow_kind uses LIMIT 1, so it returns one of them
+    // (the one from the LIMIT 1 query — typically the first inserted)
+    let kind = db.find_pr_workflow_kind("org/repo", 5).unwrap();
+    assert!(kind.is_some(), "Should find one of the kinds");
+    // We don't assert which one because LIMIT 1 order is undefined without ORDER BY
+}

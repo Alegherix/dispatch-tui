@@ -4773,6 +4773,78 @@ async fn update_review_status_findings_ready_sets_action_required() {
     assert_eq!(row.sub_state.as_deref(), Some("findings_ready"));
 }
 
+
+#[tokio::test]
+async fn update_review_status_findings_ready_without_workflow_row() {
+    use crate::models::{CiStatus, ReviewDecision, ReviewPr, WorkflowItemKind};
+    use chrono::Utc;
+
+    let state = test_state();
+
+    // Insert a PR and set an active review agent so update_agent_status succeeds
+    let pr = ReviewPr {
+        number: 88,
+        title: "Test PR No Workflow".to_string(),
+        author: "bob".to_string(),
+        repo: "acme/product".to_string(),
+        url: "https://github.com/acme/product/pull/88".to_string(),
+        is_draft: false,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        additions: 10,
+        deletions: 5,
+        review_decision: ReviewDecision::ReviewRequired,
+        labels: vec![],
+        body: String::new(),
+        head_ref: String::new(),
+        ci_status: CiStatus::None,
+        reviewers: vec![],
+    };
+    state.db.save_prs(crate::db::PrKind::Review, &[pr]).unwrap();
+    state
+        .db
+        .set_pr_agent(
+            crate::db::PrKind::Review,
+            "acme/product",
+            88,
+            "dispatch:review-88",
+            "/tmp/wt",
+        )
+        .unwrap();
+
+    // NOTE: NO workflow row is inserted — find_pr_workflow_kind will return None
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_review_status",
+            "arguments": { "repo": "acme/product", "number": 88, "status": "findings_ready" }
+        })),
+    )
+    .await;
+    // Should succeed even though there's no workflow row
+    // (find_workflow_kind_for returns None, so upsert_pr_workflow is skipped)
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    // Agent status should be updated
+    let status = state
+        .db
+        .pr_agent_status("review_prs", "acme/product", 88)
+        .unwrap();
+    assert_eq!(
+        status.map(|s| s.as_db_str()),
+        Some("findings_ready")
+    );
+
+    // No workflow row should exist since find_pr_workflow_kind found none
+    let no_workflow = state
+        .db
+        .get_pr_workflow("acme/product", 88, WorkflowItemKind::ReviewerPr)
+        .unwrap();
+    assert!(no_workflow.is_none());
+}
+
 #[tokio::test]
 async fn wrap_up_rebase_clears_tmux_window() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());

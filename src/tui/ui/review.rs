@@ -520,8 +520,9 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             }
 
             let agent_status = app.pr_agent(pr).map(|h| h.status);
-            // tmux_alive = true only when agent is actively Reviewing (window is live)
-            let tmux_alive = matches!(agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
+            // Circle reflects whether a tmux window exists for this PR, not the agent's logical status.
+            // Filled (◉) if session is live, empty (○) if not.
+            let tmux_alive = app.pr_agent(pr).map(|h| !h.tmux_window.is_empty()).unwrap_or(false);
             list_items.push(build_review_pr_item(
                 pr,
                 wf_state,
@@ -694,15 +695,6 @@ pub(in crate::tui::ui) fn build_review_pr_item(
     ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
 }
 
-fn ci_dot_color(status: CiStatus) -> Color {
-    match status {
-        CiStatus::Success => Color::Green,
-        CiStatus::Failure => Color::Red,
-        CiStatus::Pending => Color::Yellow,
-        CiStatus::None => Color::DarkGray,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Helpers for the Dependabot security board (3-column ReviewDecision layout)
 // ---------------------------------------------------------------------------
@@ -776,9 +768,15 @@ fn build_pr_line1_dependabot(
         spans.push(Span::styled(badge_text.to_string(), badge_style));
     }
     spans.push(Span::styled(header_truncated, line1_style));
+    let ci_color = match pr.ci_status {
+        CiStatus::Success => Color::Green,
+        CiStatus::Failure => Color::Red,
+        CiStatus::Pending => Color::Yellow,
+        CiStatus::None => Color::DarkGray,
+    };
     spans.push(Span::styled(
         " \u{25cf}",
-        Style::default().fg(ci_dot_color(pr.ci_status)),
+        Style::default().fg(ci_color),
     ));
     Line::from(spans)
 }
@@ -792,7 +790,7 @@ pub(in crate::tui::ui) fn build_dependabot_pr_item(
     is_selected: bool,
     col_width: u16,
 ) -> ListItem<'static> {
-    let _ = is_selected; // not used for Dependabot items currently
+    let _ = is_selected; // selection highlight applied by List widget, not inline
     let color = dependabot_column_color(decision);
     let now = Utc::now();
     let age = format_age(pr.created_at, now);

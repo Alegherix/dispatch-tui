@@ -17381,7 +17381,7 @@ fn review_board_findings_ready_agent_shows_open_circle_badge() {
     app.review.review_agents.insert(
         crate::models::PrRef::new("acme/app".to_string(), 1),
         super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-1".to_string(),
+            tmux_window: "".to_string(), // tmux window cleared when session ends
             worktree: "/repo/.worktrees/review-1".to_string(),
             status: crate::models::ReviewAgentStatus::FindingsReady,
         },
@@ -17411,7 +17411,7 @@ fn review_board_idle_agent_shows_open_circle_badge() {
     app.review.review_agents.insert(
         crate::models::PrRef::new("acme/app".to_string(), 1),
         super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-1".to_string(),
+            tmux_window: "".to_string(), // tmux window cleared when idle (not actively running)
             worktree: "/repo/.worktrees/review-1".to_string(),
             status: crate::models::ReviewAgentStatus::Idle,
         },

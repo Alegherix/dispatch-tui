@@ -382,12 +382,64 @@ pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 
 // ---------------------------------------------------------------------------
+// PrWorkflowRow — a row from the pr_workflow_states table
+// ---------------------------------------------------------------------------
+
+pub struct PrWorkflowRow {
+    pub repo: String,
+    pub number: i64,
+    pub kind: crate::models::WorkflowItemKind,
+    pub state: String,
+    pub sub_state: Option<String>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+// ---------------------------------------------------------------------------
+// PrWorkflowStore — CRUD for the pr_workflow_states table
+// ---------------------------------------------------------------------------
+
+pub trait PrWorkflowStore: Send + Sync {
+    /// INSERT OR IGNORE — never overwrites an existing row (preserves workflow state).
+    fn insert_pr_workflow_if_absent(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::WorkflowItemKind,
+    ) -> anyhow::Result<()>;
+
+    /// INSERT OR REPLACE — always sets state and sub_state.
+    fn upsert_pr_workflow(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::WorkflowItemKind,
+        state: &str,
+        sub_state: Option<&str>,
+    ) -> anyhow::Result<()>;
+
+    fn get_pr_workflow(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::WorkflowItemKind,
+    ) -> anyhow::Result<Option<PrWorkflowRow>>;
+
+    fn list_pr_workflows(&self) -> anyhow::Result<Vec<PrWorkflowRow>>;
+
+    /// Delete rows where state = 'done' AND updated_at < (now - older_than).
+    fn prune_done_pr_workflows(
+        &self,
+        older_than: chrono::Duration,
+    ) -> anyhow::Result<()>;
+}
+
+// ---------------------------------------------------------------------------
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
-pub trait TaskStore: TaskAndEpicStore + PrStore + AlertStore + SettingsStore {}
+pub trait TaskStore: TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore {}
 
-impl<T: TaskAndEpicStore + PrStore + AlertStore + SettingsStore> TaskStore for T {}
+impl<T: TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore> TaskStore for T {}
 
 // ---------------------------------------------------------------------------
 // Database

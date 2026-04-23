@@ -1055,6 +1055,154 @@ impl super::AlertStore for Database {
 }
 
 // ---------------------------------------------------------------------------
+// PrWorkflowStore
+// ---------------------------------------------------------------------------
+
+impl super::PrWorkflowStore for Database {
+    fn insert_pr_workflow_if_absent(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::WorkflowItemKind,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO pr_workflow_states (repo, number, kind, state, updated_at)
+             VALUES (?1, ?2, ?3, 'backlog', ?4)",
+            params![
+                repo,
+                number,
+                kind.as_db_str(),
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn upsert_pr_workflow(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::WorkflowItemKind,
+        state: &str,
+        sub_state: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO pr_workflow_states (repo, number, kind, state, sub_state, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(repo, number, kind) DO UPDATE SET
+                 state = excluded.state,
+                 sub_state = excluded.sub_state,
+                 updated_at = excluded.updated_at",
+            params![
+                repo,
+                number,
+                kind.as_db_str(),
+                state,
+                sub_state,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn get_pr_workflow(
+        &self,
+        repo: &str,
+        number: i64,
+        kind: crate::models::WorkflowItemKind,
+    ) -> anyhow::Result<Option<super::PrWorkflowRow>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT repo, number, kind, state, sub_state, updated_at
+             FROM pr_workflow_states
+             WHERE repo = ?1 AND number = ?2 AND kind = ?3",
+        )?;
+        let row = stmt
+            .query_row(
+                params![repo, number, kind.as_db_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let Some((repo, number, kind_str, state, sub_state, updated_str)) = row else {
+            return Ok(None);
+        };
+        let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
+            .ok_or_else(|| anyhow::anyhow!("unknown workflow kind: {kind_str}"))?;
+        let updated_at = updated_str
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .map_err(|e| anyhow::anyhow!("bad updated_at timestamp: {e}"))?;
+        Ok(Some(super::PrWorkflowRow {
+            repo,
+            number,
+            kind,
+            state,
+            sub_state,
+            updated_at,
+        }))
+    }
+
+    fn list_pr_workflows(&self) -> anyhow::Result<Vec<super::PrWorkflowRow>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT repo, number, kind, state, sub_state, updated_at
+             FROM pr_workflow_states",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })?
+            .map(|r| {
+                let (repo, number, kind_str, state, sub_state, updated_str) = r?;
+                let kind = crate::models::WorkflowItemKind::from_db_str(&kind_str)
+                    .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
+                let updated_at = updated_str
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                Ok(super::PrWorkflowRow {
+                    repo,
+                    number,
+                    kind,
+                    state,
+                    sub_state,
+                    updated_at,
+                })
+            })
+            .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+        Ok(rows)
+    }
+
+    fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        let cutoff = chrono::Utc::now() - older_than;
+        conn.execute(
+            "DELETE FROM pr_workflow_states
+             WHERE state = 'done' AND updated_at < ?1",
+            params![cutoff.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared PR save/load helpers
 // ---------------------------------------------------------------------------
 

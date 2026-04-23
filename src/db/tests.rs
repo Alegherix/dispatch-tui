@@ -4949,3 +4949,121 @@ fn migrate_v37_creates_pr_workflow_states_table() {
     )
     .unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// PrWorkflowStore tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pr_workflow_insert_if_absent_is_idempotent() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+
+    db.insert_pr_workflow_if_absent("org/repo", 42, ReviewerPr)
+        .unwrap();
+    db.insert_pr_workflow_if_absent("org/repo", 42, ReviewerPr)
+        .unwrap(); // no-op
+
+    let row = db
+        .get_pr_workflow("org/repo", 42, ReviewerPr)
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.state, "backlog");
+    assert!(row.sub_state.is_none());
+}
+
+#[test]
+fn pr_workflow_upsert_updates_state_and_sub_state() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+
+    db.insert_pr_workflow_if_absent("org/repo", 1, ReviewerPr)
+        .unwrap();
+    db.upsert_pr_workflow("org/repo", 1, ReviewerPr, "ongoing", Some("reviewing"))
+        .unwrap();
+
+    let row = db
+        .get_pr_workflow("org/repo", 1, ReviewerPr)
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.state, "ongoing");
+    assert_eq!(row.sub_state.as_deref(), Some("reviewing"));
+}
+
+#[test]
+fn pr_workflow_get_returns_none_when_absent() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+    let result = db.get_pr_workflow("org/repo", 99, ReviewerPr).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn pr_workflow_list_returns_all_rows() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+
+    db.insert_pr_workflow_if_absent("org/a", 1, ReviewerPr)
+        .unwrap();
+    db.insert_pr_workflow_if_absent("org/b", 2, DependabotAlert)
+        .unwrap();
+    db.insert_pr_workflow_if_absent("org/a", 1, CodeScanAlert)
+        .unwrap();
+
+    let rows = db.list_pr_workflows().unwrap();
+    assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn pr_workflow_prune_removes_done_older_than_threshold() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+
+    // Insert a done row with an old timestamp
+    let conn = db.conn().unwrap();
+    conn.execute(
+        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+         VALUES ('org/repo', 1, 'reviewer_pr', 'done', '2020-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    // Insert a recent done row — should NOT be pruned
+    conn.execute(
+        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+         VALUES ('org/repo', 2, 'reviewer_pr', 'done', ?1)",
+        rusqlite::params![chrono::Utc::now().to_rfc3339()],
+    )
+    .unwrap();
+    // Insert an ongoing row — should NOT be pruned regardless of age
+    conn.execute(
+        "INSERT INTO pr_workflow_states (repo, number, kind, state, updated_at)
+         VALUES ('org/repo', 3, 'reviewer_pr', 'ongoing', '2020-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    db.prune_done_pr_workflows(chrono::Duration::days(7))
+        .unwrap();
+
+    let rows = db.list_pr_workflows().unwrap();
+    // Only old done row removed; recent done and ongoing remain
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|r| !(r.state == "done" && r.number == 1)));
+}
+
+#[test]
+fn pr_workflow_kind_roundtrip_in_db() {
+    let db = in_memory_db();
+    use crate::models::WorkflowItemKind::*;
+
+    for kind in [ReviewerPr, DependabotPr, DependabotAlert, CodeScanAlert] {
+        db.insert_pr_workflow_if_absent("org/repo", kind as i64, kind)
+            .unwrap();
+        let row = db
+            .get_pr_workflow("org/repo", kind as i64, kind)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.kind, kind);
+    }
+}

@@ -3920,30 +3920,6 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn update_dependabot_anchor_from_current(&mut self) {
-        let (col, row) = match &self.board.view_mode {
-            ViewMode::SecurityBoard {
-                dependabot_selection,
-                ..
-            } => (
-                dependabot_selection.selected_column,
-                dependabot_selection.selected_row[dependabot_selection.selected_column],
-            ),
-            _ => return,
-        };
-        let col_prs = self.bot_prs_for_column(col);
-        let anchor = col_prs
-            .get(row)
-            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number));
-        if let ViewMode::SecurityBoard {
-            dependabot_selection,
-            ..
-        } = &mut self.board.view_mode
-        {
-            dependabot_selection.anchor_pr = anchor;
-        }
-    }
-
     fn sync_dependabot_selection(&mut self) {
         let anchor = match &self.board.view_mode {
             ViewMode::SecurityBoard {

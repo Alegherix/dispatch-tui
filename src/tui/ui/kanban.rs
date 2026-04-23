@@ -2542,7 +2542,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 
 #[cfg(test)]
 mod tests {
-    use super::super::review::{build_dependabot_pr_item, build_review_pr_item};
+    use super::super::review::build_review_pr_item;
     use super::super::security::build_security_alert_item;
     use super::*;
     use crate::models::TaskTag;
@@ -2765,100 +2765,6 @@ mod tests {
             "header text should be BOLD"
         );
         assert_eq!(style.fg, Some(FG), "header text should use FG color");
-    }
-
-    // ---------------------------------------------------------------------------
-    // build_dependabot_pr_item
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn dependabot_card_has_no_author_on_line2() {
-        let pr = make_test_pr(
-            42,
-            "dependabot[bot]",
-            crate::models::CiStatus::Success,
-            10,
-            5,
-        );
-        let item = build_dependabot_pr_item(
-            &pr,
-            crate::models::ReviewDecision::ReviewRequired,
-            false,
-            None,
-            false,
-            60,
-        );
-        let buf = render_list_item_to_buf(item, 60, 2);
-        let row1 = buf_row(&buf, 1);
-        assert!(
-            !row1.contains('@'),
-            "dependabot line 2 should not contain @author, got: {row1:?}"
-        );
-    }
-
-    #[test]
-    fn dependabot_card_line2_contains_additions_and_deletions() {
-        let pr = make_test_pr(42, "dependabot[bot]", crate::models::CiStatus::None, 12, 3);
-        let item = build_dependabot_pr_item(
-            &pr,
-            crate::models::ReviewDecision::ReviewRequired,
-            false,
-            None,
-            false,
-            60,
-        );
-        let buf = render_list_item_to_buf(item, 60, 2);
-        let row1 = buf_row(&buf, 1);
-        assert!(row1.contains("+12"), "should show additions, got: {row1:?}");
-        assert!(row1.contains("-3"), "should show deletions, got: {row1:?}");
-    }
-
-    #[test]
-    fn dependabot_card_failing_ci_renders_red_on_line2() {
-        let pr = make_test_pr(
-            42,
-            "dependabot[bot]",
-            crate::models::CiStatus::Failure,
-            5,
-            2,
-        );
-        let item = build_dependabot_pr_item(
-            &pr,
-            crate::models::ReviewDecision::ReviewRequired,
-            false,
-            None,
-            false,
-            60,
-        );
-        let buf = render_list_item_to_buf(item, 60, 2);
-        let area = buf.area();
-        let has_red =
-            (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(Color::Red));
-        assert!(has_red, "failing CI should render with red on line 2");
-    }
-
-    #[test]
-    fn dependabot_card_passing_ci_renders_green_on_line2() {
-        let pr = make_test_pr(
-            42,
-            "dependabot[bot]",
-            crate::models::CiStatus::Success,
-            5,
-            2,
-        );
-        let item = build_dependabot_pr_item(
-            &pr,
-            crate::models::ReviewDecision::ReviewRequired,
-            false,
-            None,
-            false,
-            60,
-        );
-        let buf = render_list_item_to_buf(item, 60, 2);
-        let area = buf.area();
-        let has_green =
-            (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(Color::Green));
-        assert!(has_green, "passing CI should render with green on line 2");
     }
 
     // ---------------------------------------------------------------------------

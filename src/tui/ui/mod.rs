@@ -9,7 +9,7 @@ pub use shared::{refresh_status, truncate};
 
 #[cfg(test)]
 pub(in crate::tui) use kanban::{
-    action_hints, column_bg_color, column_color, cursor_bg_color, epic_action_hints,
+    action_hints, column_color, epic_action_hints,
     task_detail_lines,
 };
 #[cfg(test)]

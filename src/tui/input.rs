@@ -1,8 +1,8 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
     App, ColumnItem, Command, FixAgentRequest, InputMode, Message, MoveDirection, PrListKind,
-    ReviewAgentRequest, ReviewBoardMode, SecurityBoardMode, ViewMode,
+    ReviewAgentRequest, ReviewBoardMode, ViewMode,
 };
 use crate::models::{
     DispatchMode, EpicId, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag, TipsShowMode,
@@ -821,22 +821,7 @@ impl App {
     }
 
     fn handle_key_security_board(&mut self, key: KeyEvent) -> Vec<Command> {
-        // Dispatch to sub-mode handler
-        let mode = match &self.board.view_mode {
-            ViewMode::SecurityBoard { mode, .. } => *mode,
-            _ => return vec![],
-        };
-        if mode == SecurityBoardMode::Dependabot {
-            return self.handle_key_security_dependabot(key);
-        }
-        // Alerts sub-mode (default)
         match key.code {
-            KeyCode::Char('1') => self.update(Message::SwitchSecurityBoardMode(
-                SecurityBoardMode::Dependabot,
-            )),
-            KeyCode::Char('2') => {
-                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts))
-            }
             KeyCode::Char('q') => self.update(Message::Quit),
             KeyCode::Tab => self.update(Message::SwitchToTaskBoard),
             KeyCode::Esc => self.update(Message::SwitchToTaskBoard),
@@ -896,10 +881,32 @@ impl App {
                     vec![]
                 }
             }
+            KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // ctrl+m: start merge only when the selected alert is ReadyToMerge
+                let is_ready = self
+                    .selected_alert_with_kind()
+                    .and_then(|(alert, kind)| {
+                        let wk = super::WorkflowKey::new(alert.repo.clone(), alert.number, kind);
+                        self.security.security_workflow_states.get(&wk).copied()
+                    })
+                    .map(|(_, sub)| {
+                        sub == Some(crate::models::SecurityWorkflowSubState::ReadyToMerge)
+                    })
+                    .unwrap_or(false);
+                if is_ready {
+                    self.update(Message::StartMergeReviewPr)
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('m') => self.update(Message::MoveSecurityItemForward),
+
+            KeyCode::Char('M') => self.update(Message::MoveSecurityItemBack),
+
             KeyCode::Char('r') => self.update(Message::RefreshSecurityAlerts),
             KeyCode::Char('e') => vec![Command::EditSecurityQueries],
             KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
-            KeyCode::Char('t') => self.update(Message::ToggleSecurityKindFilter),
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
             KeyCode::Char('g') => {
@@ -969,157 +976,6 @@ impl App {
                     vec![]
                 }
             }
-            _ => vec![],
-        }
-    }
-
-    fn handle_key_security_dependabot(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('1') => self.update(Message::SwitchSecurityBoardMode(
-                SecurityBoardMode::Dependabot,
-            )),
-            KeyCode::Char('2') => {
-                self.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts))
-            }
-            KeyCode::Char(' ') => {
-                if let Some(pr) = self.selected_dependabot_pr() {
-                    let url = pr.url.clone();
-                    self.update(Message::ToggleSelectBotPr(url))
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('a') => self.update(Message::StartApproveBotPr),
-            KeyCode::Char('m') => self.update(Message::StartMergeBotPr),
-            KeyCode::Char('d') => {
-                if let Some(pr) = self.selected_dependabot_pr() {
-                    self.update(Message::DispatchReviewAgent(ReviewAgentRequest {
-                        repo: pr.repo.clone(),
-                        github_repo: pr.repo.clone(),
-                        number: pr.number,
-                        head_ref: pr.head_ref.clone(),
-                        is_dependabot: true,
-                    }))
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('e') => vec![Command::EditGithubQueries(PrListKind::Bot)],
-            KeyCode::Char('r') => self.update(Message::RefreshBotPrs),
-            KeyCode::Char('p') => {
-                if let Some(pr) = self.selected_dependabot_pr() {
-                    let url = pr.url.clone();
-                    vec![Command::OpenInBrowser { url }]
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('g') => {
-                if let Some(pr) = self.selected_dependabot_pr() {
-                    let handle = self.pr_agent(pr).cloned();
-                    if let Some(h) = handle {
-                        vec![Command::JumpToTmux {
-                            window: h.tmux_window,
-                        }]
-                    } else {
-                        self.update(Message::StatusInfo("No active session".to_string()))
-                    }
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('T') => {
-                if let Some(pr) = self.selected_dependabot_pr() {
-                    let repo = pr.repo.clone();
-                    let number = pr.number;
-                    let has_agent = self.pr_agent(pr).is_some();
-                    if has_agent {
-                        self.update(Message::DetachReviewAgent { repo, number })
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('f') => self.update(Message::StartBotPrRepoFilter),
-            KeyCode::Enter => {
-                self.security.dependabot.detail_visible = !self.security.dependabot.detail_visible;
-                vec![]
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                let col = match &self.board.view_mode {
-                    ViewMode::SecurityBoard {
-                        dependabot_selection,
-                        ..
-                    } => dependabot_selection.selected_column,
-                    _ => return vec![],
-                };
-                let count = self
-                    .filtered_bot_prs()
-                    .into_iter()
-                    .filter(|pr| {
-                        super::bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col
-                    })
-                    .count();
-                if let ViewMode::SecurityBoard {
-                    dependabot_selection,
-                    ..
-                } = &mut self.board.view_mode
-                {
-                    if count > 0 && dependabot_selection.selected_row[col] + 1 < count {
-                        dependabot_selection.selected_row[col] += 1;
-                    }
-                }
-                self.update_dependabot_anchor_from_current();
-                vec![]
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if let ViewMode::SecurityBoard {
-                    dependabot_selection,
-                    ..
-                } = &mut self.board.view_mode
-                {
-                    let col = dependabot_selection.selected_column;
-                    if dependabot_selection.selected_row[col] > 0 {
-                        dependabot_selection.selected_row[col] -= 1;
-                    }
-                }
-                self.update_dependabot_anchor_from_current();
-                vec![]
-            }
-            KeyCode::Char('h') | KeyCode::Left => {
-                if let ViewMode::SecurityBoard {
-                    dependabot_selection,
-                    ..
-                } = &mut self.board.view_mode
-                {
-                    if dependabot_selection.selected_column > 0 {
-                        dependabot_selection.selected_column -= 1;
-                    }
-                }
-                self.update_dependabot_anchor_from_current();
-                vec![]
-            }
-            KeyCode::Char('l') | KeyCode::Right => {
-                // 3 columns for dependabot (Backlog/In Review/Approved)
-                let col_count = 3usize;
-                if let ViewMode::SecurityBoard {
-                    dependabot_selection,
-                    ..
-                } = &mut self.board.view_mode
-                {
-                    if dependabot_selection.selected_column + 1 < col_count {
-                        dependabot_selection.selected_column += 1;
-                    }
-                }
-                self.update_dependabot_anchor_from_current();
-                vec![]
-            }
-            KeyCode::Char('?') => self.update(Message::ToggleHelp),
-            KeyCode::Tab => self.update(Message::SwitchToTaskBoard),
-            KeyCode::Esc => self.update(Message::SwitchToTaskBoard),
-            KeyCode::Char('q') => self.update(Message::Quit),
             _ => vec![],
         }
     }
@@ -1274,7 +1130,28 @@ impl App {
                 }
             }
 
-            KeyCode::Char('m') => self.update(Message::StartMergeReviewPr),
+            KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // ctrl+m: start merge only when the selected PR is ReadyToMerge
+                let is_ready = self
+                    .selected_review_pr_with_kind()
+                    .and_then(|(pr, kind)| {
+                        let wk = super::WorkflowKey::new(pr.repo.clone(), pr.number, kind);
+                        self.review.review_workflow_states.get(&wk).copied()
+                    })
+                    .map(|(_, sub)| {
+                        sub == Some(crate::models::ReviewWorkflowSubState::ReadyToMerge)
+                    })
+                    .unwrap_or(false);
+                if is_ready {
+                    self.update(Message::StartMergeReviewPr)
+                } else {
+                    vec![]
+                }
+            }
+
+            KeyCode::Char('m') => self.update(Message::MoveReviewItemForward),
+
+            KeyCode::Char('M') => self.update(Message::MoveReviewItemBack),
 
             _ => vec![],
         }

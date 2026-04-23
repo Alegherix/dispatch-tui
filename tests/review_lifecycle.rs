@@ -355,16 +355,16 @@ fn make_approved_pr(number: i64, repo: &str) -> ReviewPr {
 
 #[test]
 fn merge_review_pr_confirm_emits_command() {
+    use dispatch_tui::models::{ReviewWorkflowState, WorkflowItemKind};
+    use dispatch_tui::tui::types::WorkflowKey;
     let mut app = make_app();
     app.update(Message::SwitchToReviewBoard);
     let pr = make_approved_pr(42, "org/app");
     let url = pr.url.clone();
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
-    // Approved is column 3 — navigate right from column 0
-    for _ in 0..3 {
-        app.handle_key(make_key(KeyCode::Right));
-    }
+    // PR defaults to Backlog (col 0) — cursor stays at col 0 where the PR is selected.
+    // (workflow state is not set, so PR is in Backlog)
 
     let cmds = app.update(Message::StartMergeReviewPr);
     assert!(cmds.is_empty(), "StartMergeReviewPr emits no commands");

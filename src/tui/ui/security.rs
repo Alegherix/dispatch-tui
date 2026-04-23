@@ -1,5 +1,5 @@
 use super::palette::{BORDER, CYAN, DIM_META, FG, MUTED, MUTED_LIGHT, YELLOW};
-use super::review::{build_dependabot_pr_item, review_column_bg_color, review_column_color};
+use super::review::{build_dependabot_pr_item, dependabot_column_bg_color, dependabot_column_color};
 use super::shared::{
     push_hint_spans, refresh_status, render_substatus_header, render_tab_bar, staleness_color,
     truncate,
@@ -276,9 +276,9 @@ fn render_dependabot_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     let col_count = 3usize;
     let col_labels = ["Backlog", "In Review", "Approved"];
     let col_colors = [
-        review_column_color(ReviewDecision::ReviewRequired),
-        review_column_color(ReviewDecision::ChangesRequested),
-        review_column_color(ReviewDecision::Approved),
+        dependabot_column_color(ReviewDecision::ReviewRequired),
+        dependabot_column_color(ReviewDecision::ChangesRequested),
+        dependabot_column_color(ReviewDecision::Approved),
     ];
 
     let sel_col = match app.view_mode() {
@@ -383,7 +383,7 @@ fn render_dependabot_columns(frame: &mut Frame, app: &mut App, area: Rect) {
         }
 
         let bg = if is_focused {
-            review_column_bg_color(decision_for_color)
+            dependabot_column_bg_color(decision_for_color)
         } else {
             Color::Reset
         };

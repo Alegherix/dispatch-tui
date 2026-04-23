@@ -3787,17 +3787,14 @@ impl App {
     }
 
     fn clamp_review_selection(&mut self) {
-        let filtered = self.active_review_prs();
         let col_count = ReviewBoardMode::column_count();
-        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
-            if col >= col_count {
-                return 0;
-            }
-            filtered
-                .iter()
-                .filter(|pr| pr.review_decision.column_index() == col)
-                .count()
-        });
+        let counts: [usize; ReviewDecision::COLUMN_COUNT] =
+            std::array::from_fn(|col| {
+                if col >= col_count {
+                    return 0;
+                }
+                self.active_prs_for_column(col).len()
+            });
         if let Some(sel) = self.review_selection_mut() {
             for (col, &count) in counts.iter().enumerate() {
                 if count == 0 {
@@ -3819,17 +3816,12 @@ impl App {
             return self.clamp_review_selection();
         };
 
-        let filtered = self.active_review_prs();
         let col_count = ReviewBoardMode::column_count();
 
-        // Search for anchor PR across all columns
+        // Search for anchor PR across all columns (using workflow state)
         let mut found: Option<(usize, usize)> = None;
         'outer: for col in 0..col_count {
-            let mut col_prs: Vec<_> = filtered
-                .iter()
-                .filter(|pr| pr.review_decision.column_index() == col)
-                .collect();
-            col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+            let col_prs = self.active_prs_for_column(col);
             for (row, pr) in col_prs.iter().enumerate() {
                 if anchor_pr.matches(pr.number, &pr.repo) {
                     found = Some((col, row));
@@ -3842,10 +3834,7 @@ impl App {
             if col >= col_count {
                 return 0;
             }
-            filtered
-                .iter()
-                .filter(|pr| pr.review_decision.column_index() == col)
-                .count()
+            self.active_prs_for_column(col).len()
         });
 
         if let Some((found_col, found_row)) = found {
@@ -4298,12 +4287,26 @@ impl App {
             .collect()
     }
 
-    /// Return PRs for a given column index, using the current mode's column mapping.
+    /// Return PRs for a given workflow column index, using review_workflow_states.
+    /// Falls back to Backlog (col 0) for PRs with no recorded state.
     pub fn active_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
+        let mode_kind = match &self.board.view_mode {
+            ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
+            _ => crate::models::WorkflowItemKind::ReviewerPr,
+        };
         let mut prs: Vec<_> = self
             .active_review_prs()
             .into_iter()
-            .filter(|pr| pr.review_decision.column_index() == col)
+            .filter(|pr| {
+                let key = WorkflowKey::new(pr.repo.clone(), pr.number, mode_kind);
+                let (state, _) = self
+                    .review
+                    .review_workflow_states
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((crate::models::ReviewWorkflowState::Backlog, None));
+                state.column_index() == col
+            })
             .collect();
         prs.sort_by(|a, b| a.repo.cmp(&b.repo));
         prs
@@ -4471,12 +4474,7 @@ impl App {
             Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),
             None => return,
         };
-        let mut col_prs: Vec<_> = self
-            .active_review_prs()
-            .into_iter()
-            .filter(|pr| pr.review_decision.column_index() == col)
-            .collect();
-        col_prs.sort_by(|a, b| a.repo.cmp(&b.repo));
+        let col_prs = self.active_prs_for_column(col);
         let anchor = col_prs
             .get(row)
             .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number));

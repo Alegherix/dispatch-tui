@@ -1781,7 +1781,7 @@ fn epic_action_hints_shows_filter_help() {
 
 #[test]
 fn review_hints_shows_mode_keys_and_filter() {
-    let hints = ui::review_action_hints(true, false, None);
+    let hints = ui::review_action_hints(true, None, false);
     let keys = hint_keys(&hints);
     assert!(keys.contains(&"[1/2]"), "review should show 1/2 mode hint");
     assert!(keys.contains(&"[f]"), "review should show filter hint");
@@ -3125,40 +3125,35 @@ fn render_help_overlay_in_review_board_shows_review_shortcuts() {
 }
 
 #[test]
-fn review_board_status_bar_shows_approve_hint_in_reviewer_mode() {
+fn review_board_status_bar_shows_forward_and_filter_hints() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut pr = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
     pr.ci_status = crate::models::CiStatus::None;
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
     app.update(Message::SwitchToReviewBoard);
     let buf = render_to_buffer(&mut app, 200, 30);
-    // The hint is rendered as "[a]pprove" (embedded key style), so check for the key span
+    // forward/back hints shown when a PR is selected
     assert!(
-        buffer_contains(&buf, "[a]pprove"),
-        "status bar should show approve hint in reviewer mode"
+        buffer_contains(&buf, "[m]"),
+        "status bar should show [m] forward hint when PR selected"
     );
-    // The merge hint is rendered as "[m]erge"
     assert!(
-        buffer_contains(&buf, "[m]erge"),
-        "status bar should show merge hint in reviewer mode"
+        buffer_contains(&buf, "[f]"),
+        "status bar should show [f]ilter hint"
     );
 }
 
 #[test]
-fn review_board_status_bar_approve_hint_in_reviewer_mode() {
+fn review_board_status_bar_shows_dispatch_hint_without_agent() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let pr = make_review_pr(1, "alice", ReviewDecision::Approved);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
     app.update(Message::SwitchToReviewBoard);
-    // Stay in Reviewer mode (default)
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(3); // Approved is column 3
-    }
     let buf = render_to_buffer(&mut app, 200, 30);
-    // The merge hint "[m]erge" should appear in reviewer mode
+    // dispatch hint appears when PR is selected and no agent
     assert!(
-        buffer_contains(&buf, "[m]erge"),
-        "status bar should show merge hint in reviewer mode"
+        buffer_contains(&buf, "[d]"),
+        "status bar should show [d]ispatch hint when no agent running"
     );
 }
 
@@ -14768,33 +14763,40 @@ fn focused_backlog_header_renders_in_blue() {
 }
 
 #[test]
-fn needs_review_column_color_matches_backlog() {
-    let backlog = ui::column_color(TaskStatus::Backlog);
-    let needs_review = ui::review_column_color(ReviewDecision::ReviewRequired);
-    assert_eq!(
-        backlog, needs_review,
-        "Needs Review column color should match Backlog column color"
-    );
+fn review_workflow_column_colors_are_distinct() {
+    use crate::models::ReviewWorkflowState;
+    let backlog = ui::review_column_color(ReviewWorkflowState::Backlog);
+    let ongoing = ui::review_column_color(ReviewWorkflowState::Ongoing);
+    let action = ui::review_column_color(ReviewWorkflowState::ActionRequired);
+    let done = ui::review_column_color(ReviewWorkflowState::Done);
+    // All four columns should have distinct colors
+    assert_ne!(backlog, ongoing);
+    assert_ne!(ongoing, action);
+    assert_ne!(action, done);
 }
 
 #[test]
-fn needs_review_cursor_bg_matches_backlog() {
-    let backlog = ui::cursor_bg_color(TaskStatus::Backlog);
-    let needs_review = ui::review_cursor_bg_color(ReviewDecision::ReviewRequired);
-    assert_eq!(
-        backlog, needs_review,
-        "Needs Review cursor bg should match Backlog cursor bg"
-    );
+fn review_workflow_cursor_bg_colors_are_distinct() {
+    use crate::models::ReviewWorkflowState;
+    let backlog = ui::review_cursor_bg_color(ReviewWorkflowState::Backlog);
+    let ongoing = ui::review_cursor_bg_color(ReviewWorkflowState::Ongoing);
+    let action = ui::review_cursor_bg_color(ReviewWorkflowState::ActionRequired);
+    let done = ui::review_cursor_bg_color(ReviewWorkflowState::Done);
+    assert_ne!(backlog, ongoing);
+    assert_ne!(ongoing, action);
+    assert_ne!(action, done);
 }
 
 #[test]
-fn needs_review_column_bg_matches_backlog() {
-    let backlog = ui::column_bg_color(TaskStatus::Backlog);
-    let needs_review = ui::review_column_bg_color(ReviewDecision::ReviewRequired);
-    assert_eq!(
-        backlog, needs_review,
-        "Needs Review column bg should match Backlog column bg"
-    );
+fn review_workflow_column_bg_colors_are_distinct() {
+    use crate::models::ReviewWorkflowState;
+    let backlog = ui::review_column_bg_color(ReviewWorkflowState::Backlog);
+    let ongoing = ui::review_column_bg_color(ReviewWorkflowState::Ongoing);
+    let action = ui::review_column_bg_color(ReviewWorkflowState::ActionRequired);
+    let done = ui::review_column_bg_color(ReviewWorkflowState::Done);
+    assert_ne!(backlog, ongoing);
+    assert_ne!(ongoing, action);
+    assert_ne!(action, done);
 }
 
 // ---------------------------------------------------------------------------
@@ -17289,7 +17291,18 @@ fn review_board_r_refreshes_even_when_agent_idle() {
 
 #[test]
 fn review_board_reviewing_agent_shows_circle_badge() {
+    use crate::models::ReviewWorkflowState;
+    use super::types::WorkflowKey;
     let mut app = make_review_board_app();
+    // Put PR 1 in Ongoing column so circle is shown
+    let key = WorkflowKey::new(
+        "acme/app".to_string(),
+        1,
+        crate::models::WorkflowItemKind::ReviewerPr,
+    );
+    app.review
+        .review_workflow_states
+        .insert(key, (ReviewWorkflowState::Ongoing, None));
     app.review.review_agents.insert(
         crate::models::PrRef::new("acme/app".to_string(), 1),
         super::types::ReviewAgentHandle {
@@ -17311,7 +17324,18 @@ fn review_board_reviewing_agent_shows_circle_badge() {
 
 #[test]
 fn review_board_reviewing_agent_badge_is_cyan() {
+    use crate::models::ReviewWorkflowState;
+    use super::types::WorkflowKey;
     let mut app = make_review_board_app();
+    // Put PR 1 in Ongoing column so circle is shown
+    let key = WorkflowKey::new(
+        "acme/app".to_string(),
+        1,
+        crate::models::WorkflowItemKind::ReviewerPr,
+    );
+    app.review
+        .review_workflow_states
+        .insert(key, (ReviewWorkflowState::Ongoing, None));
     app.review.review_agents.insert(
         crate::models::PrRef::new("acme/app".to_string(), 1),
         super::types::ReviewAgentHandle {
@@ -17341,8 +17365,19 @@ fn review_board_reviewing_agent_badge_is_cyan() {
 }
 
 #[test]
-fn review_board_findings_ready_agent_shows_checkmark_badge() {
+fn review_board_findings_ready_agent_shows_open_circle_badge() {
+    use crate::models::ReviewWorkflowState;
+    use super::types::WorkflowKey;
+    // FindingsReady means the agent finished — shows ○ (tmux not alive)
     let mut app = make_review_board_app();
+    let key = WorkflowKey::new(
+        "acme/app".to_string(),
+        1,
+        crate::models::WorkflowItemKind::ReviewerPr,
+    );
+    app.review
+        .review_workflow_states
+        .insert(key, (ReviewWorkflowState::ActionRequired, None));
     app.review.review_agents.insert(
         crate::models::PrRef::new("acme/app".to_string(), 1),
         super::types::ReviewAgentHandle {
@@ -17352,19 +17387,27 @@ fn review_board_findings_ready_agent_shows_checkmark_badge() {
         },
     );
     let buf = render_to_buffer(&mut app, 120, 40);
+    // FindingsReady agent shows ○ (session no longer running)
     assert!(
-        buffer_contains(&buf, "\u{2714}"),
-        "expected ✔ (U+2714) for FindingsReady agent"
-    );
-    assert!(
-        !buffer_contains(&buf, "\u{25c6}"),
-        "◆ should not appear for FindingsReady"
+        buffer_contains(&buf, "\u{25cb}"),
+        "expected ○ (U+25CB) for FindingsReady agent (session ended)"
     );
 }
 
 #[test]
 fn review_board_idle_agent_shows_open_circle_badge() {
+    use crate::models::ReviewWorkflowState;
+    use super::types::WorkflowKey;
     let mut app = make_review_board_app();
+    // Put PR 1 in Ongoing column so circle is shown
+    let key = WorkflowKey::new(
+        "acme/app".to_string(),
+        1,
+        crate::models::WorkflowItemKind::ReviewerPr,
+    );
+    app.review
+        .review_workflow_states
+        .insert(key, (ReviewWorkflowState::Ongoing, None));
     app.review.review_agents.insert(
         crate::models::PrRef::new("acme/app".to_string(), 1),
         super::types::ReviewAgentHandle {
@@ -17816,11 +17859,8 @@ fn make_reviewer_app_with_pr(
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    // Navigate to the PR's column so it is selected
-    let col = decision.column_index();
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(col);
-    }
+    // PRs default to Backlog (col 0) unless workflow state is set.
+    // Stay at col 0 to select the PR.
     (app, url)
 }
 
@@ -17832,10 +17872,7 @@ fn make_dependabot_app_with_pr(decision: ReviewDecision, ci: crate::models::CiSt
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    let col = decision.column_index();
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(col);
-    }
+    // PRs default to Backlog (col 0) — stay there to select the PR.
     (app, url)
 }
 
@@ -18646,19 +18683,27 @@ fn move_review_item_forward_advances_workflow_state() {
     let mut app = make_review_board_app();
     let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
 
-    // Start at Backlog (default)
+    // Start at Backlog (default) — PR 1 is at col 0 row 0
     let cmds = app.update(Message::MoveReviewItemForward);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, Ongoing);
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
 
-    // Ongoing → ActionRequired
+    // Now navigate to col 1 where PR 1 moved, select it, advance again
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(1);
+        sel.set_row(1, 0);
+    }
     let cmds = app.update(Message::MoveReviewItemForward);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, ActionRequired);
     assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
 
-    // ActionRequired → Done
+    // Navigate to col 2 and advance again
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(2);
+        sel.set_row(2, 0);
+    }
     let cmds = app.update(Message::MoveReviewItemForward);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, Done);
@@ -18673,19 +18718,33 @@ fn move_review_item_back_retreats_workflow_state() {
     let mut app = make_review_board_app();
     let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
 
-    // Seed the state at Done
+    // Seed the state at Done and navigate cursor to col 3
     app.review.review_workflow_states.insert(key.clone(), (Done, None));
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(3);
+        sel.set_row(3, 0);
+    }
 
     // Done → ActionRequired
     app.update(Message::MoveReviewItemBack);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, ActionRequired);
 
+    // Navigate to col 2
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(2);
+        sel.set_row(2, 0);
+    }
     // ActionRequired → Ongoing
     app.update(Message::MoveReviewItemBack);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, Ongoing);
 
+    // Navigate to col 1
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(1);
+        sel.set_row(1, 0);
+    }
     // Ongoing → Backlog
     app.update(Message::MoveReviewItemBack);
     let (state, _) = app.review.review_workflow_states[&key];
@@ -18700,8 +18759,12 @@ fn move_review_item_forward_noop_at_done() {
     let mut app = make_review_board_app();
     let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
 
-    // Seed the state at Done
+    // Seed the state at Done and navigate cursor to col 3
     app.review.review_workflow_states.insert(key.clone(), (Done, None));
+    if let Some(sel) = app.review_selection_mut() {
+        sel.set_column(3);
+        sel.set_row(3, 0);
+    }
 
     // At Done, forward should emit no command
     let cmds = app.update(Message::MoveReviewItemForward);

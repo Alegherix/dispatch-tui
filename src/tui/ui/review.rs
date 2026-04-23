@@ -1,10 +1,14 @@
-use super::palette::{BLUE, BORDER, DIM_META, GREEN, MUTED, MUTED_LIGHT, RED_DIM, YELLOW};
+use super::palette::{BLUE, BORDER, CYAN, DIM_META, GREEN, MUTED, MUTED_LIGHT, RED_DIM, YELLOW};
 use super::shared::{
     push_hint_spans, refresh_status, render_substatus_header, render_tab_bar, staleness_color,
     truncate,
 };
 
-use crate::models::{format_age, CiStatus, ReviewDecision, ReviewPr, Staleness};
+use crate::models::{
+    format_age, CiStatus, ReviewDecision, ReviewPr, ReviewWorkflowState, ReviewWorkflowSubState,
+    Staleness,
+};
+use crate::tui::types::{WorkflowKey};
 use crate::tui::{App, InputMode, ReviewBoardMode, ViewMode};
 use chrono::Utc;
 use ratatui::{
@@ -86,8 +90,8 @@ fn render_review_repo_filter_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
 pub(in crate::tui) fn review_action_hints(
     has_pr: bool,
-    is_author_mode: bool,
     agent_status: Option<crate::models::ReviewAgentStatus>,
+    ready_to_merge: bool,
 ) -> Vec<Span<'static>> {
     use crate::models::ReviewAgentStatus;
     let key_color = Color::Cyan;
@@ -115,17 +119,15 @@ pub(in crate::tui) fn review_action_hints(
             }
         }
     }
+    if has_pr {
+        push_hint("m", "forward");
+        push_hint("M", "back");
+        if ready_to_merge {
+            push_hint("ctrl+m", "merge");
+        }
+    }
     push_hint("f", "filter");
     push_hint("e", "edit queries");
-    if is_author_mode {
-        push_hint("D", "dispatch filter");
-    }
-    if has_pr {
-        if !is_author_mode {
-            push_hint("a", "approve");
-        }
-        push_hint("m", "merge");
-    }
     push_hint("1/2", "mode");
     push_hint("Tab", "task board");
     push_hint("?", "help");
@@ -133,30 +135,30 @@ pub(in crate::tui) fn review_action_hints(
     spans
 }
 
-pub(in crate::tui) fn review_column_color(decision: ReviewDecision) -> Color {
-    match decision {
-        ReviewDecision::ReviewRequired => BLUE,
-        ReviewDecision::WaitingForResponse => YELLOW,
-        ReviewDecision::ChangesRequested => RED_DIM,
-        ReviewDecision::Approved => GREEN,
+pub(in crate::tui) fn review_column_color(state: ReviewWorkflowState) -> Color {
+    match state {
+        ReviewWorkflowState::Backlog => MUTED,
+        ReviewWorkflowState::Ongoing => BLUE,
+        ReviewWorkflowState::ActionRequired => YELLOW,
+        ReviewWorkflowState::Done => GREEN,
     }
 }
 
-pub(in crate::tui) fn review_cursor_bg_color(decision: ReviewDecision) -> Color {
-    match decision {
-        ReviewDecision::ReviewRequired => Color::Rgb(34, 38, 66),
-        ReviewDecision::WaitingForResponse => Color::Rgb(52, 44, 20),
-        ReviewDecision::ChangesRequested => Color::Rgb(56, 32, 32),
-        ReviewDecision::Approved => Color::Rgb(32, 52, 36),
+pub(in crate::tui) fn review_cursor_bg_color(state: ReviewWorkflowState) -> Color {
+    match state {
+        ReviewWorkflowState::Backlog => Color::Rgb(30, 30, 44),
+        ReviewWorkflowState::Ongoing => Color::Rgb(34, 38, 66),
+        ReviewWorkflowState::ActionRequired => Color::Rgb(52, 44, 20),
+        ReviewWorkflowState::Done => Color::Rgb(32, 52, 36),
     }
 }
 
-pub(in crate::tui) fn review_column_bg_color(decision: ReviewDecision) -> Color {
-    match decision {
-        ReviewDecision::ReviewRequired => Color::Rgb(28, 30, 44),
-        ReviewDecision::WaitingForResponse => Color::Rgb(36, 34, 26),
-        ReviewDecision::ChangesRequested => Color::Rgb(36, 28, 28),
-        ReviewDecision::Approved => Color::Rgb(27, 36, 30),
+pub(in crate::tui) fn review_column_bg_color(state: ReviewWorkflowState) -> Color {
+    match state {
+        ReviewWorkflowState::Backlog => Color::Rgb(26, 26, 36),
+        ReviewWorkflowState::Ongoing => Color::Rgb(28, 30, 44),
+        ReviewWorkflowState::ActionRequired => Color::Rgb(36, 34, 26),
+        ReviewWorkflowState::Done => Color::Rgb(27, 36, 30),
     }
 }
 
@@ -235,14 +237,24 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_widget(status, chunks[5]);
     } else {
         let has_pr = app.selected_review_pr().is_some();
-        let is_author_mode = false; // Author mode removed in v2
         let agent_status = app
             .selected_review_pr()
             .and_then(|pr| app.pr_agent(pr).map(|h| h.status));
+        let ready_to_merge = app.selected_review_pr().map(|pr| {
+            let kind = match app.view_mode() {
+                ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
+                _ => return false,
+            };
+            let key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
+            matches!(
+                app.review.review_workflow_states.get(&key),
+                Some((ReviewWorkflowState::ActionRequired, Some(ReviewWorkflowSubState::ReadyToMerge)))
+            )
+        }).unwrap_or(false);
         let hints = Paragraph::new(Line::from(review_action_hints(
             has_pr,
-            is_author_mode,
             agent_status,
+            ready_to_merge,
         )));
         frame.render_widget(hints, chunks[5]);
     }
@@ -270,7 +282,20 @@ fn render_review_detail(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    let decision_color = review_column_color(pr.review_decision);
+    // Get workflow state for color
+    let kind = match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
+        _ => crate::models::WorkflowItemKind::ReviewerPr,
+    };
+    let wf_key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
+    let (wf_state, _) = app
+        .review
+        .review_workflow_states
+        .get(&wf_key)
+        .copied()
+        .unwrap_or((ReviewWorkflowState::Backlog, None));
+    let col_color = review_column_color(wf_state);
+
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
 
@@ -291,7 +316,7 @@ fn render_review_detail(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(
             format!("{}#{} {}", pr.repo, pr.number, pr.title),
             Style::default()
-                .fg(decision_color)
+                .fg(col_color)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -353,10 +378,8 @@ fn render_review_detail(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
-    use crate::models::ReviewWorkflowState;
     let sel = app.review_selection();
     let selected_col = sel.map(|s| s.column()).unwrap_or(0);
-    let filtered = app.active_review_prs();
     let col_count = ReviewBoardMode::column_count();
     let workflow_states = [
         ReviewWorkflowState::Backlog,
@@ -370,18 +393,30 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
         .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
         .split(area);
 
+    let mode_kind = match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
+        _ => crate::models::WorkflowItemKind::ReviewerPr,
+    };
+    let filtered = app.active_review_prs();
+
     for i in 0..col_count {
-        let count = filtered.iter().filter(|pr| pr.review_decision.column_index() == i).count();
+        let wf_state = workflow_states[i];
+        let count = filtered.iter().filter(|pr| {
+            let key = WorkflowKey::new(pr.repo.clone(), pr.number, mode_kind);
+            let (state, _) = app
+                .review
+                .review_workflow_states
+                .get(&key)
+                .copied()
+                .unwrap_or((ReviewWorkflowState::Backlog, None));
+            state == wf_state
+        }).count();
         let is_focused = i == selected_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
-        let col_label = workflow_states.get(i).map(|s| ReviewBoardMode::column_label(*s)).unwrap_or("");
+        let col_label = ReviewBoardMode::column_label(wf_state);
         let label = format!("{prefix}{col_label} ({count})");
 
-        // Map column index to ReviewDecision for coloring
-        let decision_for_color =
-            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired);
-
-        let color = review_column_color(decision_for_color);
+        let color = review_column_color(wf_state);
         let style = if is_focused {
             Style::default().fg(color).add_modifier(Modifier::BOLD)
         } else {
@@ -393,50 +428,113 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// Sub-state sort order within a column — lower = earlier.
+fn sub_state_sort_key(sub: Option<ReviewWorkflowSubState>) -> u8 {
+    match sub {
+        Some(ReviewWorkflowSubState::Reviewing) => 0,
+        Some(ReviewWorkflowSubState::Idle) => 1,
+        Some(ReviewWorkflowSubState::Stale) => 2,
+        Some(ReviewWorkflowSubState::FindingsReady) => 3,
+        Some(ReviewWorkflowSubState::ReadyToMerge) => 4,
+        Some(ReviewWorkflowSubState::ChangesRequested) => 5,
+        Some(ReviewWorkflowSubState::AwaitingResponse) => 6,
+        Some(ReviewWorkflowSubState::CiFailing) => 7,
+        None => 8,
+    }
+}
+
 fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.review_selection().map(|s| s.column()).unwrap_or(0);
     let col_count = ReviewBoardMode::column_count();
+    let workflow_states = [
+        ReviewWorkflowState::Backlog,
+        ReviewWorkflowState::Ongoing,
+        ReviewWorkflowState::ActionRequired,
+        ReviewWorkflowState::Done,
+    ];
+
+    let mode_kind = match app.view_mode() {
+        ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
+        _ => crate::models::WorkflowItemKind::ReviewerPr,
+    };
 
     let col_areas = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(vec![Constraint::Ratio(1, col_count as u32); col_count])
         .split(area);
 
+    // Build column PR lists with workflow state lookup
     for i in 0..col_count {
         let is_focused = i == sel_col;
-        let prs: Vec<&ReviewPr> = app.active_prs_for_column(i);
+        let wf_state = workflow_states[i];
 
-        let decision_for_color =
-            ReviewDecision::from_column_index(i).unwrap_or(ReviewDecision::ReviewRequired);
+        // Collect PRs for this workflow column, with their sub-states
+        let mut col_prs: Vec<(&ReviewPr, Option<ReviewWorkflowSubState>)> = app
+            .active_review_prs()
+            .into_iter()
+            .filter_map(|pr| {
+                let key = WorkflowKey::new(pr.repo.clone(), pr.number, mode_kind);
+                let (state, sub) = app
+                    .review
+                    .review_workflow_states
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((ReviewWorkflowState::Backlog, None));
+                if state == wf_state {
+                    Some((pr, sub))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Sort by sub-state then repo then number
+        col_prs.sort_by(|(a, a_sub), (b, b_sub)| {
+            sub_state_sort_key(*a_sub)
+                .cmp(&sub_state_sort_key(*b_sub))
+                .then(a.repo.cmp(&b.repo))
+                .then(a.number.cmp(&b.number))
+        });
+
         let selected_row = app.review_selection().map(|s| s.row(i)).unwrap_or(0);
         let mut list_items: Vec<ListItem> = Vec::new();
         let mut list_selection_idx: Option<usize> = None;
-        let mut current_repo: Option<&str> = None;
+        let mut current_sub: Option<Option<ReviewWorkflowSubState>> = None;
 
-        for (item_idx, pr) in prs.iter().enumerate() {
-            if current_repo != Some(pr.repo.as_str()) {
-                current_repo = Some(pr.repo.as_str());
-                let repo_short = pr.repo.split('/').next_back().unwrap_or(&pr.repo);
-                list_items.push(render_substatus_header(repo_short, list_items.is_empty()));
+        // Build items with circle indicator
+        for (item_idx, (pr, sub)) in col_prs.iter().enumerate() {
+            // Section header when sub-state changes
+            if current_sub != Some(*sub) {
+                current_sub = Some(*sub);
+                if let Some(sub_state) = sub {
+                    let label = sub_state.section_label();
+                    list_items.push(render_substatus_header(label, list_items.is_empty()));
+                } else if !list_items.is_empty() {
+                    // No sub-state but not first item — add separator
+                    list_items.push(render_substatus_header("other", false));
+                }
             }
 
             if item_idx == selected_row {
                 list_selection_idx = Some(list_items.len());
             }
 
-            let is_selected = false;
+            let agent_status = app.pr_agent(pr).map(|h| h.status);
+            // tmux_alive = true only when agent is actively Reviewing (window is live)
+            let tmux_alive = matches!(agent_status, Some(crate::models::ReviewAgentStatus::Reviewing));
             list_items.push(build_review_pr_item(
                 pr,
-                i,
+                wf_state,
+                *sub,
                 is_focused && item_idx == selected_row,
-                app.pr_agent(pr).map(|h| h.status),
-                is_selected,
+                agent_status,
+                tmux_alive,
                 col_areas[i].width,
             ));
         }
 
         let bg = if is_focused {
-            review_column_bg_color(decision_for_color)
+            review_column_bg_color(wf_state)
         } else {
             Color::Reset
         };
@@ -457,15 +555,195 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn build_pr_line1(
+/// Build a 2-line list item for a review PR card.
+///
+/// Line 1: `[circle] #<number> <title> [CI dot] [draft badge]`
+/// - circle omitted in Backlog; ◉ (cyan) if tmux alive, ○ (dim) if not
+/// - CI dot: green for success, red for failure, omitted for unknown
+///
+/// Line 2: context based on sub-state
+pub(in crate::tui::ui) fn build_review_pr_item(
+    pr: &ReviewPr,
+    state: ReviewWorkflowState,
+    sub: Option<ReviewWorkflowSubState>,
+    is_cursor: bool,
+    agent_status: Option<crate::models::ReviewAgentStatus>,
+    tmux_alive: bool,
+    col_width: u16,
+) -> ListItem<'static> {
+    let col_color = review_column_color(state);
+    let now = Utc::now();
+
+    // --- Line 1 ---
+    let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
+
+    // Circle indicator (omitted in Backlog)
+    let (circle_text, circle_color): (&'static str, Color) = if state == ReviewWorkflowState::Backlog {
+        ("", Color::Reset)
+    } else if tmux_alive {
+        ("\u{25c9} ", CYAN) // ◉
+    } else {
+        ("\u{25cb} ", Color::DarkGray) // ○
+    };
+
+    // CI dot
+    let ci_dot_color = match pr.ci_status {
+        CiStatus::Success => Some(Color::Green),
+        CiStatus::Failure => Some(Color::Red),
+        _ => None,
+    };
+
+    // Draft badge
+    let draft_badge = if pr.is_draft { " [drft]" } else { "" };
+
+    // Calculate available width for title
+    let circle_w = if circle_text.is_empty() { 0usize } else { 2 };
+    let ci_dot_w = if ci_dot_color.is_some() { 2usize } else { 0 };
+    let draft_w = draft_badge.len();
+    let header_prefix = format!("#{} ", pr.number);
+    // stripe(2) + circle(0 or 2) + "#N "(varies) + title + ci_dot(0/2) + draft
+    let overhead = 2 + circle_w + header_prefix.len() + ci_dot_w + draft_w;
+    let max_title = (col_width as usize).saturating_sub(overhead).max(1);
+    let title_truncated = truncate(&pr.title, max_title);
+
+    let line1_style = if is_cursor {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(col_color)
+    };
+
+    let _ = agent_status; // circle already encodes running state via tmux_alive
+    let mut spans1: Vec<Span> = vec![Span::styled(stripe.to_string(), Style::default().fg(col_color))];
+    if !circle_text.is_empty() {
+        spans1.push(Span::styled(circle_text.to_string(), Style::default().fg(circle_color)));
+    }
+    spans1.push(Span::styled(
+        format!("{header_prefix}{title_truncated}"),
+        line1_style,
+    ));
+    if let Some(dot_color) = ci_dot_color {
+        spans1.push(Span::styled(" \u{25cf}", Style::default().fg(dot_color)));
+    }
+    if !draft_badge.is_empty() {
+        spans1.push(Span::styled(
+            draft_badge.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    let line1 = Line::from(spans1);
+
+    // --- Line 2: context based on sub-state ---
+    let line2 = match sub {
+        Some(ReviewWorkflowSubState::ReadyToMerge) => {
+            let approved_count = pr
+                .reviewers
+                .iter()
+                .filter(|r| r.decision == Some(ReviewDecision::Approved))
+                .count();
+            let check_marks = "\u{2713}\u{2713}";
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled("approved  ", Style::default().fg(GREEN)),
+                Span::styled(check_marks.to_string(), Style::default().fg(GREEN)),
+                if approved_count > 0 {
+                    Span::styled(
+                        format!(" ({approved_count})"),
+                        Style::default().fg(DIM_META),
+                    )
+                } else {
+                    Span::raw("")
+                },
+            ])
+        }
+        Some(ReviewWorkflowSubState::FindingsReady) => Line::from(vec![
+            Span::raw("  "),
+            Span::styled("findings", Style::default().fg(YELLOW)),
+        ]),
+        Some(ReviewWorkflowSubState::Stale) => {
+            let age = format_age(pr.updated_at, now);
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(format!("stale {age}"), Style::default().fg(RED_DIM)),
+            ])
+        }
+        _ => {
+            // Default: @author  +lines-lines  age
+            let age = format_age(pr.created_at, now);
+            let staleness = Staleness::from_age(pr.created_at, now);
+            let age_color = staleness_color(staleness);
+            let meta_style = Style::default().fg(DIM_META);
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!("@{} \u{b7} +{}/-{} \u{b7} ", pr.author, pr.additions, pr.deletions),
+                    meta_style,
+                ),
+                Span::styled(age, Style::default().fg(age_color)),
+            ])
+        }
+    };
+
+    let bg = if is_cursor {
+        review_cursor_bg_color(state)
+    } else {
+        Color::Reset
+    };
+
+    ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
+}
+
+fn ci_dot_color(status: CiStatus) -> Color {
+    match status {
+        CiStatus::Success => Color::Green,
+        CiStatus::Failure => Color::Red,
+        CiStatus::Pending => Color::Yellow,
+        CiStatus::None => Color::DarkGray,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for the Dependabot security board (3-column ReviewDecision layout)
+// ---------------------------------------------------------------------------
+
+/// Column color for the 3-column Dependabot board (ReviewDecision-keyed).
+pub(in crate::tui::ui) fn dependabot_column_color(decision: ReviewDecision) -> Color {
+    match decision {
+        ReviewDecision::ReviewRequired => BLUE,
+        ReviewDecision::WaitingForResponse => YELLOW,
+        ReviewDecision::ChangesRequested => RED_DIM,
+        ReviewDecision::Approved => GREEN,
+    }
+}
+
+/// Column background for the 3-column Dependabot board (ReviewDecision-keyed).
+pub(in crate::tui::ui) fn dependabot_column_bg_color(decision: ReviewDecision) -> Color {
+    match decision {
+        ReviewDecision::ReviewRequired => Color::Rgb(28, 30, 44),
+        ReviewDecision::WaitingForResponse => Color::Rgb(36, 34, 26),
+        ReviewDecision::ChangesRequested => Color::Rgb(36, 28, 28),
+        ReviewDecision::Approved => Color::Rgb(27, 36, 30),
+    }
+}
+
+/// Cursor highlight background for the 3-column Dependabot board.
+pub(in crate::tui::ui) fn dependabot_cursor_bg_color(decision: ReviewDecision) -> Color {
+    match decision {
+        ReviewDecision::ReviewRequired => Color::Rgb(34, 38, 66),
+        ReviewDecision::WaitingForResponse => Color::Rgb(52, 44, 20),
+        ReviewDecision::ChangesRequested => Color::Rgb(56, 32, 32),
+        ReviewDecision::Approved => Color::Rgb(32, 52, 36),
+    }
+}
+
+fn build_pr_line1_dependabot(
     pr: &ReviewPr,
     color: Color,
-    is_selected: bool,
     is_cursor: bool,
     agent_status: Option<crate::models::ReviewAgentStatus>,
     col_width: u16,
 ) -> Line<'static> {
-    let select_prefix = if is_selected { "* " } else { "" };
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
 
     let (badge_text, badge_is_running) = match agent_status {
@@ -475,13 +753,12 @@ fn build_pr_line1(
         None => ("", false),
     };
 
-    let header = format!("{select_prefix}#{} {}", pr.number, pr.title);
-    // stripe(2) + badge(0 or 2) + header + " ●"(2)
+    let header = format!("#{} {}", pr.number, pr.title);
     let badge_w = if badge_text.is_empty() { 0 } else { 2 };
     let max_header = (col_width as usize).saturating_sub(4 + badge_w);
     let header_truncated = truncate(&header, max_header);
 
-    let line1_style = if is_selected || is_cursor {
+    let line1_style = if is_cursor {
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
@@ -489,12 +766,12 @@ fn build_pr_line1(
         Style::default().fg(color)
     };
     let badge_style = if badge_is_running {
-        Style::default().fg(super::palette::CYAN)
+        Style::default().fg(CYAN)
     } else {
         line1_style
     };
 
-    let mut spans = vec![Span::styled(stripe, Style::default().fg(color))];
+    let mut spans = vec![Span::styled(stripe.to_string(), Style::default().fg(color))];
     if !badge_text.is_empty() {
         spans.push(Span::styled(badge_text.to_string(), badge_style));
     }
@@ -506,52 +783,7 @@ fn build_pr_line1(
     Line::from(spans)
 }
 
-pub(in crate::tui::ui) fn build_review_pr_item(
-    pr: &ReviewPr,
-    col: usize,
-    is_cursor: bool,
-    agent_status: Option<crate::models::ReviewAgentStatus>,
-    is_selected: bool,
-    col_width: u16,
-) -> ListItem<'static> {
-    let decision_for_color =
-        ReviewDecision::from_column_index(col).unwrap_or(ReviewDecision::ReviewRequired);
-    let color = review_column_color(decision_for_color);
-    let now = Utc::now();
-    let age = format_age(pr.created_at, now);
-
-    let line1 = build_pr_line1(pr, color, is_selected, is_cursor, agent_status, col_width);
-
-    // Line 2: ● ci_state · @author · +/-lines · age
-    let staleness = Staleness::from_age(pr.created_at, now);
-    let age_color = staleness_color(staleness);
-
-    let (ci_color, ci_label) = ci_state_prefix(pr.ci_status);
-
-    let meta_style = Style::default().fg(DIM_META);
-
-    let line2 = Line::from(vec![
-        Span::raw("  "),
-        Span::styled(ci_label, Style::default().fg(ci_color)),
-        Span::styled(
-            format!(
-                " \u{b7} @{} \u{b7} +{}/-{} \u{b7} ",
-                pr.author, pr.additions, pr.deletions
-            ),
-            meta_style,
-        ),
-        Span::styled(age, Style::default().fg(age_color)),
-    ]);
-
-    let bg = if is_cursor {
-        review_cursor_bg_color(decision_for_color)
-    } else {
-        Color::Reset
-    };
-
-    ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
-}
-
+/// Build a list item for the Dependabot security board (ReviewDecision-based coloring).
 pub(in crate::tui::ui) fn build_dependabot_pr_item(
     pr: &ReviewPr,
     decision: ReviewDecision,
@@ -560,19 +792,18 @@ pub(in crate::tui::ui) fn build_dependabot_pr_item(
     is_selected: bool,
     col_width: u16,
 ) -> ListItem<'static> {
-    let color = review_column_color(decision);
+    let _ = is_selected; // not used for Dependabot items currently
+    let color = dependabot_column_color(decision);
     let now = Utc::now();
     let age = format_age(pr.created_at, now);
 
-    let line1 = build_pr_line1(pr, color, is_selected, is_cursor, agent_status, col_width);
+    let line1 = build_pr_line1_dependabot(pr, color, is_cursor, agent_status, col_width);
 
-    // Line 2: ● ci_state · +/-lines · age (author omitted — always "dependabot")
     let staleness = Staleness::from_age(pr.created_at, now);
     let age_color = staleness_color(staleness);
 
     let (ci_prefix_color, ci_label) = ci_state_prefix(pr.ci_status);
     let meta_style = Style::default().fg(DIM_META);
-
     let line2 = Line::from(vec![
         Span::raw("  "),
         Span::styled(ci_label, Style::default().fg(ci_prefix_color)),
@@ -584,7 +815,7 @@ pub(in crate::tui::ui) fn build_dependabot_pr_item(
     ]);
 
     let bg = if is_cursor {
-        review_cursor_bg_color(decision)
+        dependabot_cursor_bg_color(decision)
     } else {
         Color::Reset
     };
@@ -599,8 +830,4 @@ fn ci_state_prefix(status: CiStatus) -> (Color, &'static str) {
         CiStatus::Pending => (Color::Yellow, "\u{25cf} pending"),
         CiStatus::None => (Color::DarkGray, "\u{25cf} \u{2013}"),
     }
-}
-
-fn ci_dot_color(status: CiStatus) -> Color {
-    ci_state_prefix(status).0
 }

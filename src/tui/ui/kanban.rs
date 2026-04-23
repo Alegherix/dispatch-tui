@@ -2867,8 +2867,17 @@ mod tests {
 
     #[test]
     fn review_pr_card_line2_contains_author() {
+        use crate::models::ReviewWorkflowState;
         let pr = make_test_pr(7, "alice", crate::models::CiStatus::Success, 8, 2);
-        let item = build_review_pr_item(&pr, 0, false, None, false, 80);
+        let item = build_review_pr_item(
+            &pr,
+            ReviewWorkflowState::Backlog,
+            None,
+            false,
+            None,
+            false,
+            80,
+        );
         let buf = render_list_item_to_buf(item, 80, 2);
         let row1 = buf_row(&buf, 1);
         assert!(
@@ -2878,30 +2887,50 @@ mod tests {
     }
 
     #[test]
-    fn review_pr_card_line2_has_colored_ci_prefix() {
+    fn review_pr_card_line1_has_colored_ci_dot_for_failure() {
+        use crate::models::ReviewWorkflowState;
         let pr = make_test_pr(7, "alice", crate::models::CiStatus::Failure, 8, 2);
-        let item = build_review_pr_item(&pr, 0, false, None, false, 80);
+        let item = build_review_pr_item(
+            &pr,
+            ReviewWorkflowState::Backlog,
+            None,
+            false,
+            None,
+            false,
+            80,
+        );
         let buf = render_list_item_to_buf(item, 80, 2);
         let area = buf.area();
+        // CI dot is on line 1 (row 0)
         let has_red =
-            (area.left()..area.right()).any(|x| buf[(x, 1)].style().fg == Some(Color::Red));
+            (area.left()..area.right()).any(|x| buf[(x, 0)].style().fg == Some(Color::Red));
         assert!(
             has_red,
-            "review PR line 2 should have red for failing CI, got no red cell"
+            "review PR line 1 should have red CI dot for failing CI, got no red cell"
         );
     }
 
     #[test]
-    fn review_pr_card_line2_ci_prefix_before_author() {
+    fn review_pr_card_line1_has_colored_ci_dot_for_success() {
+        use crate::models::ReviewWorkflowState;
         let pr = make_test_pr(7, "alice", crate::models::CiStatus::Success, 8, 2);
-        let item = build_review_pr_item(&pr, 0, false, None, false, 80);
+        let item = build_review_pr_item(
+            &pr,
+            ReviewWorkflowState::Backlog,
+            None,
+            false,
+            None,
+            false,
+            80,
+        );
         let buf = render_list_item_to_buf(item, 80, 2);
-        let row1 = buf_row(&buf, 1);
-        let ci_pos = row1.find("passing").expect("should contain ci state text");
-        let author_pos = row1.find("@alice").expect("should contain @author");
+        let area = buf.area();
+        // CI dot is on line 1 (row 0) with green color
+        let has_green =
+            (area.left()..area.right()).any(|x| buf[(x, 0)].style().fg == Some(Color::Green));
         assert!(
-            ci_pos < author_pos,
-            "CI prefix should appear before @author on line 2"
+            has_green,
+            "review PR line 1 should have green CI dot for passing CI"
         );
     }
 

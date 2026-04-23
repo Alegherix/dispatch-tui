@@ -3,13 +3,14 @@ source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
  Tasks  │  ▸ Reviews (3)  │  Security   [Tab] security  [S-Tab] toggle                                            🔕  [N]
-▸ Backlog (2)                 ◦ Ongoing (0)                 ◦ Action Required (0)         ◦ Done (1)
+▸ Backlog (3)                 ◦ Ongoing (0)                 ◦ Action Required (0)         ◦ Done (0)
 Updated 0s ago  [r] refresh
-  ── app                                                                                    ── app
-▌ ◉ #1 PR 1 ●                                                                             ▎ #2 PR 2 ●
-  ● – · @alice · +10/-5 · <1h                                                               ● – · @bob · +10/-5 · <1h
-▎ #3 PR 3 ●
-  ● – · @carol · +10/-5 · <1h
+▌ #1 PR 1
+  @alice · +10/-5 · <1h
+▎ #2 PR 2
+  @bob · +10/-5 · <1h
+▎ #3 PR 3
+  @carol · +10/-5 · <1h
 
 
 
@@ -40,5 +41,4 @@ Updated 0s ago  [r] refresh
 
 
 
-
-[Enter] open PR  [g]o to  [T] detach  [f]ilter  [e]dit queries  [a]pprove  [m]erge  [1/2] mode  [Tab] task board  [?] he
+[Enter] open PR  [g]o to  [T] detach  [m] forward  [M] back  [f]ilter  [e]dit queries  [1/2] mode  [Tab] task board  [?]

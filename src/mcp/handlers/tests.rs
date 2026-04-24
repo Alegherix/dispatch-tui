@@ -5890,3 +5890,244 @@ async fn dispatch_fix_agent_success() {
     assert!(!handle.tmux_window.is_empty());
     assert!(!handle.worktree.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// dispatch_task tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn dispatch_task_dispatches_backlog_task() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l (literal text / write prompt file)
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task(
+            "My Backlog Task",
+            "do the thing",
+            &repo_path,
+            Some("docs/plan.md"),
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    // Pre-create worktree dir (mocked git won't create it)
+    std::fs::create_dir_all(
+        dir.path()
+            .join(".worktrees")
+            .join(format!("{}-my-backlog-task", task_id.0)),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("dispatched"),
+        "Expected 'dispatched' in response, got: {text}"
+    );
+
+    // dispatch_task is synchronous — no sleep needed
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    assert!(task.worktree.is_some(), "worktree should be set after dispatch");
+    assert!(
+        task.tmux_window.is_some(),
+        "tmux_window should be set after dispatch"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_task_returns_error_for_non_backlog_task() {
+    let state = test_state();
+    let task_id = state
+        .db
+        .create_task(
+            "Running Task",
+            "already running",
+            "/repo",
+            None,
+            TaskStatus::Running,
+            "main",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    assert_error(&resp, "not in backlog");
+}
+
+#[tokio::test]
+async fn dispatch_task_unknown_task_id_returns_error() {
+    let state = test_state();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": 9999 }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_some(), "expected error for unknown task_id 9999");
+}
+
+#[tokio::test]
+async fn dispatch_task_respects_tag_routing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l (literal text / write prompt file)
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    // Feature-tagged task with no plan → should route to Plan mode
+    let task_id = db
+        .create_task(
+            "Feature Task",
+            "a new feature",
+            &repo_path,
+            None, // no plan
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Feature)),
+    )
+    .unwrap();
+
+    // Pre-create worktree dir
+    std::fs::create_dir_all(
+        dir.path()
+            .join(".worktrees")
+            .join(format!("{}-feature-task", task_id.0)),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains("dispatched"),
+        "Expected dispatch confirmation, got: {text}"
+    );
+
+    // Task should be Running — plan mode still dispatches an agent
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+}
+
+#[tokio::test]
+async fn dispatch_task_returns_error_when_dispatch_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
+    // First mock call fails (tmux new-window fails) → dispatch errors out
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail("tmux: no server running"), // tmux new-window fails
+    ]));
+    let state = Arc::new(McpState {
+        db: db.clone(),
+        notify_tx: None,
+        runner,
+    });
+
+    let task_id = db
+        .create_task(
+            "Backlog Task",
+            "will fail to dispatch",
+            &repo_path,
+            None,
+            TaskStatus::Backlog,
+            "main",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_some(), "expected error when dispatch fails");
+
+    // Task status must remain Backlog — dispatch failure must not leave it as Running
+    let task = db.get_task(task_id).unwrap().unwrap();
+    assert_eq!(
+        task.status,
+        TaskStatus::Backlog,
+        "task should remain Backlog after dispatch failure"
+    );
+}

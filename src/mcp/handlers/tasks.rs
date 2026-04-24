@@ -833,9 +833,7 @@ pub(super) fn handle_update_review_status(
             state.notify();
             if parsed.status == crate::models::ReviewAgentStatus::FindingsReady {
                 // Move the workflow item to ActionRequired so the board reflects the new state
-                if let Some(kind) =
-                    find_workflow_kind_for(&state.db, &parsed.repo, parsed.number)
-                {
+                if let Some(kind) = find_workflow_kind_for(&state.db, &parsed.repo, parsed.number) {
                     let _ = state.db.upsert_pr_workflow(
                         &parsed.repo,
                         parsed.number,

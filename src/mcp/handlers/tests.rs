@@ -4773,7 +4773,6 @@ async fn update_review_status_findings_ready_sets_action_required() {
     assert_eq!(row.sub_state.as_deref(), Some("findings_ready"));
 }
 
-
 #[tokio::test]
 async fn update_review_status_findings_ready_without_workflow_row() {
     use crate::models::{CiStatus, ReviewDecision, ReviewPr, WorkflowItemKind};
@@ -4832,10 +4831,7 @@ async fn update_review_status_findings_ready_without_workflow_row() {
         .db
         .pr_agent_status("review_prs", "acme/product", 88)
         .unwrap();
-    assert_eq!(
-        status.map(|s| s.as_db_str()),
-        Some("findings_ready")
-    );
+    assert_eq!(status.map(|s| s.as_db_str()), Some("findings_ready"));
 
     // No workflow row should exist since find_pr_workflow_kind found none
     let no_workflow = state

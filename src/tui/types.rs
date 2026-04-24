@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus,
-    SecurityAlert, SecurityWorkflowColumn, SecurityWorkflowState, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag, TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
+    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus, SecurityAlert,
+    SecurityWorkflowColumn, SecurityWorkflowState, SubStatus, Task, TaskId, TaskStatus, TaskTag,
+    TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -1097,10 +1097,13 @@ pub struct ReviewBoardState {
     pub review_flash: HashMap<PrRef, Instant>,
     pub review_agents: HashMap<PrRef, ReviewAgentHandle>,
     /// Column placement authority: (repo, number, kind) → (state, sub_state)
-    pub review_workflow_states: HashMap<WorkflowKey, (
-        crate::models::ReviewWorkflowState,
-        Option<crate::models::ReviewWorkflowSubState>,
-    )>,
+    pub review_workflow_states: HashMap<
+        WorkflowKey,
+        (
+            crate::models::ReviewWorkflowState,
+            Option<crate::models::ReviewWorkflowSubState>,
+        ),
+    >,
 }
 
 impl ReviewBoardState {
@@ -1372,10 +1375,13 @@ pub struct SecurityBoardState {
     pub review_flash: HashMap<PrRef, Instant>,
     pub dependabot: DependabotBoardState,
     pub fix_agents: HashMap<FixDispatchKey, FixAgentHandle>,
-    pub security_workflow_states: HashMap<WorkflowKey, (
-        crate::models::SecurityWorkflowState,
-        Option<crate::models::SecurityWorkflowSubState>,
-    )>,
+    pub security_workflow_states: HashMap<
+        WorkflowKey,
+        (
+            crate::models::SecurityWorkflowState,
+            Option<crate::models::SecurityWorkflowSubState>,
+        ),
+    >,
 }
 
 impl SecurityBoardState {

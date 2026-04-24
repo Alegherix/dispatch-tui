@@ -1120,19 +1120,16 @@ impl super::PrWorkflowStore for Database {
              WHERE repo = ?1 AND number = ?2 AND kind = ?3",
         )?;
         let row = stmt
-            .query_row(
-                params![repo, number, kind.as_db_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, String>(5)?,
-                    ))
-                },
-            )
+            .query_row(params![repo, number, kind.as_db_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
             .optional()?;
 
         let Some((repo, number, kind_str, state, sub_state, updated_str)) = row else {

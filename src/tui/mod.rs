@@ -1349,8 +1349,13 @@ impl App {
                 }
             }
             Message::WorkflowStatesLoaded(rows) => {
-                use crate::models::WorkflowItemKind::{CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr};
-                use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState, SecurityWorkflowState, SecurityWorkflowSubState};
+                use crate::models::WorkflowItemKind::{
+                    CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr,
+                };
+                use crate::models::{
+                    ReviewWorkflowState, ReviewWorkflowSubState, SecurityWorkflowState,
+                    SecurityWorkflowSubState,
+                };
                 // Replace maps entirely so pruned rows don't linger in memory.
                 self.review.review_workflow_states.clear();
                 self.security.security_workflow_states.clear();
@@ -1360,16 +1365,22 @@ impl App {
                         ReviewerPr | DependabotPr => {
                             let state = ReviewWorkflowState::from_db_str(&row.state)
                                 .unwrap_or(ReviewWorkflowState::Backlog);
-                            let sub = row.sub_state.as_deref()
+                            let sub = row
+                                .sub_state
+                                .as_deref()
                                 .and_then(ReviewWorkflowSubState::from_db_str);
                             self.review.review_workflow_states.insert(key, (state, sub));
                         }
                         DependabotAlert | CodeScanAlert => {
                             let state = SecurityWorkflowState::from_db_str(&row.state)
                                 .unwrap_or(SecurityWorkflowState::Backlog);
-                            let sub = row.sub_state.as_deref()
+                            let sub = row
+                                .sub_state
+                                .as_deref()
                                 .and_then(SecurityWorkflowSubState::from_db_str);
-                            self.security.security_workflow_states.insert(key, (state, sub));
+                            self.security
+                                .security_workflow_states
+                                .insert(key, (state, sub));
                         }
                     }
                 }
@@ -1379,12 +1390,24 @@ impl App {
             Message::MoveReviewItemBack => self.handle_move_review_item_back(),
             Message::MoveSecurityItemForward => self.handle_move_security_item_forward(),
             Message::MoveSecurityItemBack => self.handle_move_security_item_back(),
-            Message::ReviewWorkflowUpdated { key, state, sub_state } => {
-                self.review.review_workflow_states.insert(key, (state, sub_state));
+            Message::ReviewWorkflowUpdated {
+                key,
+                state,
+                sub_state,
+            } => {
+                self.review
+                    .review_workflow_states
+                    .insert(key, (state, sub_state));
                 vec![]
             }
-            Message::SecurityWorkflowUpdated { key, state, sub_state } => {
-                self.security.security_workflow_states.insert(key, (state, sub_state));
+            Message::SecurityWorkflowUpdated {
+                key,
+                state,
+                sub_state,
+            } => {
+                self.security
+                    .security_workflow_states
+                    .insert(key, (state, sub_state));
                 vec![]
             }
         }
@@ -2253,9 +2276,7 @@ impl App {
         }
 
         // Also refresh bot PRs data if stale (> 30s)
-        if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL)
-            && !self.review.bot.loading
-        {
+        if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.bot.loading {
             self.review.bot.loading = true;
             cmds.push(Command::FetchPrs(PrListKind::Bot));
         }
@@ -3806,9 +3827,13 @@ impl App {
             {
                 let new_sub = derive_review_sub_state(pr, sub);
                 if Some(new_sub) != sub {
-                    self.review
-                        .review_workflow_states
-                        .insert(key.clone(), (crate::models::ReviewWorkflowState::ActionRequired, Some(new_sub)));
+                    self.review.review_workflow_states.insert(
+                        key.clone(),
+                        (
+                            crate::models::ReviewWorkflowState::ActionRequired,
+                            Some(new_sub),
+                        ),
+                    );
                     cmds.push(Command::PersistReviewWorkflow {
                         key,
                         state: crate::models::ReviewWorkflowState::ActionRequired,
@@ -3823,13 +3848,12 @@ impl App {
 
     fn clamp_review_selection(&mut self) {
         let col_count = ReviewBoardMode::column_count();
-        let counts: [usize; ReviewDecision::COLUMN_COUNT] =
-            std::array::from_fn(|col| {
-                if col >= col_count {
-                    return 0;
-                }
-                self.active_prs_for_column(col).len()
-            });
+        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
+            if col >= col_count {
+                return 0;
+            }
+            self.active_prs_for_column(col).len()
+        });
         if let Some(sel) = self.review_selection_mut() {
             for (col, &count) in counts.iter().enumerate() {
                 if count == 0 {
@@ -4348,11 +4372,18 @@ impl App {
     /// Get the currently selected SecurityAlert along with its workflow kind.
     fn selected_alert_with_kind(
         &self,
-    ) -> Option<(&crate::models::SecurityAlert, crate::models::WorkflowItemKind)> {
+    ) -> Option<(
+        &crate::models::SecurityAlert,
+        crate::models::WorkflowItemKind,
+    )> {
         let alert = self.selected_security_alert()?;
         let kind = match alert.kind {
-            crate::models::AlertKind::Dependabot => crate::models::WorkflowItemKind::DependabotAlert,
-            crate::models::AlertKind::CodeScanning => crate::models::WorkflowItemKind::CodeScanAlert,
+            crate::models::AlertKind::Dependabot => {
+                crate::models::WorkflowItemKind::DependabotAlert
+            }
+            crate::models::AlertKind::CodeScanning => {
+                crate::models::WorkflowItemKind::CodeScanAlert
+            }
         };
         Some((alert, kind))
     }
@@ -4379,8 +4410,14 @@ impl App {
         if next == current {
             return vec![];
         }
-        self.review.review_workflow_states.insert(key.clone(), (next, None));
-        vec![Command::PersistReviewWorkflow { key, state: next, sub_state: None }]
+        self.review
+            .review_workflow_states
+            .insert(key.clone(), (next, None));
+        vec![Command::PersistReviewWorkflow {
+            key,
+            state: next,
+            sub_state: None,
+        }]
     }
 
     fn handle_move_review_item_back(&mut self) -> Vec<Command> {
@@ -4405,8 +4442,14 @@ impl App {
         if prev == current {
             return vec![];
         }
-        self.review.review_workflow_states.insert(key.clone(), (prev, None));
-        vec![Command::PersistReviewWorkflow { key, state: prev, sub_state: None }]
+        self.review
+            .review_workflow_states
+            .insert(key.clone(), (prev, None));
+        vec![Command::PersistReviewWorkflow {
+            key,
+            state: prev,
+            sub_state: None,
+        }]
     }
 
     fn handle_move_security_item_forward(&mut self) -> Vec<Command> {
@@ -4431,8 +4474,14 @@ impl App {
         if next == current {
             return vec![];
         }
-        self.security.security_workflow_states.insert(key.clone(), (next, None));
-        vec![Command::PersistSecurityWorkflow { key, state: next, sub_state: None }]
+        self.security
+            .security_workflow_states
+            .insert(key.clone(), (next, None));
+        vec![Command::PersistSecurityWorkflow {
+            key,
+            state: next,
+            sub_state: None,
+        }]
     }
 
     fn handle_move_security_item_back(&mut self) -> Vec<Command> {
@@ -4457,8 +4506,14 @@ impl App {
         if prev == current {
             return vec![];
         }
-        self.security.security_workflow_states.insert(key.clone(), (prev, None));
-        vec![Command::PersistSecurityWorkflow { key, state: prev, sub_state: None }]
+        self.security
+            .security_workflow_states
+            .insert(key.clone(), (prev, None));
+        vec![Command::PersistSecurityWorkflow {
+            key,
+            state: prev,
+            sub_state: None,
+        }]
     }
 
     pub(in crate::tui) fn navigate_review_row(&mut self, delta: isize) {

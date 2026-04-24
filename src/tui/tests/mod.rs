@@ -11111,7 +11111,11 @@ fn render_review_board_dependabot_shows_bot_pr_titles() {
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     app.update(Message::PrsLoaded(
         PrListKind::Bot,
-        vec![make_review_pr(42, "dependabot", ReviewDecision::ReviewRequired)],
+        vec![make_review_pr(
+            42,
+            "dependabot",
+            ReviewDecision::ReviewRequired,
+        )],
     ));
     app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -11128,7 +11132,11 @@ fn render_review_board_dependabot_shows_column_headers() {
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     app.update(Message::PrsLoaded(
         PrListKind::Bot,
-        vec![make_review_pr(42, "dependabot", ReviewDecision::ReviewRequired)],
+        vec![make_review_pr(
+            42,
+            "dependabot",
+            ReviewDecision::ReviewRequired,
+        )],
     ));
     app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -12537,10 +12545,9 @@ fn g_on_security_board_jumps_to_agent() {
         1,
         crate::models::WorkflowItemKind::DependabotAlert,
     );
-    app.security.security_workflow_states.insert(
-        key,
-        (crate::models::SecurityWorkflowState::Ongoing, None),
-    );
+    app.security
+        .security_workflow_states
+        .insert(key, (crate::models::SecurityWorkflowState::Ongoing, None));
 
     // Alert is now in Ongoing column (col 1); navigate there
     if let Some(sel) = app.security_selection_mut() {
@@ -14357,10 +14364,9 @@ fn security_board_g_jumps_to_tmux_window() {
         1,
         crate::models::WorkflowItemKind::DependabotAlert,
     );
-    app.security.security_workflow_states.insert(
-        key,
-        (crate::models::SecurityWorkflowState::Ongoing, None),
-    );
+    app.security
+        .security_workflow_states
+        .insert(key, (crate::models::SecurityWorkflowState::Ongoing, None));
 
     // Alert is now in Ongoing column (col 1); navigate there
     if let Some(sel) = app.security_selection_mut() {
@@ -14408,10 +14414,9 @@ fn security_board_capital_t_detaches_agent() {
         1,
         crate::models::WorkflowItemKind::DependabotAlert,
     );
-    app.security.security_workflow_states.insert(
-        key,
-        (crate::models::SecurityWorkflowState::Ongoing, None),
-    );
+    app.security
+        .security_workflow_states
+        .insert(key, (crate::models::SecurityWorkflowState::Ongoing, None));
 
     // Alert is now in Ongoing column (col 1); navigate there
     if let Some(sel) = app.security_selection_mut() {
@@ -15923,7 +15928,6 @@ fn make_security_dependabot_app_with_pr() -> (App, String) {
 // (dependabot approve/merge key binding tests removed — those keys now go
 //  through handle_key_security_board with the unified security board handler)
 
-
 #[test]
 fn bot_pr_repo_filter_enter_closes() {
     let (mut app, _) = make_security_dependabot_app_with_pr();
@@ -15998,7 +16002,6 @@ fn bot_pr_repo_filter_filters_prs() {
     assert_eq!(app.filtered_bot_prs().len(), 1);
     assert_eq!(app.filtered_bot_prs()[0].repo, "org/repo-a");
 }
-
 
 #[test]
 fn render_repo_path_mode_shows_all_when_buffer_empty() {
@@ -16936,8 +16939,8 @@ fn review_board_r_refreshes_even_when_agent_idle() {
 
 #[test]
 fn review_board_reviewing_agent_shows_circle_badge() {
-    use crate::models::ReviewWorkflowState;
     use super::types::WorkflowKey;
+    use crate::models::ReviewWorkflowState;
     let mut app = make_review_board_app();
     // Put PR 1 in Ongoing column so circle is shown
     let key = WorkflowKey::new(
@@ -16969,8 +16972,8 @@ fn review_board_reviewing_agent_shows_circle_badge() {
 
 #[test]
 fn review_board_reviewing_agent_badge_is_cyan() {
-    use crate::models::ReviewWorkflowState;
     use super::types::WorkflowKey;
+    use crate::models::ReviewWorkflowState;
     let mut app = make_review_board_app();
     // Put PR 1 in Ongoing column so circle is shown
     let key = WorkflowKey::new(
@@ -17011,8 +17014,8 @@ fn review_board_reviewing_agent_badge_is_cyan() {
 
 #[test]
 fn review_board_findings_ready_agent_shows_open_circle_badge() {
-    use crate::models::ReviewWorkflowState;
     use super::types::WorkflowKey;
+    use crate::models::ReviewWorkflowState;
     // FindingsReady means the agent finished — shows ○ (tmux not alive)
     let mut app = make_review_board_app();
     let key = WorkflowKey::new(
@@ -17041,8 +17044,8 @@ fn review_board_findings_ready_agent_shows_open_circle_badge() {
 
 #[test]
 fn review_board_idle_agent_shows_open_circle_badge() {
-    use crate::models::ReviewWorkflowState;
     use super::types::WorkflowKey;
+    use crate::models::ReviewWorkflowState;
     let mut app = make_review_board_app();
     // Put PR 1 in Ongoing column so circle is shown
     let key = WorkflowKey::new(
@@ -17085,7 +17088,6 @@ fn security_board_r_refreshes_security_alerts_in_alerts_mode() {
         "r in Alerts mode must not emit ReReview"
     );
 }
-
 
 // == refresh_status: text and color helper ==
 
@@ -17461,7 +17463,10 @@ fn make_reviewer_app_with_pr(
     (app, url)
 }
 
-fn make_dependabot_app_with_pr(decision: ReviewDecision, ci: crate::models::CiStatus) -> (App, String) {
+fn make_dependabot_app_with_pr(
+    decision: ReviewDecision,
+    ci: crate::models::CiStatus,
+) -> (App, String) {
     let mut pr = make_review_pr(42, "dependabot", decision);
     pr.ci_status = ci;
     let url = pr.url.clone();
@@ -17572,7 +17577,10 @@ fn review_merge_reviewer_mode_approved_ci_success_enters_confirm() {
     let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::ReviewerPr);
     app.review.review_workflow_states.insert(
         key,
-        (ReviewWorkflowState::ActionRequired, Some(ReviewWorkflowSubState::ReadyToMerge)),
+        (
+            ReviewWorkflowState::ActionRequired,
+            Some(ReviewWorkflowSubState::ReadyToMerge),
+        ),
     );
     // PR moves to ActionRequired (col 2) — navigate cursor there
     if let Some(sel) = app.review_selection_mut() {
@@ -17597,7 +17605,10 @@ fn review_merge_dependabot_mode_approved_ci_none_enters_confirm() {
     let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::DependabotPr);
     app.review.review_workflow_states.insert(
         key,
-        (ReviewWorkflowState::ActionRequired, Some(ReviewWorkflowSubState::ReadyToMerge)),
+        (
+            ReviewWorkflowState::ActionRequired,
+            Some(ReviewWorkflowSubState::ReadyToMerge),
+        ),
     );
     // PR moves to ActionRequired (col 2) — navigate cursor there
     if let Some(sel) = app.review_selection_mut() {
@@ -17636,7 +17647,10 @@ fn review_merge_confirm_y_emits_merge_command() {
     let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::ReviewerPr);
     app.review.review_workflow_states.insert(
         key,
-        (ReviewWorkflowState::ActionRequired, Some(ReviewWorkflowSubState::ReadyToMerge)),
+        (
+            ReviewWorkflowState::ActionRequired,
+            Some(ReviewWorkflowSubState::ReadyToMerge),
+        ),
     );
     // PR moves to ActionRequired (col 2) — navigate cursor there
     if let Some(sel) = app.review_selection_mut() {
@@ -17663,7 +17677,10 @@ fn review_merge_confirm_n_cancels() {
     let key = WorkflowKey::new("acme/app".into(), 42, WorkflowItemKind::ReviewerPr);
     app.review.review_workflow_states.insert(
         key,
-        (ReviewWorkflowState::ActionRequired, Some(ReviewWorkflowSubState::ReadyToMerge)),
+        (
+            ReviewWorkflowState::ActionRequired,
+            Some(ReviewWorkflowSubState::ReadyToMerge),
+        ),
     );
     // PR moves to ActionRequired (col 2) — navigate cursor there
     if let Some(sel) = app.review_selection_mut() {
@@ -18207,19 +18224,22 @@ fn security_navigation_left_clamps_at_zero() {
 
 #[test]
 fn review_board_mode_column_labels_v2() {
-    use crate::tui::types::ReviewBoardMode;
     use crate::models::ReviewWorkflowState::*;
+    use crate::tui::types::ReviewBoardMode;
 
     assert_eq!(ReviewBoardMode::column_label(Backlog), "Backlog");
     assert_eq!(ReviewBoardMode::column_label(Ongoing), "Ongoing");
-    assert_eq!(ReviewBoardMode::column_label(ActionRequired), "Action Required");
+    assert_eq!(
+        ReviewBoardMode::column_label(ActionRequired),
+        "Action Required"
+    );
     assert_eq!(ReviewBoardMode::column_label(Done), "Done");
 }
 
 #[test]
 fn workflow_states_loaded_populates_review_board() {
     use crate::db::PrWorkflowRow;
-    use crate::models::{WorkflowItemKind, ReviewWorkflowState};
+    use crate::models::{ReviewWorkflowState, WorkflowItemKind};
     use crate::tui::types::WorkflowKey;
 
     let mut app = make_app();
@@ -18241,7 +18261,7 @@ fn workflow_states_loaded_populates_review_board() {
 #[test]
 fn workflow_states_loaded_populates_security_board() {
     use crate::db::PrWorkflowRow;
-    use crate::models::{WorkflowItemKind, SecurityWorkflowState};
+    use crate::models::{SecurityWorkflowState, WorkflowItemKind};
     use crate::tui::types::WorkflowKey;
 
     let mut app = make_app();
@@ -18263,7 +18283,7 @@ fn workflow_states_loaded_populates_security_board() {
 #[test]
 fn workflow_states_loaded_clears_pruned_review_rows() {
     use crate::db::PrWorkflowRow;
-    use crate::models::{WorkflowItemKind, ReviewWorkflowState};
+    use crate::models::{ReviewWorkflowState, WorkflowItemKind};
     use crate::tui::types::WorkflowKey;
 
     let mut app = make_app();
@@ -18319,7 +18339,7 @@ fn workflow_states_loaded_clears_pruned_review_rows() {
 #[test]
 fn workflow_states_loaded_clears_pruned_security_rows() {
     use crate::db::PrWorkflowRow;
-    use crate::models::{WorkflowItemKind, SecurityWorkflowState};
+    use crate::models::{SecurityWorkflowState, WorkflowItemKind};
     use crate::tui::types::WorkflowKey;
 
     let mut app = make_app();
@@ -18372,9 +18392,9 @@ fn workflow_states_loaded_clears_pruned_security_rows() {
 
 #[test]
 fn review_workflow_updated_sets_state() {
+    use crate::models::WorkflowItemKind;
     use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState};
     use crate::tui::types::WorkflowKey;
-    use crate::models::WorkflowItemKind;
 
     let mut app = make_app();
     let key = WorkflowKey::new("org/repo".into(), 5, WorkflowItemKind::ReviewerPr);
@@ -18391,9 +18411,9 @@ fn review_workflow_updated_sets_state() {
 
 #[test]
 fn security_workflow_updated_sets_state() {
+    use crate::models::WorkflowItemKind;
     use crate::models::{SecurityWorkflowState, SecurityWorkflowSubState};
     use crate::tui::types::WorkflowKey;
-    use crate::models::WorkflowItemKind;
 
     let mut app = make_app();
     let key = WorkflowKey::new("org/repo".into(), 7, WorkflowItemKind::CodeScanAlert);
@@ -18437,7 +18457,9 @@ fn move_review_item_forward_advances_workflow_state() {
     let cmds = app.update(Message::MoveReviewItemForward);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, Ongoing);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
 
     // Now navigate to col 1 where PR 1 moved, select it, advance again
     if let Some(sel) = app.review_selection_mut() {
@@ -18447,7 +18469,9 @@ fn move_review_item_forward_advances_workflow_state() {
     let cmds = app.update(Message::MoveReviewItemForward);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, ActionRequired);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
 
     // Navigate to col 2 and advance again
     if let Some(sel) = app.review_selection_mut() {
@@ -18457,7 +18481,9 @@ fn move_review_item_forward_advances_workflow_state() {
     let cmds = app.update(Message::MoveReviewItemForward);
     let (state, _) = app.review.review_workflow_states[&key];
     assert_eq!(state, Done);
-    assert!(cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
 }
 
 #[test]
@@ -18469,7 +18495,9 @@ fn move_review_item_back_retreats_workflow_state() {
     let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
 
     // Seed the state at Done and navigate cursor to col 3
-    app.review.review_workflow_states.insert(key.clone(), (Done, None));
+    app.review
+        .review_workflow_states
+        .insert(key.clone(), (Done, None));
     if let Some(sel) = app.review_selection_mut() {
         sel.set_column(3);
         sel.set_row(3, 0);
@@ -18510,7 +18538,9 @@ fn move_review_item_forward_noop_at_done() {
     let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
 
     // Seed the state at Done and navigate cursor to col 3
-    app.review.review_workflow_states.insert(key.clone(), (Done, None));
+    app.review
+        .review_workflow_states
+        .insert(key.clone(), (Done, None));
     if let Some(sel) = app.review_selection_mut() {
         sel.set_column(3);
         sel.set_row(3, 0);
@@ -18534,7 +18564,10 @@ fn move_review_item_back_noop_at_backlog() {
 
     // State starts at Backlog (default — no entry in map)
     let cmds = app.update(Message::MoveReviewItemBack);
-    assert!(cmds.is_empty(), "Expected no commands when already at Backlog");
+    assert!(
+        cmds.is_empty(),
+        "Expected no commands when already at Backlog"
+    );
     // State should remain Backlog (not inserted into the map)
     let state = app
         .review
@@ -18574,10 +18607,8 @@ fn prs_loaded_upgrades_sub_state_to_ready_to_merge() {
     assert_eq!(sub, Some(ReviewWorkflowSubState::ReadyToMerge));
     // Should emit PersistReviewWorkflow
     assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::PersistReviewWorkflow { .. }
-        )),
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
         "Expected PersistReviewWorkflow command"
     );
 }
@@ -18591,7 +18622,8 @@ fn review_board_m_emits_move_forward() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
         "m key on review board should emit PersistReviewWorkflow (MoveReviewItemForward)"
     );
 }
@@ -18615,7 +18647,8 @@ fn review_board_shift_m_emits_move_back() {
 
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::NONE));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
         "M key on review board should emit PersistReviewWorkflow (MoveReviewItemBack)"
     );
 }
@@ -18630,12 +18663,17 @@ fn review_board_ctrl_m_noop_when_not_ready_to_merge() {
         !matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
         "ctrl+m should not trigger merge when sub_state != ReadyToMerge"
     );
-    assert!(cmds.is_empty(), "ctrl+m with no ReadyToMerge should return empty commands");
+    assert!(
+        cmds.is_empty(),
+        "ctrl+m with no ReadyToMerge should return empty commands"
+    );
 }
 
 #[test]
 fn review_board_ctrl_m_starts_merge_when_ready_to_merge() {
-    use crate::models::{ReviewDecision, ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind};
+    use crate::models::{
+        ReviewDecision, ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind,
+    };
     use crate::tui::types::WorkflowKey;
 
     let mut app = make_app();
@@ -18646,9 +18684,13 @@ fn review_board_ctrl_m_starts_merge_when_ready_to_merge() {
 
     // Seed PR #1 with ReadyToMerge sub_state (ActionRequired column = col 2)
     let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
-    app.review
-        .review_workflow_states
-        .insert(key, (ReviewWorkflowState::ActionRequired, Some(ReviewWorkflowSubState::ReadyToMerge)));
+    app.review.review_workflow_states.insert(
+        key,
+        (
+            ReviewWorkflowState::ActionRequired,
+            Some(ReviewWorkflowSubState::ReadyToMerge),
+        ),
+    );
 
     // Navigate cursor to col 2 (ActionRequired) row 0 where PR #1 now lives
     if let Some(sel) = app.review_selection_mut() {
@@ -18672,7 +18714,8 @@ fn security_board_m_emits_move_forward() {
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('m')));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::PersistSecurityWorkflow { .. })),
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistSecurityWorkflow { .. })),
         "m key on security board should emit PersistSecurityWorkflow (MoveSecurityItemForward)"
     );
 }
@@ -18696,7 +18739,8 @@ fn security_board_shift_m_emits_move_back() {
 
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::NONE));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::PersistSecurityWorkflow { .. })),
+        cmds.iter()
+            .any(|c| matches!(c, Command::PersistSecurityWorkflow { .. })),
         "M key on security board should emit PersistSecurityWorkflow (MoveSecurityItemBack)"
     );
 }
@@ -18706,14 +18750,20 @@ fn security_board_digit_1_is_noop() {
     // After removing mode switching, '1' should not switch modes
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(cmds.is_empty(), "'1' should be a noop on security board (mode switching removed)");
+    assert!(
+        cmds.is_empty(),
+        "'1' should be a noop on security board (mode switching removed)"
+    );
 }
 
 #[test]
 fn security_board_digit_2_is_noop() {
     let mut app = make_security_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert!(cmds.is_empty(), "'2' should be a noop on security board (mode switching removed)");
+    assert!(
+        cmds.is_empty(),
+        "'2' should be a noop on security board (mode switching removed)"
+    );
 }
 
 #[test]
@@ -18722,7 +18772,10 @@ fn security_board_t_is_noop() {
     let mut app = make_security_board_app();
     let kind_before = app.security.kind_filter;
     let cmds = app.handle_key(make_key(KeyCode::Char('t')));
-    assert!(cmds.is_empty(), "'t' should be a noop on security board (kind filter removed)");
+    assert!(
+        cmds.is_empty(),
+        "'t' should be a noop on security board (kind filter removed)"
+    );
     assert_eq!(
         app.security.kind_filter, kind_before,
         "'t' should not change kind_filter"

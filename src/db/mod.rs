@@ -435,17 +435,17 @@ pub trait PrWorkflowStore: Send + Sync {
     ) -> anyhow::Result<Option<crate::models::WorkflowItemKind>>;
 
     /// Delete rows where state = 'done' AND updated_at < (now - older_than).
-    fn prune_done_pr_workflows(
-        &self,
-        older_than: chrono::Duration,
-    ) -> anyhow::Result<()>;
+    fn prune_done_pr_workflows(&self, older_than: chrono::Duration) -> anyhow::Result<()>;
 }
 
 // ---------------------------------------------------------------------------
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
-pub trait TaskStore: TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore {}
+pub trait TaskStore:
+    TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore
+{
+}
 
 impl<T: TaskAndEpicStore + PrStore + AlertStore + SettingsStore + PrWorkflowStore> TaskStore for T {}
 

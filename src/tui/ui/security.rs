@@ -172,16 +172,18 @@ pub fn render_security_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let status = Paragraph::new(msg.to_string()).style(Style::default().fg(Color::Yellow));
         frame.render_widget(status, chunks[5]);
     } else if let Some(err) = app.last_security_error() {
-        let status =
-            Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
+        let status = Paragraph::new(format!("Error: {err}")).style(Style::default().fg(Color::Red));
         frame.render_widget(status, chunks[5]);
     } else {
         let has_alert = app.selected_security_alert().is_some();
         let agent_status = app
             .selected_security_alert()
             .and_then(|a| app.alert_agent(a).map(|h| h.status));
-        let hints =
-            Paragraph::new(Line::from(security_action_hints(app, has_alert, agent_status)));
+        let hints = Paragraph::new(Line::from(security_action_hints(
+            app,
+            has_alert,
+            agent_status,
+        )));
         frame.render_widget(hints, chunks[5]);
     }
 
@@ -438,15 +440,24 @@ pub(in crate::tui::ui) fn build_security_alert_item(
         Style::default().fg(FG)
     };
 
-    let mut spans1: Vec<Span> = vec![Span::styled(stripe.to_string(), Style::default().fg(stripe_color))];
+    let mut spans1: Vec<Span> = vec![Span::styled(
+        stripe.to_string(),
+        Style::default().fg(stripe_color),
+    )];
     if !circle_text.is_empty() {
-        spans1.push(Span::styled(circle_text.to_string(), Style::default().fg(circle_color)));
+        spans1.push(Span::styled(
+            circle_text.to_string(),
+            Style::default().fg(circle_color),
+        ));
     }
     spans1.push(Span::styled(
         format!("{number_prefix}{title_truncated}"),
         line1_style,
     ));
-    spans1.push(Span::styled(kind_badge.to_string(), Style::default().fg(kind_color)));
+    spans1.push(Span::styled(
+        kind_badge.to_string(),
+        Style::default().fg(kind_color),
+    ));
     let line1 = Line::from(spans1);
 
     // Line 2: severity badge + package + CVSS + age
@@ -679,4 +690,3 @@ fn render_security_filter_overlay_inner(
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
 }
-

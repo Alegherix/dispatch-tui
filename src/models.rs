@@ -793,7 +793,12 @@ pub enum ReviewWorkflowState {
 
 impl ReviewWorkflowState {
     pub const COLUMN_COUNT: usize = 4;
-    pub const ALL: [Self; 4] = [Self::Backlog, Self::Ongoing, Self::ActionRequired, Self::Done];
+    pub const ALL: [Self; 4] = [
+        Self::Backlog,
+        Self::Ongoing,
+        Self::ActionRequired,
+        Self::Done,
+    ];
 
     pub fn as_db_str(self) -> &'static str {
         match self {
@@ -2909,8 +2914,14 @@ mod security_tests {
     fn review_workflow_sub_state_roundtrip() {
         use ReviewWorkflowSubState::*;
         for s in [
-            Reviewing, Idle, Stale, FindingsReady, ChangesRequested, AwaitingResponse,
-            CiFailing, ReadyToMerge,
+            Reviewing,
+            Idle,
+            Stale,
+            FindingsReady,
+            ChangesRequested,
+            AwaitingResponse,
+            CiFailing,
+            ReadyToMerge,
         ] {
             let db_str = s.as_db_str();
             assert_eq!(ReviewWorkflowSubState::from_db_str(db_str), Some(s));
@@ -2931,7 +2942,10 @@ mod security_tests {
         use ReviewWorkflowState::*;
         assert_eq!(ReviewWorkflowState::COLUMN_COUNT, 4);
         assert_eq!(ReviewWorkflowState::ALL.len(), 4);
-        assert_eq!(ReviewWorkflowState::COLUMN_COUNT, ReviewWorkflowState::ALL.len());
+        assert_eq!(
+            ReviewWorkflowState::COLUMN_COUNT,
+            ReviewWorkflowState::ALL.len()
+        );
         // Verify that the 4 variants are in the ALL array
         let all_states = ReviewWorkflowState::ALL.to_vec();
         assert!(all_states.contains(&Backlog));
@@ -2945,7 +2959,10 @@ mod security_tests {
         use SecurityWorkflowState::*;
         assert_eq!(SecurityWorkflowState::COLUMN_COUNT, 4);
         assert_eq!(SecurityWorkflowState::ALL.len(), 4);
-        assert_eq!(SecurityWorkflowState::COLUMN_COUNT, SecurityWorkflowState::ALL.len());
+        assert_eq!(
+            SecurityWorkflowState::COLUMN_COUNT,
+            SecurityWorkflowState::ALL.len()
+        );
         // Verify that the 4 variants are in the ALL array
         let all_states = SecurityWorkflowState::ALL.to_vec();
         assert!(all_states.contains(&Backlog));
@@ -2974,8 +2991,15 @@ mod security_tests {
     fn security_workflow_sub_state_roundtrip() {
         use SecurityWorkflowSubState::*;
         for s in [
-            Investigating, Idle, Stale, FindingsReady, NeedsManualFix, PrOpen,
-            ChangesRequested, CiFailing, ReadyToMerge,
+            Investigating,
+            Idle,
+            Stale,
+            FindingsReady,
+            NeedsManualFix,
+            PrOpen,
+            ChangesRequested,
+            CiFailing,
+            ReadyToMerge,
         ] {
             let db_str = s.as_db_str();
             assert_eq!(SecurityWorkflowSubState::from_db_str(db_str), Some(s));

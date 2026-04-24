@@ -8,7 +8,7 @@ use crate::models::{
     format_age, CiStatus, ReviewDecision, ReviewPr, ReviewWorkflowState, ReviewWorkflowSubState,
     Staleness,
 };
-use crate::tui::types::{WorkflowKey};
+use crate::tui::types::WorkflowKey;
 use crate::tui::{App, InputMode, ReviewBoardMode, ViewMode};
 use chrono::Utc;
 use ratatui::{
@@ -185,7 +185,10 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         ViewMode::ReviewBoard {
             mode: ReviewBoardMode::Dependabot,
             ..
-        } => (app.review_bot_prs_last_fetch(), app.review_bot_prs_loading()),
+        } => (
+            app.review_bot_prs_last_fetch(),
+            app.review_bot_prs_loading(),
+        ),
         _ => (app.review_last_fetch(), app.review_board_loading()),
     };
     let (status_text, status_color) =
@@ -240,17 +243,23 @@ pub fn render_review_board(frame: &mut Frame, app: &mut App, area: Rect) {
         let agent_status = app
             .selected_review_pr()
             .and_then(|pr| app.pr_agent(pr).map(|h| h.status));
-        let ready_to_merge = app.selected_review_pr().map(|pr| {
-            let kind = match app.view_mode() {
-                ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
-                _ => return false,
-            };
-            let key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
-            matches!(
-                app.review.review_workflow_states.get(&key),
-                Some((ReviewWorkflowState::ActionRequired, Some(ReviewWorkflowSubState::ReadyToMerge)))
-            )
-        }).unwrap_or(false);
+        let ready_to_merge = app
+            .selected_review_pr()
+            .map(|pr| {
+                let kind = match app.view_mode() {
+                    ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
+                    _ => return false,
+                };
+                let key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
+                matches!(
+                    app.review.review_workflow_states.get(&key),
+                    Some((
+                        ReviewWorkflowState::ActionRequired,
+                        Some(ReviewWorkflowSubState::ReadyToMerge)
+                    ))
+                )
+            })
+            .unwrap_or(false);
         let hints = Paragraph::new(Line::from(review_action_hints(
             has_pr,
             agent_status,
@@ -315,9 +324,7 @@ fn render_review_detail(frame: &mut Frame, app: &App, area: Rect) {
     let line1 = Line::from(vec![
         Span::styled(
             format!("{}#{} {}", pr.repo, pr.number, pr.title),
-            Style::default()
-                .fg(col_color)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(col_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  CI: {} {ci_label}", pr.ci_status.symbol()),
@@ -401,16 +408,19 @@ fn render_review_summary_row(frame: &mut Frame, app: &App, area: Rect) {
 
     for i in 0..col_count {
         let wf_state = workflow_states[i];
-        let count = filtered.iter().filter(|pr| {
-            let key = WorkflowKey::new(pr.repo.clone(), pr.number, mode_kind);
-            let (state, _) = app
-                .review
-                .review_workflow_states
-                .get(&key)
-                .copied()
-                .unwrap_or((ReviewWorkflowState::Backlog, None));
-            state == wf_state
-        }).count();
+        let count = filtered
+            .iter()
+            .filter(|pr| {
+                let key = WorkflowKey::new(pr.repo.clone(), pr.number, mode_kind);
+                let (state, _) = app
+                    .review
+                    .review_workflow_states
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((ReviewWorkflowState::Backlog, None));
+                state == wf_state
+            })
+            .count();
         let is_focused = i == selected_col;
         let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
         let col_label = ReviewBoardMode::column_label(wf_state);
@@ -522,7 +532,10 @@ fn render_review_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             let agent_status = app.pr_agent(pr).map(|h| h.status);
             // Circle reflects whether a tmux window exists for this PR, not the agent's logical status.
             // Filled (◉) if session is live, empty (○) if not.
-            let tmux_alive = app.pr_agent(pr).map(|h| !h.tmux_window.is_empty()).unwrap_or(false);
+            let tmux_alive = app
+                .pr_agent(pr)
+                .map(|h| !h.tmux_window.is_empty())
+                .unwrap_or(false);
             list_items.push(build_review_pr_item(
                 pr,
                 wf_state,
@@ -579,13 +592,14 @@ pub(in crate::tui::ui) fn build_review_pr_item(
     let stripe = if is_cursor { "\u{258c} " } else { "\u{258e} " };
 
     // Circle indicator (omitted in Backlog)
-    let (circle_text, circle_color): (&'static str, Color) = if state == ReviewWorkflowState::Backlog {
-        ("", Color::Reset)
-    } else if tmux_alive {
-        ("\u{25c9} ", CYAN) // ◉
-    } else {
-        ("\u{25cb} ", Color::DarkGray) // ○
-    };
+    let (circle_text, circle_color): (&'static str, Color) =
+        if state == ReviewWorkflowState::Backlog {
+            ("", Color::Reset)
+        } else if tmux_alive {
+            ("\u{25c9} ", CYAN) // ◉
+        } else {
+            ("\u{25cb} ", Color::DarkGray) // ○
+        };
 
     // CI dot
     let ci_dot_color = match pr.ci_status {
@@ -616,9 +630,15 @@ pub(in crate::tui::ui) fn build_review_pr_item(
     };
 
     let _ = agent_status; // circle already encodes running state via tmux_alive
-    let mut spans1: Vec<Span> = vec![Span::styled(stripe.to_string(), Style::default().fg(col_color))];
+    let mut spans1: Vec<Span> = vec![Span::styled(
+        stripe.to_string(),
+        Style::default().fg(col_color),
+    )];
     if !circle_text.is_empty() {
-        spans1.push(Span::styled(circle_text.to_string(), Style::default().fg(circle_color)));
+        spans1.push(Span::styled(
+            circle_text.to_string(),
+            Style::default().fg(circle_color),
+        ));
     }
     spans1.push(Span::styled(
         format!("{header_prefix}{title_truncated}"),
@@ -678,7 +698,10 @@ pub(in crate::tui::ui) fn build_review_pr_item(
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
-                    format!("@{} \u{b7} +{}/-{} \u{b7} ", pr.author, pr.additions, pr.deletions),
+                    format!(
+                        "@{} \u{b7} +{}/-{} \u{b7} ",
+                        pr.author, pr.additions, pr.deletions
+                    ),
                     meta_style,
                 ),
                 Span::styled(age, Style::default().fg(age_color)),
@@ -694,4 +717,3 @@ pub(in crate::tui::ui) fn build_review_pr_item(
 
     ListItem::new(vec![line1, line2]).style(Style::default().bg(bg))
 }
-

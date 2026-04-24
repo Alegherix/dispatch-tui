@@ -765,7 +765,11 @@ async fn execute_commands(
                     tracing::warn!("Failed to save tips state: {e:#}");
                 }
             }
-            Command::PersistReviewWorkflow { key, state, sub_state } => {
+            Command::PersistReviewWorkflow {
+                key,
+                state,
+                sub_state,
+            } => {
                 let state_str = state.as_db_str().to_string();
                 let sub_str = sub_state.map(|s| s.as_db_str().to_string());
                 if let Err(e) = rt.database.upsert_pr_workflow(
@@ -778,7 +782,11 @@ async fn execute_commands(
                     tracing::error!("Failed to persist review workflow state: {e}");
                 }
             }
-            Command::PersistSecurityWorkflow { key, state, sub_state } => {
+            Command::PersistSecurityWorkflow {
+                key,
+                state,
+                sub_state,
+            } => {
                 let state_str = state.as_db_str().to_string();
                 let sub_str = sub_state.map(|s| s.as_db_str().to_string());
                 if let Err(e) = rt.database.upsert_pr_workflow(

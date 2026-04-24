@@ -1188,6 +1188,32 @@ rule DispatchNextViaMcp {
         -- not block dispatch; the flag defaults to treated-as-true on
         -- read failure (fail-open). Returns success immediately; the
         -- dispatch runs in the background via spawn_blocking.
+        -- Internally delegates to the same dispatch logic as DispatchTaskViaMcp.
+}
+
+rule DispatchTaskViaMcp {
+    when: McpDispatchTask(task)
+
+    requires: task.status = backlog
+
+    ensures:
+        let mode = DispatchMode.for_task(task)
+        if mode = dispatch:
+            DispatchTask(task)
+        else if mode = brainstorm:
+            BrainstormTask(task)
+        else if mode = plan:
+            PlanTask(task)
+
+    @guidance
+        -- Returns an error if task.status != backlog.
+        -- Routes to the appropriate dispatch mode based on tag and plan presence,
+        -- identical to DispatchNextViaMcp but targeting a specific task by ID.
+        -- Unlike DispatchNextViaMcp, this call is synchronous: it waits for
+        -- worktree creation and agent launch to complete before returning.
+        -- On success, the worktree path and tmux window are returned to the caller.
+        -- On failure (e.g. worktree creation or tmux launch error), the error is
+        -- returned immediately and the task remains in backlog status.
 }
 
 rule SwapSplitPane {

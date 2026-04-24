@@ -11509,6 +11509,75 @@ fn security_alerts_for_column_sorts_by_repo() {
 }
 
 #[test]
+fn security_alerts_for_column_sorts_by_severity_within_sub_state() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
+    // Loaded in reverse severity order to prove the sort works.
+    app.update(Message::SecurityAlertsLoaded(vec![
+        make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Low),
+        make_security_alert(2, "org/beta", crate::models::AlertSeverity::Medium),
+        make_security_alert(3, "org/gamma", crate::models::AlertSeverity::High),
+        make_security_alert(4, "org/delta", crate::models::AlertSeverity::Critical),
+    ]));
+
+    // All alerts land in Backlog (col 0). Highest severity should be first.
+    let alerts = app.security_alerts_for_column(0);
+    assert_eq!(alerts.len(), 4);
+    assert_eq!(alerts[0].repo, "org/delta", "Critical should be first");
+    assert_eq!(alerts[1].repo, "org/gamma", "High should be second");
+    assert_eq!(alerts[2].repo, "org/beta", "Medium should be third");
+    assert_eq!(alerts[3].repo, "org/alpha", "Low should be fourth");
+}
+
+#[test]
+fn security_alerts_for_column_cvss_breaks_severity_tie() {
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
+    // Two Critical alerts, different CVSS scores. Higher CVSS should come first.
+    let high_cvss = crate::models::SecurityAlert {
+        number: 1,
+        repo: "org/zebra".to_string(),
+        severity: crate::models::AlertSeverity::Critical,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "High CVSS".to_string(),
+        package: Some("pkg".to_string()),
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: Some(9.8),
+        url: "https://github.com/org/zebra/security/dependabot/1".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
+    };
+    let low_cvss = crate::models::SecurityAlert {
+        number: 2,
+        repo: "org/alpha".to_string(), // alphabetically first, but lower CVSS
+        severity: crate::models::AlertSeverity::Critical,
+        kind: crate::models::AlertKind::Dependabot,
+        title: "Low CVSS".to_string(),
+        package: Some("pkg".to_string()),
+        vulnerable_range: None,
+        fixed_version: None,
+        cvss_score: Some(4.3),
+        url: "https://github.com/org/alpha/security/dependabot/2".to_string(),
+        created_at: chrono::Utc::now(),
+        state: "open".to_string(),
+        description: String::new(),
+    };
+    app.update(Message::SecurityAlertsLoaded(vec![low_cvss, high_cvss]));
+
+    let alerts = app.security_alerts_for_column(0);
+    assert_eq!(alerts.len(), 2);
+    assert_eq!(
+        alerts[0].repo, "org/zebra",
+        "Higher CVSS (9.8) should be first despite later repo name"
+    );
+    assert_eq!(alerts[1].repo, "org/alpha", "Lower CVSS (4.3) should be second");
+}
+
+#[test]
 fn selected_security_alert_agrees_with_sorted_order() {
     let mut app = make_app();
     app.update(Message::SwitchToSecurityBoard);

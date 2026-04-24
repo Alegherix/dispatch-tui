@@ -69,6 +69,24 @@ fn snapshot_security_board() {
 }
 
 #[test]
+fn snapshot_security_board_severity_order() {
+    use super::super::types::Message;
+    use crate::tui::types::SecurityBoardMode;
+    let mut app = make_app();
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
+    // Loaded in reverse severity order — Critical should render at the top.
+    app.update(Message::SecurityAlertsLoaded(vec![
+        super::make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Low),
+        super::make_security_alert(2, "org/beta", crate::models::AlertSeverity::Medium),
+        super::make_security_alert(3, "org/gamma", crate::models::AlertSeverity::High),
+        super::make_security_alert(4, "org/delta", crate::models::AlertSeverity::Critical),
+    ]));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_help_overlay() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('?')));

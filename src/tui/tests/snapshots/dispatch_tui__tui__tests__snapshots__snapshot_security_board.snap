@@ -7,10 +7,10 @@ expression: rendered
 Updated 0s ago  [r] refresh
 ▌ #1 Alert 1 [DEP]
   [CRIT] some-pkg · <1h
-▎ #2 Alert 2 [DEP]
-  [HIGH] some-pkg · <1h
 ▎ #3 Alert 3 [DEP]
   [CRIT] some-pkg · <1h
+▎ #2 Alert 2 [DEP]
+  [HIGH] some-pkg · <1h
 
 
 

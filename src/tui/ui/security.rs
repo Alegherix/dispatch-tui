@@ -277,6 +277,24 @@ fn render_security_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+fn sort_security_alerts(
+    alerts: &mut Vec<(&SecurityAlert, Option<SecurityWorkflowSubState>)>,
+) {
+    alerts.sort_by(|(a, a_sub), (b, b_sub)| {
+        security_sub_state_sort_key(*a_sub)
+            .cmp(&security_sub_state_sort_key(*b_sub))
+            .then(a.severity.column_index().cmp(&b.severity.column_index()))
+            .then_with(|| {
+                b.cvss_score
+                    .unwrap_or(0.0)
+                    .partial_cmp(&a.cvss_score.unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then(a.repo.cmp(&b.repo))
+            .then(a.number.cmp(&b.number))
+    });
+}
+
 fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let sel_col = app.security_selection().map(|s| s.column()).unwrap_or(0);
     let col_count = 4usize;
@@ -316,13 +334,7 @@ fn render_security_columns(frame: &mut Frame, app: &mut App, area: Rect) {
             })
             .collect();
 
-        // Sort by sub-state, then repo, then number
-        col_alerts.sort_by(|(a, a_sub), (b, b_sub)| {
-            security_sub_state_sort_key(*a_sub)
-                .cmp(&security_sub_state_sort_key(*b_sub))
-                .then(a.repo.cmp(&b.repo))
-                .then(a.number.cmp(&b.number))
-        });
+        sort_security_alerts(&mut col_alerts);
 
         let selected_row = app.security_selection().map(|s| s.row(i)).unwrap_or(0);
         let mut list_items: Vec<ListItem> = Vec::new();

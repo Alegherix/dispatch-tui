@@ -475,7 +475,19 @@ impl App {
                 state == wf_state
             })
             .collect();
-        alerts.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.number.cmp(&b.number)));
+        alerts.sort_by(|a, b| {
+            a.severity
+                .column_index()
+                .cmp(&b.severity.column_index())
+                .then_with(|| {
+                    b.cvss_score
+                        .unwrap_or(0.0)
+                        .partial_cmp(&a.cvss_score.unwrap_or(0.0))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then(a.repo.cmp(&b.repo))
+                .then(a.number.cmp(&b.number))
+        });
         alerts
     }
 

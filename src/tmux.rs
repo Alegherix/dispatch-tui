@@ -15,6 +15,29 @@ pub fn new_window(name: &str, working_dir: &str, runner: &dyn ProcessRunner) -> 
     Ok(())
 }
 
+/// Create a new tmux window running the given command as separate argv
+/// elements (no shell wrapping). When the command exits, the window closes.
+///
+/// `-d` keeps current focus; callers use [`select_window`] afterwards to
+/// switch to the new window if desired.
+pub fn new_window_running(
+    name: &str,
+    working_dir: &str,
+    command: &[&str],
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    if command.is_empty() {
+        bail!("new_window_running: command must not be empty");
+    }
+    let mut args: Vec<&str> = vec!["new-window", "-d", "-n", name, "-c", working_dir, "--"];
+    args.extend(command.iter().copied());
+    let output = runner.run("tmux", &args)?;
+    if !output.status.success() {
+        bail!("tmux new-window failed with status {}", output.status);
+    }
+    Ok(())
+}
+
 /// Send literal text to a tmux window, then press Enter.
 ///
 /// Uses `-l` to prevent tmux from interpreting escape sequences in the text.
@@ -592,6 +615,63 @@ mod tests {
             calls[0].1,
             vec!["new-window", "-d", "-n", "task-42", "-c", "/some/path"]
         );
+    }
+
+    #[test]
+    fn new_window_running_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        new_window_running("dispatch-edit-1", "/home/u", &["vim", "/tmp/foo.md"], &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "new-window",
+                "-d",
+                "-n",
+                "dispatch-edit-1",
+                "-c",
+                "/home/u",
+                "--",
+                "vim",
+                "/tmp/foo.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn new_window_running_keeps_argv_elements_separate() {
+        // A path with spaces must be passed as its own argv element, not
+        // joined into a single shell string. This is why we use the `--`
+        // exec form rather than `send-keys` with a concatenated command.
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        new_window_running(
+            "edit-1",
+            "/tmp",
+            &["vim", "/tmp/dir with spaces/file.md"],
+            &mock,
+        )
+        .unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[0].1.last().unwrap(), "/tmp/dir with spaces/file.md");
+        // and the preceding element is the exec separator + program
+        assert_eq!(calls[0].1[calls[0].1.len() - 3], "--");
+        assert_eq!(calls[0].1[calls[0].1.len() - 2], "vim");
+    }
+
+    #[test]
+    fn new_window_running_rejects_empty_command() {
+        let mock = MockProcessRunner::new(vec![]);
+        let err = new_window_running("n", "/tmp", &[], &mock).unwrap_err();
+        assert!(err.to_string().contains("command must not be empty"));
+    }
+
+    #[test]
+    fn new_window_running_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("bad")]);
+        let err = new_window_running("n", "/tmp", &["vim", "f"], &mock).unwrap_err();
+        assert!(err.to_string().contains("new-window failed"));
     }
 
     #[test]

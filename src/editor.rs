@@ -87,6 +87,96 @@ pub fn format_editor_content(task: &Task) -> String {
     )
 }
 
+/// Result of merging editor output with an existing [`Task`]. Empty string
+/// fields are replaced with the task's prior values; empty plan/tag fields
+/// clear the field. Invalid status strings fall back to the task's prior
+/// status. Empty base_branch preserves the prior value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskEditApplied {
+    pub title: String,
+    pub description: String,
+    pub repo_path: String,
+    pub status: crate::models::TaskStatus,
+    pub plan_path: Option<String>,
+    pub tag: Option<crate::models::TaskTag>,
+    pub base_branch: Option<String>,
+}
+
+/// Apply parsed editor fields on top of the task's existing values using
+/// the rules documented in `tasks.allium::EditTask`.
+pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditApplied {
+    let title = if fields.title.is_empty() {
+        task.title.clone()
+    } else {
+        fields.title
+    };
+    let description = if fields.description.is_empty() {
+        task.description.clone()
+    } else {
+        fields.description
+    };
+    let repo_path = if fields.repo_path.is_empty() {
+        task.repo_path.clone()
+    } else {
+        fields.repo_path
+    };
+    let status = crate::models::TaskStatus::parse(&fields.status).unwrap_or(task.status);
+    let plan_path = if fields.plan.is_empty() {
+        None
+    } else {
+        Some(fields.plan)
+    };
+    let tag = if fields.tag.is_empty() {
+        None
+    } else {
+        crate::models::TaskTag::parse(&fields.tag)
+    };
+    let base_branch = if fields.base_branch.is_empty() {
+        None
+    } else {
+        Some(fields.base_branch)
+    };
+    TaskEditApplied {
+        title,
+        description,
+        repo_path,
+        status,
+        plan_path,
+        tag,
+        base_branch,
+    }
+}
+
+/// Result of merging editor output with an existing [`Epic`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpicEditApplied {
+    pub title: String,
+    pub description: String,
+    pub repo_path: String,
+}
+
+/// Apply parsed epic editor fields on top of the epic's existing values.
+/// Empty fields preserve the prior value.
+pub fn apply_epic_editor_fields(epic: &Epic, fields: EpicEditorFields) -> EpicEditApplied {
+    EpicEditApplied {
+        title: if fields.title.is_empty() {
+            epic.title.clone()
+        } else {
+            fields.title
+        },
+        description: if fields.description.is_empty() {
+            epic.description.clone()
+        } else {
+            fields.description
+        },
+        repo_path: if fields.repo_path.is_empty() {
+            epic.repo_path.clone()
+        } else {
+            fields.repo_path
+        },
+    }
+}
+
 pub fn parse_editor_content(input: &str) -> EditorFields {
     let mut s = parse_sections(input);
     EditorFields {
@@ -315,5 +405,185 @@ mod tests {
             // parse_editor_content should never panic on arbitrary input
             let _ = parse_editor_content(&input);
         }
+    }
+
+    // --- apply_task_editor_fields -----------------------------------------
+
+    fn sample_task() -> Task {
+        let mut t = make_task(
+            "Original title",
+            "Original description",
+            "/orig/repo",
+            TaskStatus::Running,
+            Some("docs/plan.md"),
+        );
+        t.tag = Some(crate::models::TaskTag::Bug);
+        t.base_branch = "develop".to_string();
+        t
+    }
+
+    #[test]
+    fn apply_task_editor_fields_roundtrip() {
+        let task = sample_task();
+        let content = format_editor_content(&task);
+        let fields = parse_editor_content(&content);
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.title, task.title);
+        assert_eq!(applied.description, task.description);
+        assert_eq!(applied.repo_path, task.repo_path);
+        assert_eq!(applied.status, task.status);
+        assert_eq!(applied.plan_path.as_deref(), task.plan_path.as_deref());
+        assert_eq!(applied.tag, task.tag);
+        assert_eq!(
+            applied.base_branch.as_deref(),
+            Some(task.base_branch.as_str())
+        );
+    }
+
+    #[test]
+    fn apply_task_empty_title_preserves_prior() {
+        let task = sample_task();
+        let fields = EditorFields {
+            title: String::new(),
+            description: "New desc".into(),
+            repo_path: String::new(),
+            status: String::new(),
+            plan: String::new(),
+            tag: String::new(),
+            base_branch: String::new(),
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.title, "Original title");
+        assert_eq!(applied.description, "New desc");
+        // empty repo_path preserves prior
+        assert_eq!(applied.repo_path, "/orig/repo");
+    }
+
+    #[test]
+    fn apply_task_empty_plan_clears_plan() {
+        let task = sample_task();
+        assert!(task.plan_path.is_some());
+        let fields = EditorFields {
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            status: String::new(),
+            plan: String::new(),
+            tag: "bug".into(),
+            base_branch: String::new(),
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert!(applied.plan_path.is_none(), "empty plan should clear plan");
+    }
+
+    #[test]
+    fn apply_task_empty_tag_clears_tag() {
+        let task = sample_task();
+        let fields = EditorFields {
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            status: String::new(),
+            plan: String::new(),
+            tag: String::new(),
+            base_branch: String::new(),
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert!(applied.tag.is_none());
+    }
+
+    #[test]
+    fn apply_task_invalid_status_preserves_prior() {
+        let task = sample_task();
+        let fields = EditorFields {
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            status: "nonsense".into(),
+            plan: String::new(),
+            tag: String::new(),
+            base_branch: String::new(),
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.status, task.status);
+    }
+
+    #[test]
+    fn apply_task_invalid_tag_clears_tag() {
+        let task = sample_task();
+        let fields = EditorFields {
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            status: String::new(),
+            plan: String::new(),
+            tag: "not-a-real-tag".into(),
+            base_branch: String::new(),
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        // parse returns None → applied.tag = None. Documented behaviour.
+        assert!(applied.tag.is_none());
+    }
+
+    #[test]
+    fn apply_task_empty_base_branch_preserves_prior() {
+        let task = sample_task();
+        let fields = EditorFields {
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            status: String::new(),
+            plan: String::new(),
+            tag: String::new(),
+            base_branch: String::new(),
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        // When the field is "" we preserve by returning None so the DB
+        // patch does not touch it. The runtime's merger then keeps the
+        // prior value.
+        assert!(applied.base_branch.is_none());
+    }
+
+    #[test]
+    fn apply_task_unchanged_content_yields_same_task() {
+        // Regression guard: if a user opens the editor and closes without
+        // changes, the applied result must equal the original task's values.
+        let task = sample_task();
+        let content = format_editor_content(&task);
+        let fields = parse_editor_content(&content);
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.title, task.title);
+        assert_eq!(applied.description, task.description);
+        assert_eq!(applied.repo_path, task.repo_path);
+        assert_eq!(applied.status, task.status);
+        assert_eq!(applied.plan_path, task.plan_path);
+        assert_eq!(applied.tag, task.tag);
+    }
+
+    // --- apply_epic_editor_fields -----------------------------------------
+
+    #[test]
+    fn apply_epic_editor_fields_roundtrip() {
+        let epic = make_epic("E title", "E desc", "/repo");
+        let content = format_epic_for_editor(&epic);
+        let fields = parse_epic_editor_output(&content);
+        let applied = apply_epic_editor_fields(&epic, fields);
+        assert_eq!(applied.title, epic.title);
+        assert_eq!(applied.description, epic.description);
+        assert_eq!(applied.repo_path, epic.repo_path);
+    }
+
+    #[test]
+    fn apply_epic_empty_fields_preserve_prior() {
+        let epic = make_epic("E title", "E desc", "/repo");
+        let fields = EpicEditorFields {
+            title: String::new(),
+            description: "new desc".into(),
+            repo_path: String::new(),
+        };
+        let applied = apply_epic_editor_fields(&epic, fields);
+        assert_eq!(applied.title, "E title");
+        assert_eq!(applied.description, "new desc");
+        assert_eq!(applied.repo_path, "/repo");
     }
 }

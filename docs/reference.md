@@ -19,7 +19,7 @@
 |-----|--------|
 | `n` | New task |
 | `c` | Copy selected task |
-| `e` | Edit task in editor |
+| `e` | Edit task in editor (opens in a separate tmux window) |
 | `d` | Dispatch agent — behavior depends on tag (see README) / resume (Running task whose window is gone) |
 | `D` | Quick dispatch — pick repo and dispatch immediately |
 | `m` / `M` | Move task forward / backward |
@@ -78,7 +78,7 @@ Press `Tab` to switch to the Review Board, which shows GitHub PRs where you are 
 
 Three columns: **Needs Review** → **Changes Requested** → **Approved**
 
-Press `e` to edit the GitHub search queries for the current tab in `$EDITOR`. Each line is a separate GitHub search query. Queries are stored per-category (Review PRs, My PRs, Bot PRs) and persist across sessions.
+Press `e` to edit the GitHub search queries for the current tab in `$EDITOR`. Each line is a separate GitHub search query. Queries are stored per-category (Review PRs, My PRs, Bot PRs) and persist across sessions. The editor opens in a separate tmux window so the board stays navigable while you edit; save and quit to return.
 
 **Bot PRs tip:** The default bot queries have no org scope, so results may be dominated by public repos. Add `org:your-org` to scope them (e.g. `is:pr is:open author:app/dependabot -is:draft archived:false org:my-org`).
 

@@ -1,8 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
-    App, ColumnItem, Command, FixAgentRequest, InputMode, Message, MoveDirection, PrListKind,
-    ReviewAgentRequest, ReviewBoardMode, ViewMode,
+    App, ColumnItem, Command, EditKind, FixAgentRequest, InputMode, Message, MoveDirection,
+    PrListKind, ReviewAgentRequest, ReviewBoardMode, ViewMode,
 };
 use crate::models::{
     DispatchMode, EpicId, ReviewDecision, SubStatus, TaskId, TaskStatus, TaskTag, TipsShowMode,
@@ -795,7 +795,7 @@ impl App {
     fn handle_key_confirm_edit_task(&mut self, key: KeyEvent, id: TaskId) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             if let Some(task) = s.board.tasks.iter().find(|t| t.id == id) {
-                vec![Command::EditTaskInEditor(task.clone())]
+                vec![Command::PopOutEditor(EditKind::TaskEdit(task.clone()))]
             } else {
                 vec![]
             }
@@ -905,7 +905,7 @@ impl App {
             KeyCode::Char('M') => self.update(Message::MoveSecurityItemBack),
 
             KeyCode::Char('r') => self.update(Message::RefreshSecurityAlerts),
-            KeyCode::Char('e') => vec![Command::EditSecurityQueries],
+            KeyCode::Char('e') => vec![Command::PopOutEditor(EditKind::SecurityQueries)],
             KeyCode::Char('f') => self.update(Message::StartSecurityRepoFilter),
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
 
@@ -1080,7 +1080,7 @@ impl App {
                         ReviewBoardMode::Reviewer => PrListKind::Review,
                         ReviewBoardMode::Dependabot => PrListKind::Bot,
                     };
-                    vec![Command::EditGithubQueries(kind)]
+                    vec![Command::PopOutEditor(EditKind::GithubQueries(kind))]
                 } else {
                     vec![]
                 }

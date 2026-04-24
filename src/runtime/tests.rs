@@ -68,8 +68,8 @@ fn make_runtime(
         epic_svc: crate::service::EpicService::new(db.clone()),
         database: db,
         msg_tx: tx,
-        input_paused: Arc::new(AtomicBool::new(false)),
         runner,
+        editor_session: Arc::new(std::sync::Mutex::new(None)),
     }
 }
 

@@ -1825,7 +1825,7 @@ fn e_key_confirm_y_emits_edit_task() {
     app.handle_key(make_key(KeyCode::Char('e')));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)));
+    assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::TaskEdit(t)) if t.id == TaskId(1)));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
@@ -2026,7 +2026,7 @@ fn submit_tag_advances_to_description() {
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
-        Command::OpenDescriptionEditor { is_epic: false }
+        Command::PopOutEditor(EditKind::Description { is_epic: false })
     ));
     assert_eq!(app.input.mode, InputMode::InputDescription);
     assert_eq!(
@@ -2086,6 +2086,85 @@ fn description_editor_result_multiline() {
     assert_eq!(
         app.input.task_draft.as_ref().unwrap().description,
         "Line 1\nLine 2"
+    );
+}
+
+#[test]
+fn editor_result_description_saved_advances_draft() {
+    // EditorResult{Description, Saved(raw)} must parse sections out of the
+    // raw editor output and feed the description into the existing
+    // DescriptionEditorResult flow.
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.input.mode = InputMode::InputDescription;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    app.update(Message::EditorResult {
+        kind: EditKind::Description { is_epic: false },
+        outcome: EditorOutcome::Saved("--- DESCRIPTION ---\nhello from editor\n".to_string()),
+    });
+    assert_eq!(app.input.mode, InputMode::InputRepoPath);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().description,
+        "hello from editor"
+    );
+}
+
+#[test]
+fn editor_result_description_cancelled_cancels_input() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.input.mode = InputMode::InputDescription;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        ..Default::default()
+    });
+    app.update(Message::EditorResult {
+        kind: EditKind::Description { is_epic: false },
+        outcome: EditorOutcome::Cancelled,
+    });
+    // Cancelling during description input returns to Normal mode.
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn editor_result_task_edit_returns_finalize_command() {
+    // Non-description EditKind variants route through a FinalizeEditorResult
+    // command so the runtime applies the edit via services.
+    use crate::models::{Task, TaskId, TaskStatus};
+    let task = Task {
+        id: TaskId(42),
+        title: "t".into(),
+        description: "d".into(),
+        repo_path: "/r".into(),
+        status: TaskStatus::Backlog,
+        worktree: None,
+        tmux_window: None,
+        plan_path: None,
+        epic_id: None,
+        sub_status: crate::models::SubStatus::None,
+        pr_url: None,
+        tag: None,
+        sort_order: None,
+        base_branch: "main".to_string(),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let mut app = App::new(vec![task.clone()], TEST_TIMEOUT);
+    let cmds = app.update(Message::EditorResult {
+        kind: EditKind::TaskEdit(task),
+        outcome: EditorOutcome::Saved("--- TITLE ---\nNew\n".into()),
+    });
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::FinalizeEditorResult {
+                kind: EditKind::TaskEdit(t),
+                outcome: EditorOutcome::Saved(_),
+            } if t.id == TaskId(42)
+        )),
+        "expected FinalizeEditorResult(TaskEdit(42)), got {:?}",
+        cmds
     );
 }
 
@@ -3579,7 +3658,7 @@ fn e_on_epic_opens_editor() {
     app.selection_mut().set_row(0, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(matches!(&cmds[0], Command::EditEpicInEditor(e) if e.id == EpicId(10)));
+    assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::EpicEdit(e)) if e.id == EpicId(10)));
 }
 
 #[test]
@@ -3602,7 +3681,7 @@ fn e_on_task_enters_confirm_then_edits() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::EditTaskInEditor(_))));
+        .any(|c| matches!(c, Command::PopOutEditor(EditKind::TaskEdit(_)))));
 }
 
 #[test]
@@ -4011,7 +4090,7 @@ fn e_key_in_epic_view_edits_epic() {
     };
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::EditEpicInEditor(e) if e.id == EpicId(10)));
+    assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::EpicEdit(e)) if e.id == EpicId(10)));
 }
 
 #[test]
@@ -4036,8 +4115,8 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1, "expected exactly one command");
     assert!(
-        matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)),
-        "expected EditTaskInEditor(task 1), got {:?}",
+        matches!(&cmds[0], Command::PopOutEditor(EditKind::TaskEdit(t)) if t.id == TaskId(1)),
+        "expected PopOutEditor(TaskEdit(task 1), got {:?}",
         cmds
     );
 }
@@ -4857,7 +4936,7 @@ fn archive_panel_e_edits_task() {
     ));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::EditTaskInEditor(t) if t.id == TaskId(1)));
+    assert!(matches!(&cmds[0], Command::PopOutEditor(EditKind::TaskEdit(t)) if t.id == TaskId(1)));
 }
 
 #[test]
@@ -8508,7 +8587,7 @@ fn handle_key_tag_selects_bug() {
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
-        Command::OpenDescriptionEditor { is_epic: false }
+        Command::PopOutEditor(EditKind::Description { is_epic: false })
     ));
     assert_eq!(*app.mode(), InputMode::InputDescription);
     assert_eq!(
@@ -8530,7 +8609,7 @@ fn handle_key_tag_skip_with_enter() {
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
-        Command::OpenDescriptionEditor { is_epic: false }
+        Command::PopOutEditor(EditKind::Description { is_epic: false })
     ));
     assert_eq!(*app.mode(), InputMode::InputDescription);
     assert_eq!(app.input.task_draft.as_ref().unwrap().tag, None);
@@ -12128,9 +12207,10 @@ fn review_board_question_mark_toggles_help() {
 fn review_board_e_edits_github_queries() {
     let mut app = make_review_board_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Review))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::PopOutEditor(EditKind::GithubQueries(PrListKind::Review))
+    )));
 }
 
 #[test]
@@ -12142,9 +12222,10 @@ fn e_in_review_board_dependabot_emits_edit_bot_queries() {
         saved_board: BoardSelection::default(),
     };
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::EditGithubQueries(PrListKind::Bot))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::PopOutEditor(EditKind::GithubQueries(PrListKind::Bot))
+    )));
 }
 
 #[test]
@@ -12159,7 +12240,7 @@ fn e_in_security_alerts_emits_edit_security_queries() {
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::EditSecurityQueries)));
+        .any(|c| matches!(c, Command::PopOutEditor(EditKind::SecurityQueries))));
 }
 
 #[test]
@@ -12480,7 +12561,7 @@ fn confirm_edit_task_y_emits_editor_command() {
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::EditTaskInEditor(_))));
+        .any(|c| matches!(c, Command::PopOutEditor(EditKind::TaskEdit(_)))));
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 

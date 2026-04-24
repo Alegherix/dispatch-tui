@@ -224,6 +224,38 @@ pub(crate) fn repo_filter_matches(
 }
 
 // ---------------------------------------------------------------------------
+// EditKind / EditorOutcome — tags for the pop-out editor flow
+// ---------------------------------------------------------------------------
+
+/// Identifies what the user is editing and how to finalize the edit when
+/// the pop-out editor closes. One variant per existing $EDITOR call-site.
+#[derive(Debug, Clone)]
+pub enum EditKind {
+    /// Full task editor (title/description/repo_path/status/plan/tag/base_branch).
+    TaskEdit(Task),
+    /// Full epic editor (title/description/repo_path).
+    EpicEdit(Epic),
+    /// Description-only editor used during task/epic creation.
+    /// `is_epic` distinguishes the epic-create flow from the task-create flow.
+    Description { is_epic: bool },
+    /// GitHub PR search queries for a given [`PrListKind`]. The Bot variant
+    /// additionally routes through the dependabot_config two-section format.
+    GithubQueries(PrListKind),
+    /// Repo list for the security alerts board.
+    SecurityQueries,
+}
+
+/// Result of a pop-out editor session. `Saved` carries the final tempfile
+/// contents; `Cancelled` means the editor closed without a readable result
+/// (e.g. the tempfile disappeared, or the tmux window was killed while the
+/// editor buffer was empty).
+#[derive(Debug, Clone)]
+pub enum EditorOutcome {
+    Saved(String),
+    Cancelled,
+}
+
+// ---------------------------------------------------------------------------
 // Message
 // ---------------------------------------------------------------------------
 
@@ -302,6 +334,12 @@ pub enum Message {
     SubmitTitle(String),
     SubmitDescription(String),
     DescriptionEditorResult(String),
+    /// Result from an editor popped out into a tmux window. Carries the
+    /// tag identifying which edit was in flight and the editor outcome.
+    EditorResult {
+        kind: EditKind,
+        outcome: EditorOutcome,
+    },
     SubmitRepoPath(String),
     SubmitDispatchRepoPath(String),
     SubmitTag(Option<TaskTag>),
@@ -616,9 +654,16 @@ pub enum Command {
     KillTmuxWindow {
         window: String,
     },
-    EditTaskInEditor(Task),
-    OpenDescriptionEditor {
-        is_epic: bool,
+    /// Launch $EDITOR in a new tmux window. The `kind` decides both what
+    /// to put in the initial file and what post-processing to apply when
+    /// the editor closes.
+    PopOutEditor(EditKind),
+    /// Finalize an editor session: apply the user's edits (if any) to
+    /// the database via the appropriate service. Dispatches on the
+    /// [`EditKind`] to reach the right code path.
+    FinalizeEditorResult {
+        kind: EditKind,
+        outcome: EditorOutcome,
     },
     SaveRepoPath(String),
     RefreshFromDb,
@@ -631,7 +676,6 @@ pub enum Command {
         epic: Epic,
     },
     InsertEpic(EpicDraft),
-    EditEpicInEditor(Epic),
     DeleteEpic(EpicId),
     PersistEpic {
         id: EpicId,
@@ -696,8 +740,6 @@ pub enum Command {
     FetchSecurityAlerts,
     PersistSecurityAlerts(Vec<SecurityAlert>),
     DispatchFixAgent(FixAgentRequest),
-    EditGithubQueries(PrListKind),
-    EditSecurityQueries,
     UpdateAgentStatus {
         repo: String,
         number: i64,

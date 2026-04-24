@@ -38,9 +38,12 @@ rule EditEpic {
         -- editable by the user.
         -- updated_at is touched automatically by the database layer on
         -- any patch_epic call, so the rule does not assert it directly.
-        -- The TUI is suspended while the editor is open and resumes
-        -- on editor exit. If the editor exits with a non-zero status,
-        -- no changes are applied.
+        -- The editor opens in a separate tmux window; tmux focus
+        -- switches to that window while the TUI keeps running in
+        -- its original window. On editor exit the window closes and
+        -- focus returns to the TUI. At most one editor session is
+        -- live at a time — a second edit while an editor is already
+        -- open is a no-op with a status message.
 }
 
 -- == Epic Lifecycle ==

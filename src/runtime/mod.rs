@@ -15,8 +15,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
-use tempfile::Builder as TempfileBuilder;
-
 /// Interval between TUI tick events (captures tmux output, checks staleness, etc.).
 const TICK_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -24,10 +22,6 @@ const TICK_INTERVAL: Duration = Duration::from_secs(2);
 const TUI_WINDOW_NAME: &str = "TUI";
 
 use crate::db::{PrWorkflowStore, SettingsStore, TaskCrud};
-use crate::editor::{
-    format_description_for_editor, format_editor_content, format_epic_for_editor,
-    parse_description_editor_output, parse_editor_content, parse_epic_editor_output,
-};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
@@ -190,8 +184,8 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         epic_svc: crate::service::EpicService::new(database.clone()),
         database,
         msg_tx,
-        input_paused,
         runner,
+        editor_session: Arc::new(std::sync::Mutex::new(None)),
     };
     let result = run_loop(
         &mut app,
@@ -220,73 +214,6 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
 }
 
 // ---------------------------------------------------------------------------
-// TerminalSuspend — RAII guard for leaving/re-entering the alternate screen
-// ---------------------------------------------------------------------------
-
-struct TerminalSuspend<'a> {
-    terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>,
-}
-
-impl<'a> TerminalSuspend<'a> {
-    fn new(terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<Self> {
-        disable_raw_mode()?;
-        execute!(
-            terminal.backend_mut(),
-            DisableFocusChange,
-            LeaveAlternateScreen
-        )?;
-        terminal.show_cursor()?;
-        Ok(TerminalSuspend { terminal })
-    }
-}
-
-impl Drop for TerminalSuspend<'_> {
-    fn drop(&mut self) {
-        let _ = enable_raw_mode();
-        let _ = execute!(
-            self.terminal.backend_mut(),
-            EnterAlternateScreen,
-            EnableFocusChange
-        );
-        let _ = self.terminal.hide_cursor();
-        let _ = self.terminal.clear();
-    }
-}
-
-// ---------------------------------------------------------------------------
-// InputPausedGuard — RAII guard for pausing input + suspending the terminal
-// ---------------------------------------------------------------------------
-
-struct InputPausedGuard<'a> {
-    input_paused: Arc<AtomicBool>,
-    terminal_guard: Option<TerminalSuspend<'a>>,
-}
-
-impl<'a> InputPausedGuard<'a> {
-    fn new(
-        input_paused: &Arc<AtomicBool>,
-        terminal: &'a mut Terminal<CrosstermBackend<io::Stdout>>,
-        key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
-    ) -> Result<Self> {
-        input_paused.store(true, Ordering::Relaxed);
-        while key_rx.try_recv().is_ok() {}
-        let terminal_guard = TerminalSuspend::new(terminal)?;
-        Ok(InputPausedGuard {
-            input_paused: Arc::clone(input_paused),
-            terminal_guard: Some(terminal_guard),
-        })
-    }
-}
-
-impl Drop for InputPausedGuard<'_> {
-    fn drop(&mut self) {
-        // Restore terminal first, then resume input (matches original ordering)
-        drop(self.terminal_guard.take());
-        self.input_paused.store(false, Ordering::Relaxed);
-    }
-}
-
-// ---------------------------------------------------------------------------
 // TuiRuntime — shared context for command execution
 // ---------------------------------------------------------------------------
 
@@ -299,11 +226,15 @@ struct TuiRuntime {
     task_svc: crate::service::TaskService,
     epic_svc: crate::service::EpicService,
     msg_tx: mpsc::UnboundedSender<Message>,
-    input_paused: Arc<AtomicBool>,
     runner: Arc<dyn ProcessRunner>,
+    /// Holds the in-flight pop-out editor session, if any. `None` means no
+    /// editor is currently open. We enforce "at most one editor at a time"
+    /// by refusing to start a new one while this slot is populated.
+    editor_session: Arc<std::sync::Mutex<Option<editor::EditorSession>>>,
 }
 
 mod agents;
+mod editor;
 mod epics;
 mod pr;
 mod security;
@@ -431,50 +362,6 @@ impl TuiRuntime {
             }
         });
     }
-
-    /// Suspend the TUI, open content in $EDITOR, return edited text (or None).
-    fn run_editor(
-        &self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
-        prefix: &str,
-        content: &str,
-    ) -> Result<Option<String>> {
-        let mut tmp = TempfileBuilder::new()
-            .prefix(prefix)
-            .suffix(".md")
-            .tempfile()?;
-        std::io::Write::write_all(tmp.as_file_mut(), content.as_bytes())?;
-
-        let _guard = InputPausedGuard::new(&self.input_paused, terminal, key_rx)?;
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-        let status = std::process::Command::new(&editor).arg(tmp.path()).status();
-        drop(_guard);
-
-        // Drain OS-buffered keystrokes that arrived while the editor was open.
-        // The polling thread checks input_paused every 100ms, then polls crossterm
-        // for up to 50ms, so the worst-case lag before it re-checks the pause flag
-        // is ~150ms. We sleep 200ms to guarantee the thread has had at least one
-        // full poll cycle after the guard is dropped and the flag is cleared.
-        // Without this, editor keystrokes (e.g. `:wq`) arrive in key_rx and trigger
-        // whatever InputMode happens to be active next — e.g. confirming a deletion
-        // dialog or dispatching a task. Shortening the sleep below ~150ms risks that
-        // race; increasing it just adds latency on editor close.
-        std::thread::sleep(Duration::from_millis(200));
-        while key_rx.try_recv().is_ok() {}
-
-        match status {
-            Ok(exit) if exit.success() => Ok(std::fs::read_to_string(tmp.path()).ok()),
-            Ok(exit) => {
-                tracing::warn!(?exit, "editor exited with non-zero status");
-                Ok(None)
-            }
-            Err(e) => {
-                tracing::warn!("failed to spawn editor: {e}");
-                Ok(None)
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -548,8 +435,8 @@ async fn execute_commands(
     app: &mut App,
     commands: Vec<Command>,
     rt: &TuiRuntime,
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
+    _terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    _key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
 ) -> Result<()> {
     let mut queue = std::collections::VecDeque::from(commands);
     while let Some(command) = queue.pop_front() {
@@ -587,11 +474,10 @@ async fn execute_commands(
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::DispatchAgent { task, mode } => rt.exec_dispatch_agent(task, mode),
             Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
-            Command::EditTaskInEditor(task) => {
-                rt.exec_edit_in_editor(app, task, terminal, key_rx)?
-            }
-            Command::OpenDescriptionEditor { .. } => {
-                rt.exec_description_editor(app, terminal, key_rx)?
+            Command::PopOutEditor(kind) => rt.exec_pop_out_editor(app, kind),
+            Command::FinalizeEditorResult { kind, outcome } => {
+                let extra = rt.exec_finalize_editor_result(app, kind, outcome);
+                queue.extend(extra);
             }
             Command::SaveRepoPath(path) => rt.exec_save_repo_path(app, path),
             Command::RefreshFromDb => {
@@ -626,9 +512,6 @@ async fn execute_commands(
                 draft.repo_path,
                 draft.parent_epic_id,
             ),
-            Command::EditEpicInEditor(epic) => {
-                rt.exec_edit_epic_in_editor(app, epic, terminal, key_rx)?
-            }
             Command::DeleteEpic(id) => rt.exec_delete_epic(app, id),
             Command::PersistEpic {
                 id,
@@ -683,14 +566,6 @@ async fn execute_commands(
             Command::PersistSecurityAlerts(alerts) => rt.exec_persist_security_alerts(app, alerts),
             Command::DispatchFixAgent(req) => {
                 rt.exec_dispatch_fix_agent(req);
-            }
-            Command::EditGithubQueries(mode) => {
-                let extra = rt.exec_edit_github_queries(app, mode, terminal, key_rx)?;
-                queue.extend(extra);
-            }
-            Command::EditSecurityQueries => {
-                let extra = rt.exec_edit_security_queries(app, terminal, key_rx)?;
-                queue.extend(extra);
             }
             Command::UpdateAgentStatus {
                 repo,

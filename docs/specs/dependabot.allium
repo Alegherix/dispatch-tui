@@ -210,7 +210,8 @@ rule MergeBotPr {
 --   2      : switch to Dependabot mode (no-op if already in mode 2).
 --
 -- Note: the `1` / `2` keys no longer affect the Security Board, which is a
--- single unified view.
+-- single unified view. The `e` key opens $EDITOR in a separate tmux window;
+-- the TUI keeps running so the board stays navigable.
 
 ------------------------------------------------------------
 -- Filtering
@@ -316,7 +317,7 @@ visual StalenessColor(age: Duration) -> Color {
 
 rule EditBotQueries {
     when: UserAction([e]) and ViewMode = ReviewBoard(Dependabot)
-    opens: $EDITOR with dependabot_config setting as a structured two-section file:
+    opens: $EDITOR in a separate tmux window with dependabot_config setting as a structured two-section file:
         -- "# Base query\n{base_query}\n\n# Repositories\n{repo1}\n{repo2}\n..."
         -- If dependabot_config is not yet set, a default template is shown.
     on_save: parses the two sections, validates repo slugs (must contain "/"),

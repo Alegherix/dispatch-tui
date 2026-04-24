@@ -25,58 +25,6 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) fn exec_edit_epic_in_editor(
-        &self,
-        app: &mut App,
-        epic: models::Epic,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
-    ) -> Result<()> {
-        let epic_id = epic.id;
-        let content = format_epic_for_editor(&epic);
-        let Some(edited) =
-            self.run_editor(terminal, key_rx, &format!("epic-{epic_id}-"), &content)?
-        else {
-            return Ok(());
-        };
-
-        let fields = parse_epic_editor_output(&edited);
-        let title = if fields.title.is_empty() {
-            epic.title.clone()
-        } else {
-            fields.title
-        };
-        let description = if fields.description.is_empty() {
-            epic.description.clone()
-        } else {
-            fields.description
-        };
-        let repo_path = if fields.repo_path.is_empty() {
-            epic.repo_path.clone()
-        } else {
-            fields.repo_path
-        };
-
-        if let Err(e) = self.epic_svc.update_epic(crate::service::UpdateEpicParams {
-            epic_id: epic_id.0,
-            title: Some(title.clone()),
-            description: Some(description.clone()),
-            status: None,
-            plan_path: None,
-            sort_order: None,
-            repo_path: Some(repo_path.clone()),
-            auto_dispatch: None,
-        }) {
-            app.update(Message::Error(Self::db_error("updating epic", e)));
-        }
-        let mut updated = epic;
-        updated.title = title;
-        updated.description = description;
-        updated.repo_path = repo_path;
-        app.update(Message::EpicEdited(updated));
-        Ok(())
-    }
-
     pub(super) fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
         if let Err(e) = self.epic_svc.delete_epic(id.0) {
             app.update(Message::Error(Self::db_error("deleting epic", e)));

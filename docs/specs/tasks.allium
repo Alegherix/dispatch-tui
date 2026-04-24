@@ -860,10 +860,14 @@ rule EditTask {
         -- power-user escape hatch for manual corrections.
         -- Sub_status is auto-reset to the default for the new status
         -- when status changes, per the SubStatusAutoreset invariant.
-        -- The TUI is suspended while the editor is open and resumes
-        -- on editor exit. If the editor exits with a non-zero status,
-        -- no changes are applied. A confirmation prompt
-        -- (ConfirmEditTask) is shown before the editor is invoked.
+        -- The editor opens in a separate tmux window; tmux focus
+        -- switches to that window while the TUI keeps running in
+        -- its original window. On editor exit the window closes and
+        -- focus returns to the TUI window. At most one editor
+        -- session is live at a time — a second EditTask while an
+        -- editor is already open is a no-op with a status message.
+        -- A confirmation prompt (ConfirmEditTask) is shown before
+        -- the editor is invoked.
 }
 
 -- == Agent Health ==

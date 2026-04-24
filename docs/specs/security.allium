@@ -580,10 +580,11 @@ rule DispatchFixAgentViaMcp {
 
 rule EditSecurityQueries {
     when: UserAction([e]) and ViewMode = SecurityBoard
-    opens: $EDITOR with github_queries_security setting
+    opens: $EDITOR in a separate tmux window with github_queries_security setting
     on_save: strips comments and blank lines, persists, triggers RefreshSecurityAlerts
     on_cancel: no change
     note: key is available in both configured and unconfigured states
+    note: TUI keeps running while the editor is open; at most one editor session at a time
 }
 
 -- Unconfigured state: when github_queries_security has no active lines (all

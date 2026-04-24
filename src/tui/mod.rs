@@ -1195,6 +1195,7 @@ impl App {
             | Message::SubmitTitle(_)
             | Message::SubmitDescription(_)
             | Message::DescriptionEditorResult(_)
+            | Message::EditorResult { .. }
             | Message::SubmitRepoPath(_)
             | Message::SubmitDispatchRepoPath(_)
             | Message::SubmitTag(_)
@@ -1535,6 +1536,7 @@ impl App {
             Message::SubmitTitle(value) => self.handle_submit_title(value),
             Message::SubmitDescription(value) => self.handle_submit_description(value),
             Message::DescriptionEditorResult(value) => self.handle_description_editor_result(value),
+            Message::EditorResult { kind, outcome } => self.handle_editor_result(kind, outcome),
             Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
             Message::SubmitDispatchRepoPath(value) => self.handle_submit_dispatch_repo_path(value),
             Message::SubmitTag(tag) => self.handle_submit_tag(tag),
@@ -2896,7 +2898,9 @@ impl App {
         }
         self.input.mode = InputMode::InputDescription;
         self.set_status("Opening editor for description...".to_string());
-        vec![Command::OpenDescriptionEditor { is_epic: false }]
+        vec![Command::PopOutEditor(EditKind::Description {
+            is_epic: false,
+        })]
     }
 
     fn handle_input_char(&mut self, c: char) -> Vec<Command> {
@@ -4669,7 +4673,7 @@ impl App {
 
     fn handle_edit_epic(&mut self, id: EpicId) -> Vec<Command> {
         if let Some(epic) = self.board.epics.iter().find(|e| e.id == id) {
-            vec![Command::EditEpicInEditor(epic.clone())]
+            vec![Command::PopOutEditor(EditKind::EpicEdit(epic.clone()))]
         } else {
             vec![]
         }
@@ -4847,7 +4851,9 @@ impl App {
             });
             self.input.mode = InputMode::InputEpicDescription;
             self.set_status("Opening editor for description...".to_string());
-            vec![Command::OpenDescriptionEditor { is_epic: true }]
+            vec![Command::PopOutEditor(EditKind::Description {
+                is_epic: true,
+            })]
         }
     }
 
@@ -5105,6 +5111,23 @@ impl App {
             InputMode::InputDescription => self.handle_submit_description(value),
             InputMode::InputEpicDescription => self.handle_submit_epic_description(value),
             _ => vec![],
+        }
+    }
+
+    /// Router for editor results that come back from a pop-out editor. Each
+    /// `EditKind` is finalized by a `FinalizeEditorResult` command dispatched
+    /// to the runtime, except the `Description` variant which threads straight
+    /// through the existing description-flow messages.
+    fn handle_editor_result(&mut self, kind: EditKind, outcome: EditorOutcome) -> Vec<Command> {
+        match (&kind, &outcome) {
+            (EditKind::Description { .. }, EditorOutcome::Saved(text)) => {
+                let text = crate::editor::parse_description_editor_output(text);
+                self.update(Message::DescriptionEditorResult(text))
+            }
+            (EditKind::Description { .. }, EditorOutcome::Cancelled) => {
+                self.update(Message::CancelInput)
+            }
+            _ => vec![Command::FinalizeEditorResult { kind, outcome }],
         }
     }
 

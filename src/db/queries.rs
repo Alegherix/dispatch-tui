@@ -5,15 +5,16 @@ use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::models::{
-    CiStatus, Epic, EpicId, ReviewAgentStatus, ReviewDecision, ReviewPr, Reviewer, SubStatus, Task,
-    TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
+    CiStatus, Epic, EpicId, FeedItem, ReviewAgentStatus, ReviewDecision, ReviewPr, Reviewer,
+    SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, UsageReport,
 };
 
 use super::{Database, EpicPatch, TaskPatch};
 
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 const TASK_COLUMNS: &str = "id, title, description, repo_path, status, worktree, tmux_window, \
-     plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, created_at, updated_at";
+     plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, external_id, \
+     created_at, updated_at";
 
 impl super::TaskCrud for Database {
     fn create_task(
@@ -196,6 +197,10 @@ impl super::TaskCrud for Database {
             sets.push("base_branch = ?");
             values.push(Box::new(bb.to_string()));
         }
+        if let Some(eid) = patch.external_id {
+            sets.push("external_id = ?");
+            values.push(Box::new(eid.map(|s| s.to_string())));
+        }
 
         sets.push("updated_at = datetime('now')");
         values.push(Box::new(id.0));
@@ -290,6 +295,43 @@ impl super::TaskCrud for Database {
             });
         }
         Ok(out)
+    }
+
+    fn upsert_feed_tasks(&self, epic_id: EpicId, items: &[FeedItem]) -> Result<()> {
+        let conn = self.conn()?;
+        let repo_path: String = conn
+            .query_row(
+                "SELECT repo_path FROM epics WHERE id = ?1",
+                params![epic_id.0],
+                |row| row.get(0),
+            )
+            .with_context(|| format!("Epic {} not found for upsert_feed_tasks", epic_id))?;
+
+        for item in items {
+            let sub_status = SubStatus::default_for(item.status).as_str().to_string();
+            conn.execute(
+                "INSERT INTO tasks
+                     (title, description, repo_path, status, sub_status, base_branch,
+                      epic_id, external_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'main', ?6, ?7)
+                 ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
+                 DO UPDATE SET
+                     title       = excluded.title,
+                     description = excluded.description,
+                     updated_at  = datetime('now')",
+                params![
+                    item.title,
+                    item.description,
+                    repo_path,
+                    item.status.as_str(),
+                    sub_status,
+                    epic_id.0,
+                    item.external_id,
+                ],
+            )
+            .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
+        }
+        Ok(())
     }
 }
 
@@ -525,7 +567,7 @@ impl super::EpicCrud for Database {
     fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
+            "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
              FROM epics WHERE id = ?1",
             params![id.0],
             row_to_epic,
@@ -538,7 +580,7 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
                  FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_epics")?;
@@ -554,7 +596,7 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
                  FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_root_epics")?;
@@ -570,7 +612,7 @@ impl super::EpicCrud for Database {
         let conn = self.conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, created_at, updated_at
+                "SELECT id, title, description, repo_path, status, plan_path, sort_order, auto_dispatch, parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at
                  FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
             )
             .context("Failed to prepare list_sub_epics")?;
@@ -617,6 +659,14 @@ impl super::EpicCrud for Database {
         if let Some(ad) = patch.auto_dispatch {
             sets.push("auto_dispatch = ?");
             values.push(Box::new(ad));
+        }
+        if let Some(fc) = patch.feed_command {
+            sets.push("feed_command = ?");
+            values.push(Box::new(fc.map(|s| s.to_string())));
+        }
+        if let Some(fi) = patch.feed_interval_secs {
+            sets.push("feed_interval_secs = ?");
+            values.push(Box::new(fi));
         }
 
         sets.push("updated_at = datetime('now')");
@@ -1576,6 +1626,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .get::<_, Option<String>>("base_branch")
             .unwrap_or(None)
             .unwrap_or_else(|| "main".to_string()),
+        external_id: row.get::<_, Option<String>>("external_id").unwrap_or(None),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })
@@ -1599,6 +1650,12 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
             .get::<_, Option<i64>>("parent_epic_id")
             .unwrap_or(None)
             .map(EpicId),
+        feed_command: row
+            .get::<_, Option<String>>("feed_command")
+            .unwrap_or(None),
+        feed_interval_secs: row
+            .get::<_, Option<i64>>("feed_interval_secs")
+            .unwrap_or(None),
         created_at: parse_datetime(&created_str),
         updated_at: parse_datetime(&updated_str),
     })

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use crate::models::{
-    Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
+    Epic, EpicId, FeedItem, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUsage, TipsShowMode,
     UsageReport,
 };
 
@@ -35,6 +35,7 @@ pub struct TaskPatch<'a> {
     pub tag: Option<Option<TaskTag>>,
     pub sort_order: Option<Option<i64>>,
     pub base_branch: Option<&'a str>,
+    pub external_id: Option<Option<&'a str>>,
 }
 
 impl<'a> TaskPatch<'a> {
@@ -102,6 +103,11 @@ impl<'a> TaskPatch<'a> {
         self
     }
 
+    pub fn external_id(mut self, external_id: Option<&'a str>) -> Self {
+        self.external_id = Some(external_id);
+        self
+    }
+
     pub fn has_changes(&self) -> bool {
         self.status.is_some()
             || self.plan_path.is_some()
@@ -115,6 +121,7 @@ impl<'a> TaskPatch<'a> {
             || self.tag.is_some()
             || self.sort_order.is_some()
             || self.base_branch.is_some()
+            || self.external_id.is_some()
     }
 }
 
@@ -143,6 +150,8 @@ pub struct EpicPatch<'a> {
     pub sort_order: Option<Option<i64>>,
     pub repo_path: Option<&'a str>,
     pub auto_dispatch: Option<bool>,
+    pub feed_command: Option<Option<&'a str>>,
+    pub feed_interval_secs: Option<Option<i64>>,
 }
 
 impl<'a> EpicPatch<'a> {
@@ -185,6 +194,16 @@ impl<'a> EpicPatch<'a> {
         self
     }
 
+    pub fn feed_command(mut self, feed_command: Option<&'a str>) -> Self {
+        self.feed_command = Some(feed_command);
+        self
+    }
+
+    pub fn feed_interval_secs(mut self, feed_interval_secs: Option<i64>) -> Self {
+        self.feed_interval_secs = Some(feed_interval_secs);
+        self
+    }
+
     pub fn has_changes(&self) -> bool {
         self.title.is_some()
             || self.description.is_some()
@@ -193,6 +212,8 @@ impl<'a> EpicPatch<'a> {
             || self.sort_order.is_some()
             || self.repo_path.is_some()
             || self.auto_dispatch.is_some()
+            || self.feed_command.is_some()
+            || self.feed_interval_secs.is_some()
     }
 }
 
@@ -252,6 +273,9 @@ pub trait TaskCrud: Send + Sync {
     fn has_other_tasks_with_worktree(&self, worktree: &str, exclude_id: TaskId) -> Result<bool>;
     fn report_usage(&self, task_id: TaskId, usage: &UsageReport) -> Result<()>;
     fn get_all_usage(&self) -> Result<Vec<TaskUsage>>;
+    /// Upsert tasks from a feed. Inserts new tasks; on conflict (epic_id, external_id)
+    /// updates title and description only — status and other user-managed fields are preserved.
+    fn upsert_feed_tasks(&self, epic_id: EpicId, items: &[FeedItem]) -> Result<()>;
 }
 
 /// Epic CRUD, list, patch, recalculate status.

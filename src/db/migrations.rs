@@ -41,6 +41,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (35, migrate_v35_add_self_ref_check),
     (36, migrate_v36_tips_state),
     (37, migrate_v37_pr_workflow_states),
+    (38, migrate_v38_feed_epic_columns),
 ];
 
 fn migrate_v1_add_plan_column(conn: &Connection) -> Result<()> {
@@ -795,6 +796,18 @@ fn migrate_v37_pr_workflow_states(conn: &Connection) -> Result<()> {
         );",
     )
     .context("Failed to create pr_workflow_states table (migration v37)")
+}
+
+fn migrate_v38_feed_epic_columns(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE epics ADD COLUMN feed_command TEXT;
+         ALTER TABLE epics ADD COLUMN feed_interval_secs INTEGER;
+         ALTER TABLE tasks ADD COLUMN external_id TEXT;
+         CREATE UNIQUE INDEX IF NOT EXISTS tasks_epic_external_id
+             ON tasks (epic_id, external_id)
+             WHERE external_id IS NOT NULL;",
+    )
+    .context("Failed to add feed columns (migration v38)")
 }
 
 fn migrate_v36_tips_state(conn: &Connection) -> Result<()> {

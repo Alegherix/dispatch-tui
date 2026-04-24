@@ -68,6 +68,7 @@ fn full_lifecycle() {
             tag: None,
             sort_order: None,
             base_branch: "main".to_string(),
+            external_id: None,
             created_at: now,
             updated_at: now,
         },

@@ -368,6 +368,8 @@ impl TuiRuntime {
             sort_order: None,
             repo_path: Some(applied.repo_path.clone()),
             auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
         }) {
             app.update(Message::Error(Self::db_error("updating epic", e)));
         }

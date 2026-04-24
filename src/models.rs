@@ -432,6 +432,8 @@ pub struct Epic {
     pub sort_order: Option<i64>,
     pub auto_dispatch: bool,
     pub parent_epic_id: Option<EpicId>,
+    pub feed_command: Option<String>,
+    pub feed_interval_secs: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1094,6 +1096,7 @@ pub struct Task {
     pub tag: Option<TaskTag>,
     pub sort_order: Option<i64>,
     pub base_branch: String,
+    pub external_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1107,6 +1110,18 @@ impl Task {
             && matches!(self.status, TaskStatus::Running | TaskStatus::Review)
             && self.sub_status != SubStatus::Conflict
     }
+}
+
+// ---------------------------------------------------------------------------
+// FeedItem — an item from a programmable epic feed
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct FeedItem {
+    pub external_id: String,
+    pub title: String,
+    pub description: String,
+    pub status: TaskStatus,
 }
 
 // ---------------------------------------------------------------------------
@@ -2157,6 +2172,7 @@ mod tests {
             tag: None,
             sort_order: None,
             base_branch: "main".to_string(),
+            external_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -2181,6 +2197,7 @@ mod tests {
             tag: None,
             sort_order: None,
             base_branch: "main".to_string(),
+            external_id: None,
             created_at: now,
             updated_at: now,
         };
@@ -2200,6 +2217,8 @@ mod tests {
             sort_order: None,
             auto_dispatch: true,
             parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
             created_at: now,
             updated_at: now,
         };
@@ -2222,6 +2241,8 @@ mod tests {
             sort_order: None,
             auto_dispatch: true,
             parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -2435,6 +2456,8 @@ mod tests {
             sort_order: None,
             auto_dispatch: true,
             parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -2456,6 +2479,7 @@ mod tests {
             tag: None,
             sort_order: None,
             base_branch: "main".to_string(),
+            external_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -2653,6 +2677,7 @@ mod tests {
             tag,
             sort_order: None,
             base_branch: "main".to_string(),
+            external_id: None,
             created_at: now,
             updated_at: now,
         }
@@ -2688,6 +2713,8 @@ mod tests {
             sort_order: None,
             auto_dispatch: false,
             parent_epic_id: parent.map(EpicId),
+            feed_command: None,
+            feed_interval_secs: None,
             created_at: now,
             updated_at: now,
         }
@@ -2710,6 +2737,7 @@ mod tests {
             tag: None,
             sort_order: None,
             base_branch: "main".to_string(),
+            external_id: None,
             created_at: now,
             updated_at: now,
         }

@@ -15,6 +15,8 @@ impl TuiRuntime {
             repo_path,
             sort_order: None,
             parent_epic_id,
+            feed_command: None,
+            feed_interval_secs: None,
         }) {
             Ok(epic) => {
                 app.update(Message::EpicCreated(epic));
@@ -51,6 +53,8 @@ impl TuiRuntime {
             sort_order,
             repo_path: None,
             auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
         }) {
             app.update(Message::Error(Self::db_error("updating epic", e)));
         }
@@ -71,6 +75,8 @@ impl TuiRuntime {
             sort_order: None,
             repo_path: None,
             auto_dispatch: Some(auto_dispatch),
+            feed_command: None,
+            feed_interval_secs: None,
         }) {
             app.update(Message::Error(Self::db_error("toggling auto dispatch", e)));
         }

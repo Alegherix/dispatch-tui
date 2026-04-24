@@ -72,6 +72,8 @@ pub(super) fn handle_create_epic(
         repo_path: parsed.repo_path,
         sort_order: parsed.sort_order,
         parent_epic_id: parsed.parent_epic_id.map(EpicId),
+        feed_command: None,
+        feed_interval_secs: None,
     }) {
         Ok(epic) => {
             state.notify();
@@ -198,6 +200,8 @@ pub(super) fn handle_update_epic(
         sort_order: parsed.sort_order,
         repo_path: parsed.repo_path,
         auto_dispatch: None,
+        feed_command: None,
+        feed_interval_secs: None,
     };
     let field_names: Vec<String> = params
         .updated_field_names()

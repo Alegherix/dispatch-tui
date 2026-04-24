@@ -208,6 +208,8 @@ mod tests {
             sort_order: None,
             auto_dispatch: true,
             parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -277,6 +279,7 @@ mod tests {
             tag: None,
             sort_order: None,
             base_branch: "main".to_string(),
+            external_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

@@ -665,6 +665,8 @@ pub struct UpdateEpicParams {
     pub sort_order: Option<i64>,
     pub repo_path: Option<String>,
     pub auto_dispatch: Option<bool>,
+    pub feed_command: Option<FieldUpdate>,
+    pub feed_interval_secs: Option<i64>,
 }
 
 impl UpdateEpicParams {
@@ -695,6 +697,12 @@ impl UpdateEpicParams {
         if self.auto_dispatch.is_some() {
             names.push("auto_dispatch");
         }
+        if self.feed_command.is_some() {
+            names.push("feed_command");
+        }
+        if self.feed_interval_secs.is_some() {
+            names.push("feed_interval_secs");
+        }
         names
     }
 }
@@ -709,6 +717,8 @@ pub struct CreateEpicParams {
     pub repo_path: String,
     pub sort_order: Option<i64>,
     pub parent_epic_id: Option<EpicId>,
+    pub feed_command: Option<String>,
+    pub feed_interval_secs: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -735,10 +745,22 @@ impl EpicService {
             )
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
+        let mut patch = EpicPatch::new();
+        let mut has_extra = false;
         if let Some(so) = params.sort_order {
-            let _ = self
-                .db
-                .patch_epic(epic.id, &EpicPatch::new().sort_order(Some(so)));
+            patch = patch.sort_order(Some(so));
+            has_extra = true;
+        }
+        if let Some(ref fc) = params.feed_command {
+            patch = patch.feed_command(Some(fc.as_str()));
+            has_extra = true;
+        }
+        if let Some(fi) = params.feed_interval_secs {
+            patch = patch.feed_interval_secs(Some(fi));
+            has_extra = true;
+        }
+        if has_extra {
+            let _ = self.db.patch_epic(epic.id, &patch);
         }
 
         Ok(epic)
@@ -843,6 +865,15 @@ impl EpicService {
         }
         if let Some(ad) = params.auto_dispatch {
             patch = patch.auto_dispatch(ad);
+        }
+        if let Some(ref fc) = params.feed_command {
+            patch = patch.feed_command(match fc {
+                FieldUpdate::Set(s) => Some(s.as_str()),
+                FieldUpdate::Clear => None,
+            });
+        }
+        if let Some(fi) = params.feed_interval_secs {
+            patch = patch.feed_interval_secs(Some(fi));
         }
 
         let epic_id = EpicId(params.epic_id);
@@ -1225,6 +1256,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1263,6 +1296,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1290,6 +1325,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1302,6 +1339,8 @@ mod tests {
             sort_order: None,
             repo_path: None,
             auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
         })
         .unwrap();
 
@@ -1321,6 +1360,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1334,6 +1375,8 @@ mod tests {
                 sort_order: None,
                 repo_path: None,
                 auto_dispatch: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
@@ -1351,6 +1394,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1365,6 +1410,8 @@ mod tests {
             sort_order: None,
             repo_path: None,
             auto_dispatch: Some(false),
+            feed_command: None,
+            feed_interval_secs: None,
         })
         .unwrap();
 
@@ -1384,6 +1431,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1420,6 +1469,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
         let e2 = epic_svc
@@ -1429,6 +1480,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1499,6 +1552,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1536,6 +1591,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1572,6 +1629,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1618,6 +1677,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1690,6 +1751,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1722,6 +1785,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -1892,6 +1957,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -2033,6 +2100,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -2255,6 +2324,8 @@ mod tests {
             sort_order: None,
             repo_path: None,
             auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
         };
         assert!(
             with_field.has_any_field(),
@@ -2274,6 +2345,8 @@ mod tests {
             sort_order: None,
             repo_path: None,
             auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
         };
         assert!(
             !empty.has_any_field(),
@@ -2331,6 +2404,8 @@ mod tests {
             sort_order: None,
             repo_path: None,
             auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
         };
         let cases: Vec<UpdateEpicParams> = vec![
             UpdateEpicParams {
@@ -2359,6 +2434,14 @@ mod tests {
             },
             UpdateEpicParams {
                 auto_dispatch: Some(true),
+                ..base()
+            },
+            UpdateEpicParams {
+                feed_command: Some(FieldUpdate::Set("cmd".to_string())),
+                ..base()
+            },
+            UpdateEpicParams {
+                feed_interval_secs: Some(300),
                 ..base()
             },
         ];
@@ -2390,6 +2473,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -2400,6 +2485,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: Some(parent.id),
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 
@@ -2421,6 +2508,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
         svc.create_epic(CreateEpicParams {
@@ -2429,6 +2518,8 @@ mod tests {
             repo_path: "/repo".into(),
             sort_order: None,
             parent_epic_id: Some(parent.id),
+            feed_command: None,
+            feed_interval_secs: None,
         })
         .unwrap();
 
@@ -2449,6 +2540,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: None,
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
         let child = svc
@@ -2458,6 +2551,8 @@ mod tests {
                 repo_path: "/repo".into(),
                 sort_order: None,
                 parent_epic_id: Some(parent.id),
+                feed_command: None,
+                feed_interval_secs: None,
             })
             .unwrap();
 

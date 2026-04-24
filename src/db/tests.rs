@@ -321,7 +321,7 @@ fn fresh_db_has_latest_schema_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 }
 
 #[test]
@@ -408,7 +408,7 @@ fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 }
 
 #[test]
@@ -497,7 +497,7 @@ fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 }
 
 #[test]
@@ -608,7 +608,7 @@ fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 }
 
 #[test]
@@ -2101,7 +2101,7 @@ fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -2381,7 +2381,7 @@ fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -4448,7 +4448,7 @@ fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 }
 
 #[test]
@@ -4524,7 +4524,7 @@ fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
 }
 
 #[test]
@@ -5106,4 +5106,168 @@ fn find_pr_workflow_kind_with_multiple_kinds_returns_first() {
     let kind = db.find_pr_workflow_kind("org/repo", 5).unwrap();
     assert!(kind.is_some(), "Should find one of the kinds");
     // We don't assert which one because LIMIT 1 order is undefined without ORDER BY
+}
+
+// ---------------------------------------------------------------------------
+// Migration v38 — feed epic columns
+// ---------------------------------------------------------------------------
+
+#[test]
+fn migration_v38_feed_epic_columns() {
+    let conn = Connection::open_in_memory().unwrap();
+    // Minimal v37 schema: just the tables that v38 ALTER TABLEs
+    conn.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         PRAGMA user_version=37;
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT ''
+         );
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             epic_id INTEGER
+         );",
+    )
+    .unwrap();
+
+    Database::init_schema(&conn).unwrap();
+
+    assert!(
+        conn.prepare("SELECT feed_command FROM epics LIMIT 1").is_ok(),
+        "feed_command column should exist on epics"
+    );
+    assert!(
+        conn.prepare("SELECT feed_interval_secs FROM epics LIMIT 1")
+            .is_ok(),
+        "feed_interval_secs column should exist on epics"
+    );
+    assert!(
+        conn.prepare("SELECT external_id FROM tasks LIMIT 1").is_ok(),
+        "external_id column should exist on tasks"
+    );
+    let index_exists: bool = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='tasks_epic_external_id'",
+        )
+        .unwrap()
+        .exists([])
+        .unwrap();
+    assert!(index_exists, "tasks_epic_external_id index should exist");
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 38);
+}
+
+// ---------------------------------------------------------------------------
+// upsert_feed_tasks
+// ---------------------------------------------------------------------------
+
+fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
+    crate::models::FeedItem {
+        external_id: external_id.to_string(),
+        title: title.to_string(),
+        description: "desc".to_string(),
+        status: TaskStatus::Backlog,
+    }
+}
+
+#[test]
+fn upsert_feed_tasks_creates_tasks() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let items = vec![
+        make_feed_item("ext-1", "Task One"),
+        make_feed_item("ext-2", "Task Two"),
+    ];
+
+    db.upsert_feed_tasks(epic.id, &items).unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 2);
+    let mut titles: Vec<&str> = tasks.iter().map(|t| t.title.as_str()).collect();
+    titles.sort();
+    assert_eq!(titles, vec!["Task One", "Task Two"]);
+    assert!(tasks.iter().all(|t| t.status == TaskStatus::Backlog));
+    assert!(tasks
+        .iter()
+        .all(|t| t.external_id.as_deref() == Some("ext-1")
+            || t.external_id.as_deref() == Some("ext-2")));
+}
+
+#[test]
+fn upsert_feed_tasks_idempotent() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let items = vec![make_feed_item("ext-1", "Task One")];
+
+    db.upsert_feed_tasks(epic.id, &items).unwrap();
+    db.upsert_feed_tasks(epic.id, &items).unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1, "second call should not create duplicate");
+    assert_eq!(tasks[0].title, "Task One");
+}
+
+#[test]
+fn upsert_feed_tasks_preserves_status() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+    let items = vec![make_feed_item("ext-1", "Original Title")];
+
+    db.upsert_feed_tasks(epic.id, &items).unwrap();
+
+    // Simulate user moving task to Running
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    db.patch_task(
+        tasks[0].id,
+        &TaskPatch::new().status(TaskStatus::Running),
+    )
+    .unwrap();
+
+    // Re-run upsert with updated title and different status
+    let updated = vec![crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "Updated Title".to_string(),
+        description: "new desc".to_string(),
+        status: TaskStatus::Done, // feed says done; user status should be preserved
+    }];
+    db.upsert_feed_tasks(epic.id, &updated).unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].title, "Updated Title", "title should be updated");
+    assert_eq!(
+        tasks[0].description, "new desc",
+        "description should be updated"
+    );
+    assert_eq!(
+        tasks[0].status,
+        TaskStatus::Running,
+        "user-managed status must be preserved"
+    );
+}
+
+#[test]
+fn upsert_feed_tasks_adds_new_items() {
+    let db = in_memory_db();
+    let epic = db.create_epic("E", "", "/repo", None).unwrap();
+
+    db.upsert_feed_tasks(epic.id, &[make_feed_item("ext-1", "First")])
+        .unwrap();
+
+    db.upsert_feed_tasks(
+        epic.id,
+        &[
+            make_feed_item("ext-1", "First"),
+            make_feed_item("ext-2", "Second"),
+        ],
+    )
+    .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).unwrap();
+    assert_eq!(tasks.len(), 2, "new item should be created on second call");
 }

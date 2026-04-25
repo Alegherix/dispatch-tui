@@ -25,7 +25,7 @@ use crate::db::{PrWorkflowStore, SettingsStore, TaskCrud};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::FieldUpdate;
-use crate::tui::{self, App, Command, Message, PrListKind, RepoFilterMode, ReviewAgentRequest};
+use crate::tui::{self, App, Command, Message, RepoFilterMode};
 use crate::{db, dispatch, mcp, models, tmux};
 
 /// Convert `Option<String>` to `FieldUpdate`: `Some(v)` → `Set(v)`, `None` → `Clear`.
@@ -94,12 +94,6 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     load_repo_filter_mode(&*database, &mut app);
     for msg in [
         load_filter_presets(&*database, &mut app),
-        load_cached_review_prs(&*database, &mut app),
-        load_cached_bot_prs(&*database, &mut app),
-        load_cached_security_alerts(&*database, &mut app),
-        load_pr_agent_states(&*database, &mut app),
-        load_alert_agent_states(&*database, &mut app),
-        load_workflow_states(&*database, &mut app),
         apply_tmux_focus_warning(&*runner),
     ]
     .into_iter()
@@ -256,75 +250,7 @@ impl TuiRuntime {
         format!("DB error {action}: {e}")
     }
 
-    /// Load GitHub query strings for a given settings key, split by newline.
-    /// Returns an empty vec if the setting is missing.
-    fn load_github_queries(&self, key: &str) -> Vec<String> {
-        self.database
-            .get_setting_string(key)
-            .ok()
-            .flatten()
-            .map(|s| {
-                s.lines()
-                    .map(str::trim)
-                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
 
-    /// Load the structured dependabot config, running migration from the old
-    /// `github_queries_bot` setting if needed. Returns the assembled queries
-    /// and logs any slug warnings.
-    pub(super) fn load_dependabot_queries(&self) -> Vec<String> {
-        use crate::github::{
-            assemble_dependabot_queries, format_dependabot_config,
-            migrate_bot_queries_to_dependabot_config, parse_dependabot_config,
-        };
-
-        // Migration: convert old freeform queries to structured config on first load.
-        let existing = self
-            .database
-            .get_setting_string("dependabot_config")
-            .ok()
-            .flatten();
-        if existing.is_none() {
-            let old = self
-                .database
-                .get_setting_string("github_queries_bot")
-                .ok()
-                .flatten();
-            if let Some(migrated) = migrate_bot_queries_to_dependabot_config(old.as_deref()) {
-                let content = format_dependabot_config(&migrated);
-                if let Err(e) = self
-                    .database
-                    .set_setting_string("dependabot_config", &content)
-                {
-                    tracing::warn!("Failed to migrate dependabot config: {e}");
-                } else {
-                    // Clear old key so it no longer interferes.
-                    let _ = self.database.set_setting_string("github_queries_bot", "");
-                    tracing::info!(
-                        repos = migrated.repos.len(),
-                        "Migrated github_queries_bot → dependabot_config"
-                    );
-                }
-            }
-        }
-
-        let raw = self
-            .database
-            .get_setting_string("dependabot_config")
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        let config = parse_dependabot_config(&raw);
-        let (queries, warnings) = assemble_dependabot_queries(&config);
-        for w in &warnings {
-            tracing::warn!("{w}");
-        }
-        queries
-    }
 
     fn create_task(
         &self,
@@ -411,12 +337,7 @@ async fn run_loop(
                         app.update(Message::MessageReceived(to_task_id));
                         rt.exec_refresh_from_db(app)
                     }
-                    mcp::McpEvent::ReviewReady { repo, number } => {
-                        app.update(Message::ReviewStatusUpdated {
-                            repo,
-                            number,
-                            status: crate::models::ReviewAgentStatus::FindingsReady,
-                        });
+                    mcp::McpEvent::ReviewReady { repo: _, number: _ } => {
                         rt.exec_refresh_from_db(app)
                     }
                 }
@@ -450,34 +371,6 @@ async fn execute_commands(
     while let Some(command) = queue.pop_front() {
         match command {
             Command::PersistTask(task) => rt.exec_persist_task(app, task),
-            Command::PersistReviewAgent {
-                pr_kind,
-                github_repo,
-                number,
-                tmux_window,
-                worktree,
-            } => queue.extend(rt.exec_persist_review_agent(
-                app,
-                pr_kind,
-                &github_repo,
-                number,
-                &tmux_window,
-                &worktree,
-            )),
-            Command::PersistFixAgent {
-                github_repo,
-                number,
-                kind,
-                tmux_window,
-                worktree,
-            } => queue.extend(rt.exec_persist_fix_agent(
-                app,
-                &github_repo,
-                number,
-                kind,
-                &tmux_window,
-                &worktree,
-            )),
             Command::InsertTask { draft, epic_id } => rt.exec_insert_task(app, draft, epic_id),
             Command::DeleteTask(id) => rt.exec_delete_task(app, id),
             Command::DispatchAgent { task, mode } => rt.exec_dispatch_agent(task, mode),
@@ -550,12 +443,6 @@ async fn execute_commands(
             Command::PersistStringSetting { key, value } => {
                 rt.exec_persist_string_setting(app, &key, &value)
             }
-            Command::FetchPrs(kind) => rt.exec_fetch_prs(kind),
-            Command::PersistPrs(kind, prs) => rt.exec_persist_prs(app, kind, prs),
-            Command::ApproveBotPr(url) => rt.exec_approve_bot_pr(url),
-            Command::MergeBotPr(url) => rt.exec_merge_bot_pr(url),
-            Command::ApproveReviewPr(url) => rt.exec_approve_review_pr(url),
-            Command::MergeReviewPr(url) => rt.exec_merge_review_pr(url),
             Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
             Command::PersistFilterPreset {
                 name,
@@ -568,49 +455,6 @@ async fn execute_commands(
             Command::DeleteRepoPath(path) => rt.exec_delete_repo_path(app, &path),
             Command::PatchSubStatus { id, sub_status } => {
                 rt.exec_patch_sub_status(app, id, sub_status)
-            }
-            Command::DispatchReviewAgent(req) => rt.exec_dispatch_review_agent(req),
-            Command::FetchSecurityAlerts => rt.exec_fetch_security_alerts(),
-            Command::PersistSecurityAlerts(alerts) => rt.exec_persist_security_alerts(app, alerts),
-            Command::DispatchFixAgent(req) => {
-                rt.exec_dispatch_fix_agent(req);
-            }
-            Command::UpdateAgentStatus {
-                repo,
-                number,
-                status,
-            } => {
-                let status_str = status.map(|s| s.as_db_str().to_string());
-                if let Err(e) =
-                    rt.database
-                        .update_agent_status(&repo, number, status_str.as_deref())
-                {
-                    tracing::warn!("Failed to update agent status for {repo}#{number}: {e}");
-                }
-            }
-            Command::ReReview {
-                repo,
-                number,
-                tmux_window,
-            } => {
-                let runner = rt.runner.clone();
-                let tx = rt.msg_tx.clone();
-                let db = rt.database.clone();
-                tokio::task::spawn_blocking(move || {
-                    let cmd = format!("/review-pr {number}");
-                    if let Err(e) = crate::tmux::send_keys(&tmux_window, &cmd, &*runner) {
-                        tracing::warn!("Failed to send re-review to {tmux_window}: {e}");
-                        return;
-                    }
-                    if let Err(e) = db.update_agent_status(&repo, number, Some("reviewing")) {
-                        tracing::warn!("Failed to update agent status: {e}");
-                    }
-                    let _ = tx.send(Message::ReviewStatusUpdated {
-                        repo,
-                        number,
-                        status: crate::models::ReviewAgentStatus::Reviewing,
-                    });
-                });
             }
             // Split mode
             Command::EnterSplitMode => rt.exec_enter_split_mode(app),
@@ -646,40 +490,6 @@ async fn execute_commands(
             } => {
                 if let Err(e) = rt.database.save_tips_state(seen_up_to, show_mode) {
                     tracing::warn!("Failed to save tips state: {e:#}");
-                }
-            }
-            Command::PersistReviewWorkflow {
-                key,
-                state,
-                sub_state,
-            } => {
-                let state_str = state.as_db_str().to_string();
-                let sub_str = sub_state.map(|s| s.as_db_str().to_string());
-                if let Err(e) = rt.database.upsert_pr_workflow(
-                    &key.repo,
-                    key.number,
-                    key.kind,
-                    &state_str,
-                    sub_str.as_deref(),
-                ) {
-                    tracing::error!("Failed to persist review workflow state: {e}");
-                }
-            }
-            Command::PersistSecurityWorkflow {
-                key,
-                state,
-                sub_state,
-            } => {
-                let state_str = state.as_db_str().to_string();
-                let sub_str = sub_state.map(|s| s.as_db_str().to_string());
-                if let Err(e) = rt.database.upsert_pr_workflow(
-                    &key.repo,
-                    key.number,
-                    key.kind,
-                    &state_str,
-                    sub_str.as_deref(),
-                ) {
-                    tracing::error!("Failed to persist security workflow state: {e}");
                 }
             }
         }
@@ -732,78 +542,6 @@ fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Mess
         }
         Err(e) => Some(Message::StatusInfo(format!(
             "Failed to load filter presets: {e}"
-        ))),
-    }
-}
-
-fn load_cached_review_prs(db: &dyn db::PrStore, app: &mut App) -> Option<Message> {
-    match db.load_prs(db::PrKind::Review) {
-        Ok(prs) => {
-            app.set_review_prs(prs);
-            None
-        }
-        Err(e) => Some(Message::StatusInfo(format!(
-            "Failed to load cached review PRs: {e}"
-        ))),
-    }
-}
-
-fn load_cached_bot_prs(db: &dyn db::PrStore, app: &mut App) -> Option<Message> {
-    match db.load_prs(db::PrKind::Bot) {
-        Ok(prs) => {
-            app.set_bot_prs(prs);
-            None
-        }
-        Err(e) => Some(Message::StatusInfo(format!(
-            "Failed to load cached bot PRs: {e}"
-        ))),
-    }
-}
-
-fn load_cached_security_alerts(db: &dyn db::AlertStore, app: &mut App) -> Option<Message> {
-    match db.load_security_alerts() {
-        Ok(alerts) => {
-            app.set_security_alerts(alerts);
-            None
-        }
-        Err(e) => Some(Message::StatusInfo(format!(
-            "Failed to load cached security alerts: {e}"
-        ))),
-    }
-}
-
-fn load_pr_agent_states(db: &dyn db::PrStore, app: &mut App) -> Option<Message> {
-    match db.load_pr_agent_states() {
-        Ok(states) => {
-            app.set_pr_agent_states(states);
-            None
-        }
-        Err(e) => Some(Message::StatusInfo(format!(
-            "Failed to load PR agent states: {e}"
-        ))),
-    }
-}
-
-fn load_alert_agent_states(db: &dyn db::AlertStore, app: &mut App) -> Option<Message> {
-    match db.load_alert_agent_states() {
-        Ok(states) => {
-            app.set_alert_agent_states(states);
-            None
-        }
-        Err(e) => Some(Message::StatusInfo(format!(
-            "Failed to load alert agent states: {e}"
-        ))),
-    }
-}
-
-fn load_workflow_states(db: &dyn db::PrWorkflowStore, app: &mut App) -> Option<Message> {
-    match db.list_pr_workflows() {
-        Ok(rows) => {
-            app.update(Message::WorkflowStatesLoaded(rows));
-            None
-        }
-        Err(e) => Some(Message::StatusInfo(format!(
-            "Failed to load workflow states: {e}"
         ))),
     }
 }

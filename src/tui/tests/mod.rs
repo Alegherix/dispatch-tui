@@ -210,22 +210,6 @@ fn navigate_row_clamps() {
     assert_eq!(app.selection().row(0), 1); // clamps to last item index
 }
 
-#[test]
-fn tick_produces_capture_for_running_tasks_with_window() {
-    let mut task4 = make_task(4, TaskStatus::Running);
-    task4.tmux_window = Some("main:task-4".to_string());
-    let mut app = App::new(vec![task4], TEST_TIMEOUT);
-    let cmds = app.update(Message::Tick);
-    // Should have CaptureTmux + FetchReviewPrs + FetchBotPrs + FetchSecurityAlerts + RefreshFromDb
-    assert_eq!(cmds.len(), 5);
-    assert!(
-        matches!(&cmds[0], Command::CaptureTmux { id: TaskId(4), window } if window == "main:task-4")
-    );
-    assert!(matches!(&cmds[1], Command::FetchPrs(PrListKind::Review)));
-    assert!(matches!(&cmds[2], Command::FetchPrs(PrListKind::Bot)));
-    assert!(matches!(&cmds[3], Command::FetchSecurityAlerts));
-    assert!(matches!(&cmds[4], Command::RefreshFromDb));
-}
 
 #[test]
 fn tick_captures_review_task_with_live_window() {
@@ -240,15 +224,6 @@ fn tick_captures_review_task_with_live_window() {
         .any(|c| matches!(c, Command::CaptureTmux { id: TaskId(5), .. })));
 }
 
-#[test]
-fn tick_fetches_bot_prs_when_stale() {
-    let mut app = make_app();
-    assert!(app.review.bot.last_fetch.is_none());
-    let cmds = app.update(Message::Tick);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
-}
 
 #[test]
 fn task_created_adds_to_list() {
@@ -433,20 +408,6 @@ fn repo_path_nonexistent_shows_error() {
     assert!(msg.contains("does not exist"), "got: {msg}");
 }
 
-#[test]
-fn dispatch_repo_path_nonexistent_shows_error() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.review.review.set_prs(vec![pr]);
-    app.update(Message::SwitchToReviewBoard);
-    app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-
-    let cmds = app.update(Message::SubmitDispatchRepoPath("origin".to_string()));
-    assert!(cmds.is_empty());
-    assert!(app.status.message.is_some());
-    let msg = app.status.message.as_ref().unwrap().as_str();
-    assert!(msg.contains("does not exist"), "got: {msg}");
-}
 
 #[test]
 fn repo_path_nonempty_used_as_is() {
@@ -3379,27 +3340,7 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> Epic {
     }
 }
 
-/// Create a feed epic using the canonical `feed_command` values seeded by setup,
-/// so that ReviewBoard / SecurityBoard active-tab highlighting works correctly.
-fn make_review_feed_epic(id: i64, sort_order: i64) -> Epic {
-    Epic {
-        title: "Reviews".to_string(),
-        sort_order: Some(sort_order),
-        feed_command: Some("dispatch fetch-reviews".to_string()),
-        feed_interval_secs: Some(30),
-        ..make_epic(id)
-    }
-}
 
-fn make_security_feed_epic(id: i64, sort_order: i64) -> Epic {
-    Epic {
-        title: "Security".to_string(),
-        sort_order: Some(sort_order),
-        feed_command: Some("dispatch fetch-security".to_string()),
-        feed_interval_secs: Some(30),
-        ..make_epic(id)
-    }
-}
 
 // --- tasks_for_current_view ---
 
@@ -6089,147 +6030,9 @@ fn pr_merged_preserves_worktree() {
     assert!(!cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 }
 
-#[test]
-fn pr_merged_kills_matching_review_board_window() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
 
-    // Load a review PR that matches the task's PR URL
-    let review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
 
-    // Insert agent state into the map
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("org/repo".to_string(), 42),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-42".to_string(),
-            worktree: "/repo/.worktrees/review-42".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
 
-    let cmds = app.update(Message::PrMerged(TaskId(1)));
-
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-42")),
-        "should kill review board PR window"
-    );
-    assert!(
-        cmds.iter().any(
-            |c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
-                if repo == "org/repo" && *number == 42)
-        ),
-        "should clear review agent status"
-    );
-    // Agent handle should be removed from the map
-    let key = crate::models::PrRef::new("org/repo".to_string(), 42);
-    assert!(!app.review.review_agents.contains_key(&key));
-}
-
-#[test]
-fn pr_merged_no_review_board_match_is_ok() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
-
-    // Load a review PR with a DIFFERENT number — should not be cleaned up
-    let other_pr = make_review_pr_for_repo(99, "bob", ReviewDecision::ReviewRequired, "org/repo");
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![other_pr]));
-
-    // Insert agent state for the unrelated PR (not for #42)
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("org/repo".to_string(), 99),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-99".to_string(),
-            worktree: "/tmp/wt-99".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    let cmds = app.update(Message::PrMerged(TaskId(1)));
-
-    // The task should still move to Done
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
-    // The unrelated review window should NOT be killed
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-99")),
-        "should not kill unrelated review board PR window"
-    );
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
-        "should not emit UpdateAgentStatus when no review board PR matches"
-    );
-}
-
-#[test]
-fn pr_merged_skips_update_agent_status_when_review_pr_has_no_agent_state() {
-    // Review PR matches by (repo, number) but has no active agent session.
-    // cleanup_review_board_pr should NOT emit UpdateAgentStatus in this case —
-    // it is a no-op write to clear already-null fields.
-    let mut task = make_task(1, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
-
-    // Review PR with no tmux_window, worktree, or agent_status
-    let review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
-
-    let cmds = app.update(Message::PrMerged(TaskId(1)));
-
-    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
-        "should not emit UpdateAgentStatus when review PR has no active agent state"
-    );
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { .. })),
-        "should not kill any window when review PR has no active agent state"
-    );
-}
-
-#[test]
-fn pr_merged_kills_both_task_and_review_windows() {
-    let mut task = make_task(1, TaskStatus::Review);
-    task.tmux_window = Some("task-1".to_string());
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
-    let mut app = App::new(vec![task], TEST_TIMEOUT);
-
-    let review_pr = make_review_pr_for_repo(42, "alice", ReviewDecision::Approved, "org/repo");
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
-
-    // Insert agent state into the map (as would happen after dispatch)
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("org/repo".to_string(), 42),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-42".to_string(),
-            worktree: ".worktrees/review-org-repo-42".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    let cmds = app.update(Message::PrMerged(TaskId(1)));
-
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "task-1")),
-        "should kill task's own tmux window"
-    );
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-42")),
-        "should kill review board PR window"
-    );
-}
 
 #[test]
 fn card_shows_pr_badge() {
@@ -7035,195 +6838,16 @@ fn dispatch_epic_all_done_shows_message() {
 // Review board tests
 // ---------------------------------------------------------------------------
 
-fn make_review_pr(number: i64, author: &str, decision: ReviewDecision) -> crate::models::ReviewPr {
-    make_review_pr_for_repo(number, author, decision, "acme/app")
-}
 
-fn make_review_pr_for_repo(
-    number: i64,
-    author: &str,
-    decision: ReviewDecision,
-    repo: &str,
-) -> crate::models::ReviewPr {
-    crate::models::ReviewPr {
-        number,
-        title: format!("PR {number}"),
-        author: author.to_string(),
-        repo: repo.to_string(),
-        url: format!("https://github.com/{repo}/pull/{number}"),
-        is_draft: false,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        additions: 10,
-        deletions: 5,
-        review_decision: decision,
-        labels: vec![],
-        body: String::new(),
-        head_ref: String::new(),
-        ci_status: crate::models::CiStatus::None,
-        reviewers: vec![],
-    }
-}
 
-fn make_bot_pr(
-    number: i64,
-    decision: crate::models::ReviewDecision,
-    ci: crate::models::CiStatus,
-) -> crate::models::ReviewPr {
-    let mut pr = make_review_pr_for_repo(number, "app/dependabot", decision, "acme/app");
-    pr.ci_status = ci;
-    pr
-}
 
-fn make_security_alert(
-    number: i64,
-    repo: &str,
-    severity: crate::models::AlertSeverity,
-) -> crate::models::SecurityAlert {
-    crate::models::SecurityAlert {
-        number,
-        repo: repo.to_string(),
-        severity,
-        kind: crate::models::AlertKind::Dependabot,
-        title: format!("Alert {number}"),
-        package: Some("some-pkg".to_string()),
-        vulnerable_range: None,
-        fixed_version: None,
-        cvss_score: None,
-        url: format!("https://github.com/{repo}/security/dependabot/{number}"),
-        created_at: chrono::Utc::now(),
-        state: "open".to_string(),
-        description: String::new(),
-    }
-}
 
-#[test]
-fn switch_to_review_board_preserves_task_selection() {
-    let mut app = make_app();
-    // Move cursor to column 1
-    app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), 1);
 
-    // Switch to review board
-    app.update(Message::SwitchToReviewBoard);
-    assert!(matches!(app.board.view_mode, ViewMode::ReviewBoard { .. }));
 
-    // Switch back
-    app.update(Message::SwitchToTaskBoard);
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-    // Task board cursor should be restored
-    assert_eq!(app.selected_column(), 1);
-}
 
-#[test]
-fn review_prs_loaded_updates_state() {
-    let mut app = make_app();
-    let prs = vec![make_review_pr(42, "alice", ReviewDecision::ReviewRequired)];
-    app.update(Message::PrsLoaded(PrListKind::Review, prs));
-    assert_eq!(app.review_prs().len(), 1);
-    assert_eq!(app.review_prs()[0].number, 42);
-    assert!(!app.review_board_loading());
-}
 
-#[test]
-fn review_prs_fetch_failed_sets_error() {
-    let mut app = make_app();
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Review,
-        "auth error".to_string(),
-    ));
-    assert!(!app.review_board_loading());
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("auth error"));
-    assert_eq!(app.last_review_error(), Some("auth error"));
-}
 
-#[test]
-fn switch_to_review_board_sets_loading() {
-    let mut app = make_app();
-    let cmds = app.update(Message::SwitchToReviewBoard);
-    assert!(app.review_board_loading());
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
-}
 
-#[test]
-fn tab_from_board_without_feed_epics_is_noop() {
-    // Tab from Board is a no-op when there are no feed epics (no FetchPrs emitted).
-    let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-    assert!(!cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
-}
-#[test]
-fn esc_in_review_board_switches_back() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.handle_key(make_key(KeyCode::Esc)); // back
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-}
-#[test]
-fn review_tab_shows_loading_indicator_during_refresh() {
-    let mut app = make_app();
-    app.board.epics = vec![make_review_feed_epic(1, -2)];
-    // Load some PRs first
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
-    ));
-    assert!(!app.review_board_loading());
-
-    // Trigger a refresh — loading indicator should appear in the tab bar
-    app.update(Message::RefreshReviewPrs);
-    assert!(app.review_board_loading());
-
-    let buf = render_to_buffer(&mut app, 120, 30);
-    // ↻ (U+21BB) is the loading indicator shown in the tab label
-    assert!(
-        buffer_contains(&buf, "\u{21bb}"),
-        "Tab bar should show loading indicator while refreshing"
-    );
-}
-
-#[test]
-fn review_tab_hides_loading_indicator_after_fetch() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
-    ));
-
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        !buffer_contains(&buf, "\u{21bb}"),
-        "Tab bar should not show loading indicator after fetch completes"
-    );
-}
-
-#[test]
-fn review_prs_loaded_clears_last_error() {
-    let mut app = make_app();
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Review,
-        "auth error".to_string(),
-    ));
-    assert!(app.last_review_error().is_some());
-
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    assert!(
-        app.last_review_error().is_none(),
-        "Successful fetch should clear last error"
-    );
-}
 
 #[test]
 fn handle_refresh_usage_stores_by_task_id() {
@@ -9161,177 +8785,10 @@ fn quick_dispatch_enter_selects_cursor_repo() {
     );
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-#[test]
-fn fix_agent_dispatch_enters_repo_input_when_path_unknown() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/my-repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "CVE-2025-1234".to_string(),
-        description: "desc".to_string(),
-        package: Some("serde".to_string()),
-        fixed_version: Some("1.0.1".to_string()),
-    }));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
-    assert!(app.input.pending_dispatch.is_some());
-}
 
-#[test]
-fn fix_agent_dispatch_resolves_known_path() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.board.repo_paths = vec!["/home/user/Code/my-repo".to_string()];
-    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/my-repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "CVE-2025-1234".to_string(),
-        description: "desc".to_string(),
-        package: Some("serde".to_string()),
-        fixed_version: Some("1.0.1".to_string()),
-    }));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::DispatchFixAgent(req) if req.repo == "/home/user/Code/my-repo")
-    ));
-}
-#[test]
-fn submit_dispatch_repo_path_dispatches_fix_agent() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    // Enter InputDispatchRepoPath via fix agent with unknown repo
-    app.update(Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/my-repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "CVE-2025-1234".to_string(),
-        description: "desc".to_string(),
-        package: Some("serde".to_string()),
-        fixed_version: Some("1.0.1".to_string()),
-    }));
-    assert_eq!(app.input.mode, InputMode::InputDispatchRepoPath);
 
-    // Submit a repo path
-    let cmds = app.update(Message::SubmitDispatchRepoPath("/tmp".to_string()));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent(req) if req.repo == "/tmp")));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/tmp")));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-#[test]
-fn review_agent_dispatched_sets_status() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(99, "alice", ReviewDecision::ReviewRequired, "org/my-repo");
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    let cmds = app.update(Message::ReviewAgentDispatched {
-        github_repo: "org/my-repo".to_string(),
-        number: 99,
-        tmux_window: "review-my-repo-99".to_string(),
-        worktree: "/tmp/worktree".to_string(),
-    });
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistReviewAgent { .. })));
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("my-repo#99"));
-}
 
-#[test]
-fn review_agent_failed_sets_status() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let cmds = app.update(Message::ReviewAgentFailed {
-        github_repo: "acme/app".to_string(),
-        number: 42,
-        error: "git fetch failed".to_string(),
-    });
-    assert!(cmds.is_empty());
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("git fetch failed"));
-}
 
-#[test]
-fn clamp_review_selection_clamps_approved_column() {
-    // The Approved column is at index 3. Load a PR into it, set the row
-    // selection beyond the end, clear the PR list, and verify the selection
-    // is clamped to 0.
-    let mut app = make_app();
-
-    // Switch to the review board so that review_selection_mut() returns Some.
-    app.update(Message::SwitchToReviewBoard);
-
-    // Manually push a PR into the Approved column (index 3).
-    app.review
-        .review
-        .set_prs(vec![make_review_pr(1, "alice", ReviewDecision::Approved)]);
-
-    // Set the row selection for the Approved column to an out-of-bounds value.
-    if let Some(sel) = app.review_selection_mut() {
-        sel.selected_row[3] = 5;
-    }
-
-    // Now remove all PRs and trigger a clamp via ReviewPrsLoaded with an
-    // empty list (which calls clamp_review_selection internally).
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-
-    // The Approved column selection must have been clamped to 0.
-    let row = app.review_selection().unwrap().selected_row[3];
-    assert_eq!(
-        row, 0,
-        "Approved column (index 3) selection was not clamped"
-    );
-}
-
-#[test]
-fn review_repo_filter_hides_prs() {
-    let mut app = make_app();
-    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    pr1.repo = "org/repo-a".to_string();
-    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
-    pr2.repo = "org/repo-b".to_string();
-    app.review.review.set_prs(vec![pr1, pr2]);
-    app.update(Message::SwitchToReviewBoard);
-
-    // No filter — both visible
-    assert_eq!(app.filtered_review_prs().len(), 2);
-
-    // Filter to repo-a only
-    app.review
-        .review
-        .repo_filter
-        .insert("org/repo-a".to_string());
-    assert_eq!(app.filtered_review_prs().len(), 1);
-    assert_eq!(app.filtered_review_prs()[0].repo, "org/repo-a");
-}
-#[test]
-fn review_repo_filter_esc_closes() {
-    let mut app = make_app();
-    app.review.review.set_prs(vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]);
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::StartReviewRepoFilter);
-    assert_eq!(app.input.mode, InputMode::ReviewRepoFilter);
-
-    app.handle_key(KeyEvent::from(KeyCode::Esc));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
 #[test]
 fn repo_cursor_resets_on_quick_dispatch_entry() {
@@ -9369,157 +8826,14 @@ fn repo_filter_space_toggles_cursor_repo() {
     assert!(!app.filter.repos.contains("/repo-a"));
 }
 
-#[test]
-fn review_repo_filter_toggle_all() {
-    let mut app = make_app();
-    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    pr1.repo = "org/repo-a".to_string();
-    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
-    pr2.repo = "org/repo-b".to_string();
-    app.review.review.set_prs(vec![pr1, pr2]);
-    app.update(Message::SwitchToReviewBoard);
 
-    // Toggle all on
-    app.update(Message::ToggleAllReviewRepoFilter);
-    assert_eq!(app.review.review.repo_filter.len(), 2);
 
-    // Toggle all off
-    app.update(Message::ToggleAllReviewRepoFilter);
-    assert!(app.review.review.repo_filter.is_empty());
-}
 
-#[test]
-fn review_repo_filter_toggle_single() {
-    let mut app = make_app();
-    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    pr1.repo = "org/repo-a".to_string();
-    app.review.review.set_prs(vec![pr1]);
-    app.update(Message::SwitchToReviewBoard);
 
-    // Toggle on
-    app.update(Message::ToggleReviewRepoFilter("org/repo-a".to_string()));
-    assert!(app.review.review.repo_filter.contains("org/repo-a"));
 
-    // Toggle off
-    app.update(Message::ToggleReviewRepoFilter("org/repo-a".to_string()));
-    assert!(!app.review.review.repo_filter.contains("org/repo-a"));
-}
 
-#[test]
-fn review_repo_filter_clamps_selection() {
-    let mut app = make_app();
-    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    pr1.repo = "org/repo-a".to_string();
-    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
-    pr2.repo = "org/repo-b".to_string();
-    app.review.review.set_prs(vec![pr1, pr2]);
-    app.update(Message::SwitchToReviewBoard);
 
-    // Select the second row
-    if let Some(sel) = app.review_selection_mut() {
-        sel.selected_row[0] = 1;
-    }
 
-    // Filter to only one PR, selection should clamp
-    app.update(Message::ToggleReviewRepoFilter("org/repo-a".to_string()));
-    let row = app.review_selection().unwrap().selected_row[0];
-    assert_eq!(row, 0);
-}
-
-#[test]
-fn review_repo_filter_selected_pr_uses_filter() {
-    let mut app = make_app();
-    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    pr1.repo = "org/repo-a".to_string();
-    let mut pr2 = make_review_pr(2, "bob", ReviewDecision::ReviewRequired);
-    pr2.repo = "org/repo-b".to_string();
-    app.review.review.set_prs(vec![pr1, pr2]);
-    app.update(Message::SwitchToReviewBoard);
-
-    // Without filter, first PR is selected
-    let selected = app.selected_review_pr().unwrap();
-    assert_eq!(selected.number, 1);
-
-    // Filter to repo-b only, first visible PR should be #2
-    app.review
-        .review
-        .repo_filter
-        .insert("org/repo-b".to_string());
-    let selected = app.selected_review_pr().unwrap();
-    assert_eq!(selected.number, 2);
-}
-
-#[test]
-fn review_board_default_mode_is_reviewer() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    match app.board.view_mode {
-        ViewMode::ReviewBoard { mode, .. } => {
-            assert_eq!(mode, ReviewBoardMode::Reviewer);
-        }
-        _ => panic!("expected ReviewBoard"),
-    }
-}
-
-#[test]
-fn bot_prs_loaded_updates_state() {
-    let mut app = make_app();
-    let prs = vec![make_review_pr(101, "me", ReviewDecision::ReviewRequired)];
-    app.update(Message::PrsLoaded(PrListKind::Bot, prs));
-    assert_eq!(app.review.bot.prs.len(), 1);
-    assert_eq!(app.review.bot.prs[0].number, 101);
-    assert!(!app.review_bot_prs_loading());
-}
-#[test]
-fn switch_to_dependabot_fetches_bot_prs() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
-}
-
-#[test]
-fn switch_review_board_mode_outside_review_board_is_noop() {
-    let mut app = make_app();
-    let cmds = app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    assert!(cmds.is_empty());
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-}
-
-#[test]
-fn active_review_prs_returns_reviewer_prs_in_reviewer_mode() {
-    let mut app = make_app();
-    app.review.review.set_prs(vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]);
-    app.review
-        .bot
-        .set_prs(vec![make_review_pr(2, "bot", ReviewDecision::Approved)]);
-    app.update(Message::SwitchToReviewBoard);
-    assert_eq!(app.active_review_prs().len(), 1);
-    assert_eq!(app.active_review_prs()[0].number, 1);
-}
-
-#[test]
-fn active_review_prs_returns_bot_prs_in_dependabot_mode() {
-    let mut app = make_app();
-    app.review.review.set_prs(vec![make_review_pr(
-        1,
-        "alice",
-        ReviewDecision::ReviewRequired,
-    )]);
-    app.review
-        .bot
-        .set_prs(vec![make_review_pr(2, "bot", ReviewDecision::Approved)]);
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    assert_eq!(app.active_review_prs().len(), 1);
-    assert_eq!(app.active_review_prs()[0].number, 2);
-}
 // --- detach-aware section headers ---
 
 #[test]
@@ -9611,23 +8925,7 @@ fn is_detached_returns_false_for_conflict() {
 
 // --- dispatch PR filter (removed in v2, 'D' key is now no-op in review board) ---
 
-#[test]
-fn review_board_key_d_is_noop() {
-    // 'D' was dispatch_pr_filter toggle; now it's a no-op in all review board modes
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-    let cmds = app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(cmds.is_empty(), "D should be a no-op in reviewer mode");
-}
 
-#[test]
-fn review_board_dependabot_mode_key_d_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    let cmds = app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(cmds.is_empty(), "D should be a no-op in dependabot mode");
-}
 
 // ---------------------------------------------------------------------------
 // CardIndicator rendering tests
@@ -10027,17 +9325,6 @@ fn render_status_bar_confirm_epic_wrap_up() {
     );
 }
 
-#[test]
-fn render_status_bar_review_repo_filter() {
-    let mut app = make_app();
-    // Set mode directly (render_status_bar handles the text regardless of view)
-    app.input.mode = InputMode::ReviewRepoFilter;
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Filter repos"),
-        "ReviewRepoFilter mode should show 'Filter repos'"
-    );
-}
 
 #[test]
 fn render_status_bar_confirm_edit_task() {
@@ -10050,30 +9337,7 @@ fn render_status_bar_confirm_edit_task() {
     );
 }
 
-#[test]
-fn render_status_bar_confirm_approve_bot_pr() {
-    let mut app = make_app();
-    app.input.mode =
-        InputMode::ConfirmApproveBotPr("https://github.com/org/repo/pull/1".to_string());
-    app.status.message = Some("Approve PR #1? (y/N)".to_string());
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Approve PR #1?"),
-        "ConfirmApproveBotPr should show approve message"
-    );
-}
 
-#[test]
-fn render_status_bar_confirm_merge_bot_pr() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmMergeBotPr("https://github.com/org/repo/pull/1".to_string());
-    app.status.message = Some("Merge PR #1? (y/N)".to_string());
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Merge PR #1?"),
-        "ConfirmMergeBotPr should show merge message"
-    );
-}
 
 #[test]
 fn render_status_bar_status_message_overrides() {
@@ -10661,56 +9925,8 @@ fn render_tab_bar_board_mode_shows_tasks_label() {
     );
 }
 
-#[test]
-fn render_tab_bar_review_board_shows_reviews_active() {
-    let mut app = make_app();
-    app.board.epics = vec![make_review_feed_epic(1, -2)];
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Reviews"),
-        "tab bar in review board mode should show 'Reviews' label"
-    );
-}
 
-#[test]
-fn render_tab_bar_review_board_shows_pr_count() {
-    let mut app = make_app();
-    app.board.epics = vec![make_review_feed_epic(1, -2)];
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
-            make_review_pr(2, "bob", ReviewDecision::ReviewRequired),
-        ],
-    ));
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Reviews (2)"),
-        "tab bar in review board mode should show 'Reviews (2)' when 2 PRs loaded"
-    );
-}
 
-#[test]
-fn render_tab_bar_review_board_dependabot_tab() {
-    let mut app = make_app();
-    app.board.epics = vec![make_review_feed_epic(1, -2)];
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![make_review_pr(1, "dependabot", ReviewDecision::Approved)],
-    ));
-    // Switch to Dependabot mode
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Dependabot (1)"),
-        "tab bar in dependabot mode should show 'Dependabot (1)' when 1 bot PR loaded"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Tab bar key hint highlighting
@@ -10752,104 +9968,14 @@ fn tab_bar_board_mode_highlights_tab_key() {
     );
 }
 
-#[test]
-fn tab_bar_review_board_highlights_keys() {
-    let mut app = make_app();
-    // Two feed epics so the second one's title appears as the [Tab] hint.
-    app.board.epics = vec![make_review_feed_epic(1, -2), make_security_feed_epic(2, -1)];
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    let buf = render_to_buffer(&mut app, 120, 30);
 
-    let tab_style = find_style_of(&buf, "[Tab]").expect("[Tab] not found");
-    assert!(tab_style.add_modifier.contains(Modifier::BOLD));
-    assert_eq!(tab_style.fg, Some(Color::Rgb(120, 124, 153)));
-
-    let stab_style = find_style_of(&buf, "[S-Tab]").expect("[S-Tab] not found");
-    assert!(stab_style.add_modifier.contains(Modifier::BOLD));
-    assert_eq!(stab_style.fg, Some(Color::Rgb(120, 124, 153)));
-
-    // Description text (second feed epic title) should use MUTED (not highlighted)
-    let sec_style = find_style_of(&buf, "Security").expect("'Security' not found");
-    assert_eq!(
-        sec_style.fg,
-        Some(Color::Rgb(86, 95, 137)),
-        "description text should use MUTED color"
-    );
-}
-
-#[test]
-fn tab_bar_security_board_highlights_keys() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    let buf = render_to_buffer(&mut app, 120, 30);
-
-    let tab_style = find_style_of(&buf, "[Tab]").expect("[Tab] not found");
-    assert!(tab_style.add_modifier.contains(Modifier::BOLD));
-    assert_eq!(tab_style.fg, Some(Color::Rgb(120, 124, 153)));
-
-    let esc_style = find_style_of(&buf, "[Esc]").expect("[Esc] not found");
-    assert!(esc_style.add_modifier.contains(Modifier::BOLD));
-    assert_eq!(esc_style.fg, Some(Color::Rgb(120, 124, 153)));
-
-    // Description text "back" should use MUTED
-    let back_style = find_style_of(&buf, "back").expect("'back' not found");
-    assert_eq!(
-        back_style.fg,
-        Some(Color::Rgb(86, 95, 137)),
-        "description text should use MUTED color"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Bot error / not-configured status bar tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn last_bot_error_returns_bot_list_error() {
-    let mut app = make_app();
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Bot,
-        "not configured".to_string(),
-    ));
-    assert_eq!(app.last_bot_error(), Some("not configured"));
-}
 
-#[test]
-fn render_review_board_reviewer_mode_does_not_show_bot_error() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Bot,
-        "bot error should not appear".to_string(),
-    ));
-    // Stay in Reviewer mode (no ToggleReviewBoardMode)
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        !buffer_contains(&buf, "bot error should not appear"),
-        "Reviewer mode must not show the bot error"
-    );
-}
 
-#[test]
-fn render_review_board_reviewer_mode_shows_review_error_not_bot_error() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Review,
-        "review fetch error".to_string(),
-    ));
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Bot,
-        "bot error should not appear".to_string(),
-    ));
-    // Stay in Reviewer mode
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        !buffer_contains(&buf, "bot error should not appear"),
-        "Reviewer mode must not show the bot error"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Merge PR tests
@@ -11060,189 +10186,12 @@ fn epic_card_title_truncated_in_narrow_terminal() {
 // Repo grouping in review/security columns
 // ---------------------------------------------------------------------------
 
-#[test]
-fn active_prs_for_column_sorts_by_repo() {
-    let mut app = make_app();
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
-            make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
-            make_review_pr_for_repo(3, "carol", ReviewDecision::ReviewRequired, "org/middle"),
-        ],
-    ));
-    app.update(Message::SwitchToReviewBoard);
 
-    let col = ReviewDecision::ReviewRequired.column_index();
-    let prs = app.active_prs_for_column(col);
-    assert_eq!(prs.len(), 3);
-    assert_eq!(prs[0].repo, "org/alpha");
-    assert_eq!(prs[1].repo, "org/middle");
-    assert_eq!(prs[2].repo, "org/zebra");
-}
 
-#[test]
-fn selected_review_pr_agrees_with_sorted_order() {
-    let mut app = make_app();
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr_for_repo(1, "alice", ReviewDecision::ReviewRequired, "org/zebra"),
-            make_review_pr_for_repo(2, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
-        ],
-    ));
-    app.update(Message::SwitchToReviewBoard);
 
-    // Row 0 should be "org/alpha" (sorted first), row 1 should be "org/zebra"
-    let pr0 = app.selected_review_pr().unwrap();
-    assert_eq!(
-        pr0.repo, "org/alpha",
-        "row 0 should be the alphabetically first repo"
-    );
 
-    app.navigate_review_row(1);
-    let pr1 = app.selected_review_pr().unwrap();
-    assert_eq!(
-        pr1.repo, "org/zebra",
-        "row 1 should be the alphabetically second repo"
-    );
-}
 
-#[test]
-fn active_prs_for_column_preserves_order_within_same_repo() {
-    let mut app = make_app();
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr_for_repo(10, "alice", ReviewDecision::ReviewRequired, "org/alpha"),
-            make_review_pr_for_repo(5, "bob", ReviewDecision::ReviewRequired, "org/alpha"),
-            make_review_pr_for_repo(20, "carol", ReviewDecision::ReviewRequired, "org/alpha"),
-        ],
-    ));
-    app.update(Message::SwitchToReviewBoard);
 
-    let col = ReviewDecision::ReviewRequired.column_index();
-    let prs = app.active_prs_for_column(col);
-    assert_eq!(prs.len(), 3);
-    // Stable sort: original insertion order preserved within same repo
-    assert_eq!(prs[0].number, 10);
-    assert_eq!(prs[1].number, 5);
-    assert_eq!(prs[2].number, 20);
-}
-
-#[test]
-fn security_alerts_for_column_sorts_by_repo() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SecurityAlertsLoaded(vec![
-        make_security_alert(1, "org/zebra", crate::models::AlertSeverity::Critical),
-        make_security_alert(2, "org/alpha", crate::models::AlertSeverity::Critical),
-        make_security_alert(3, "org/middle", crate::models::AlertSeverity::Critical),
-    ]));
-
-    let col = crate::models::AlertSeverity::Critical.column_index();
-    let alerts = app.security_alerts_for_column(col);
-    assert_eq!(alerts.len(), 3);
-    assert_eq!(alerts[0].repo, "org/alpha");
-    assert_eq!(alerts[1].repo, "org/middle");
-    assert_eq!(alerts[2].repo, "org/zebra");
-}
-
-#[test]
-fn security_alerts_for_column_sorts_by_severity_within_sub_state() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-    // Loaded in reverse severity order to prove the sort works.
-    app.update(Message::SecurityAlertsLoaded(vec![
-        make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Low),
-        make_security_alert(2, "org/beta", crate::models::AlertSeverity::Medium),
-        make_security_alert(3, "org/gamma", crate::models::AlertSeverity::High),
-        make_security_alert(4, "org/delta", crate::models::AlertSeverity::Critical),
-    ]));
-
-    // All alerts land in Backlog (col 0). Highest severity should be first.
-    let alerts = app.security_alerts_for_column(0);
-    assert_eq!(alerts.len(), 4);
-    assert_eq!(alerts[0].repo, "org/delta", "Critical should be first");
-    assert_eq!(alerts[1].repo, "org/gamma", "High should be second");
-    assert_eq!(alerts[2].repo, "org/beta", "Medium should be third");
-    assert_eq!(alerts[3].repo, "org/alpha", "Low should be fourth");
-}
-
-#[test]
-fn security_alerts_for_column_cvss_breaks_severity_tie() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-    // Two Critical alerts, different CVSS scores. Higher CVSS should come first.
-    let high_cvss = crate::models::SecurityAlert {
-        number: 1,
-        repo: "org/zebra".to_string(),
-        severity: crate::models::AlertSeverity::Critical,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "High CVSS".to_string(),
-        package: Some("pkg".to_string()),
-        vulnerable_range: None,
-        fixed_version: None,
-        cvss_score: Some(9.8),
-        url: "https://github.com/org/zebra/security/dependabot/1".to_string(),
-        created_at: chrono::Utc::now(),
-        state: "open".to_string(),
-        description: String::new(),
-    };
-    let low_cvss = crate::models::SecurityAlert {
-        number: 2,
-        repo: "org/alpha".to_string(), // alphabetically first, but lower CVSS
-        severity: crate::models::AlertSeverity::Critical,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "Low CVSS".to_string(),
-        package: Some("pkg".to_string()),
-        vulnerable_range: None,
-        fixed_version: None,
-        cvss_score: Some(4.3),
-        url: "https://github.com/org/alpha/security/dependabot/2".to_string(),
-        created_at: chrono::Utc::now(),
-        state: "open".to_string(),
-        description: String::new(),
-    };
-    app.update(Message::SecurityAlertsLoaded(vec![low_cvss, high_cvss]));
-
-    let alerts = app.security_alerts_for_column(0);
-    assert_eq!(alerts.len(), 2);
-    assert_eq!(
-        alerts[0].repo, "org/zebra",
-        "Higher CVSS (9.8) should be first despite later repo name"
-    );
-    assert_eq!(
-        alerts[1].repo, "org/alpha",
-        "Lower CVSS (4.3) should be second"
-    );
-}
-
-#[test]
-fn selected_security_alert_agrees_with_sorted_order() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SecurityAlertsLoaded(vec![
-        make_security_alert(1, "org/zebra", crate::models::AlertSeverity::Critical),
-        make_security_alert(2, "org/alpha", crate::models::AlertSeverity::Critical),
-    ]));
-
-    // Default selection is column 0 (Critical). Row 0 should be "org/alpha" (sorted first).
-    let a0 = app.selected_security_alert().unwrap();
-    assert_eq!(
-        a0.repo, "org/alpha",
-        "row 0 should be the alphabetically first repo"
-    );
-
-    app.navigate_security_row(1);
-    let a1 = app.selected_security_alert().unwrap();
-    assert_eq!(
-        a1.repo, "org/zebra",
-        "row 1 should be the alphabetically second repo"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Delete repo path tests
@@ -11357,329 +10306,28 @@ fn n_in_confirm_delete_repo_path_cancels() {
 // Security board input handler tests
 // ---------------------------------------------------------------------------
 
-/// Helper: put app into SecurityBoard Alerts sub-view with alerts loaded.
-fn make_security_board_app() -> App {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    // Stay in Alerts mode for these tests (Dependabot sub-mode will be removed in a later task).
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-    app.update(Message::SecurityAlertsLoaded(vec![
-        make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Critical),
-        make_security_alert(2, "org/beta", crate::models::AlertSeverity::High),
-        make_security_alert(3, "org/gamma", crate::models::AlertSeverity::Critical),
-    ]));
-    app
-}
-#[test]
-fn security_board_tab_switches_to_task_board() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Tab));
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-}
 
-#[test]
-fn security_board_esc_switches_to_task_board() {
-    let mut app = make_security_board_app();
-    app.handle_key(make_key(KeyCode::Esc));
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-}
-#[test]
-fn security_board_p_with_no_alert_is_noop() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    // No alerts loaded
-    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(cmds.is_empty());
-}
-#[test]
-fn security_board_d_with_no_alert_is_noop() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds.is_empty());
-}
-#[test]
-fn security_board_unknown_key_is_noop() {
-    let mut app = make_security_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(cmds.is_empty());
-}
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Security repo filter input handler tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn security_repo_filter_enter_closes() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
-#[test]
-fn security_repo_filter_esc_closes() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
-    app.handle_key(make_key(KeyCode::Esc));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 // ---------------------------------------------------------------------------
 // Review board input handler tests
 // ---------------------------------------------------------------------------
 
-/// Helper: put app into ReviewBoard view with PRs loaded.
-fn make_review_board_app() -> App {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr(1, "alice", ReviewDecision::ReviewRequired),
-            make_review_pr(2, "bob", ReviewDecision::Approved),
-            make_review_pr(3, "carol", ReviewDecision::ReviewRequired),
-        ],
-    ));
-    app
-}
-#[test]
-fn review_board_esc_switches_to_task_board() {
-    let mut app = make_review_board_app();
-    app.handle_key(make_key(KeyCode::Esc));
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-}
-#[test]
-fn review_board_p_with_no_prs_is_noop() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let cmds = app.handle_key(make_key(KeyCode::Char('p')));
-    assert!(cmds.is_empty());
-}
-#[test]
-fn review_board_d_with_no_prs_is_noop() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds.is_empty());
-}
-#[test]
-fn refresh_review_prs_returns_fetch_command() {
-    let mut app = make_review_board_app();
-    let cmds = app.update(Message::RefreshReviewPrs);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Review))));
-}
-#[test]
-fn refresh_bot_prs_returns_fetch_bot_prs() {
-    let mut app = make_review_board_app();
-    let cmds = app.update(Message::RefreshBotPrs);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::FetchPrs(PrListKind::Bot))));
-}
 
-#[test]
-fn bot_prs_merged_kills_active_review_window() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
 
-    let pr = make_bot_pr(
-        42,
-        ReviewDecision::Approved,
-        crate::models::CiStatus::Success,
-    );
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
 
-    // Insert agent state into the map
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    app.review.review_agents.insert(
-        key.clone(),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-42".to_string(),
-            worktree: "/repo/.worktrees/review-42".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
 
-    let cmds = app.update(Message::BotPrsMerged(vec![
-        "https://github.com/acme/app/pull/42".to_string(),
-    ]));
 
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { window } if window == "review:pr-42")),
-        "should kill review board PR window"
-    );
-    assert!(
-        cmds.iter().any(
-            |c| matches!(c, Command::UpdateAgentStatus { repo, number, status: None }
-                if repo == "acme/app" && *number == 42)
-        ),
-        "should clear review agent status"
-    );
-    // Agent handle should be removed from the map
-    assert!(!app.review.review_agents.contains_key(&key));
-}
-
-#[test]
-fn bot_prs_merged_noop_when_no_active_window() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-
-    // Bot PR with no review agent
-    let pr = make_bot_pr(
-        42,
-        ReviewDecision::Approved,
-        crate::models::CiStatus::Success,
-    );
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-
-    let cmds = app.update(Message::BotPrsMerged(vec![
-        "https://github.com/acme/app/pull/42".to_string(),
-    ]));
-
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::KillTmuxWindow { .. })),
-        "no window to kill — should emit no KillTmuxWindow"
-    );
-    assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::UpdateAgentStatus { .. })),
-        "no agent to clear — should emit no UpdateAgentStatus"
-    );
-}
-
-#[test]
-fn bot_pr_agent_survives_review_list_refresh() {
-    // A Dependabot PR has an active review agent.
-    // When the *Review* list refreshes (with unrelated PRs), the bot PR
-    // agent must NOT be cleaned up — it only lives in the Bot list.
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-
-    // Seed the bot PR list with PR #42
-    let bot_pr = make_bot_pr(
-        42,
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![bot_pr]));
-
-    // Insert an active review agent for the bot PR
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    app.review.review_agents.insert(
-        key.clone(),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review-acme_app-42".to_string(),
-            worktree: "/repo/.worktrees/review-42".to_string(),
-            status: crate::models::ReviewAgentStatus::FindingsReady,
-        },
-    );
-
-    // Refresh the Review list with a completely different PR — bot PR #42 is not in it
-    let review_pr = make_review_pr(99, "alice", ReviewDecision::ReviewRequired);
-    let cmds = app.update(Message::PrsLoaded(PrListKind::Review, vec![review_pr]));
-
-    // Agent must still be present
-    assert!(
-        app.review.review_agents.contains_key(&key),
-        "bot PR agent must not be removed by a Review list refresh"
-    );
-    // No KillTmuxWindow for the bot PR window
-    assert!(
-        !cmds.iter().any(|c| matches!(
-            c, Command::KillTmuxWindow { window } if window == "review-acme_app-42"
-        )),
-        "Review list refresh must not kill the bot PR tmux window"
-    );
-}
-
-#[test]
-fn bot_pr_agent_cleaned_up_when_bot_pr_disappears() {
-    // A Dependabot PR had an active review agent.
-    // When the *Bot* list refreshes and that PR is no longer present
-    // (e.g. it was merged/closed on GitHub), the agent must be cleaned up.
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-
-    // Seed the bot PR list with PR #42
-    let bot_pr = make_bot_pr(
-        42,
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![bot_pr]));
-
-    // Insert an active review agent for the bot PR
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    app.review.review_agents.insert(
-        key.clone(),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review-acme_app-42".to_string(),
-            worktree: "/repo/.worktrees/review-42".to_string(),
-            status: crate::models::ReviewAgentStatus::FindingsReady,
-        },
-    );
-
-    // Bot list refreshes and PR #42 is gone (replaced by a different PR)
-    let other_bot_pr = make_bot_pr(
-        99,
-        ReviewDecision::Approved,
-        crate::models::CiStatus::Success,
-    );
-    let cmds = app.update(Message::PrsLoaded(PrListKind::Bot, vec![other_bot_pr]));
-
-    // Agent handle must have been removed
-    assert!(
-        !app.review.review_agents.contains_key(&key),
-        "bot PR agent must be removed when the bot PR disappears from the Bot list"
-    );
-    // KillTmuxWindow must have been emitted
-    assert!(
-        cmds.iter().any(|c| matches!(
-            c, Command::KillTmuxWindow { window } if window == "review-acme_app-42"
-        )),
-        "should kill the bot PR tmux window when bot PR disappears"
-    );
-    // UpdateAgentStatus(None) must have been emitted
-    assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::UpdateAgentStatus { repo, number, status: None }
-            if repo == "acme/app" && *number == 42
-        )),
-        "should clear agent status in DB when bot PR disappears"
-    );
-}
-
-#[test]
-fn review_board_unknown_key_is_noop() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(cmds.is_empty());
-}
-#[test]
-fn review_board_d_capital_is_noop_in_all_modes() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(cmds.is_empty(), "D is noop in Reviewer mode");
-    app.handle_key(make_key(KeyCode::Char('2'))); // Dependabot
-    let cmds2 = app.handle_key(make_key(KeyCode::Char('D')));
-    assert!(cmds2.is_empty(), "D is noop in Dependabot mode");
-}
 
 // ---------------------------------------------------------------------------
 // Review repo filter input handler tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn review_repo_filter_enter_closes() {
-    let mut app = make_review_board_app();
-    app.input.mode = InputMode::ReviewRepoFilter;
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 // ---------------------------------------------------------------------------
 // Confirm epic wrap-up input handler tests
 // ---------------------------------------------------------------------------
@@ -11802,184 +10450,15 @@ fn archive_q_quits() {
     app.handle_key(make_key(KeyCode::Char('q')));
     assert_eq!(app.input.mode, InputMode::ConfirmQuit);
 }
-#[test]
-fn g_on_review_board_without_agent_shows_status() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-
-    let pr = make_review_pr(42, "alice", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
-    assert!(cmds.is_empty()); // StatusInfo is handled inline via self.update(), returns empty
-}
-#[test]
-fn g_on_security_board_without_agent_shows_status() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-
-    let alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::Critical);
-    app.update(Message::SecurityAlertsLoaded(vec![alert]));
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('g')));
-    assert!(cmds.is_empty());
-}
 
 // ---------------------------------------------------------------------------
 // ReviewAgentStatus lifecycle tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn review_status_updated_sets_agent_status_on_pr() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        42,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
-    // Pre-populate the agent map (status update only works if agent exists)
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 42),
-        super::types::ReviewAgentHandle {
-            tmux_window: "win-42".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
 
-    app.update(Message::ReviewStatusUpdated {
-        repo: "acme/app".to_string(),
-        number: 42,
-        status: crate::models::ReviewAgentStatus::FindingsReady,
-    });
 
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    let handle = app.review.review_agents.get(&key).unwrap();
-    assert_eq!(
-        handle.status,
-        crate::models::ReviewAgentStatus::FindingsReady
-    );
-}
 
-#[test]
-fn review_status_updated_sets_agent_status_on_security_alert() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    let alert = make_security_alert(1, "acme/app", crate::models::AlertSeverity::High);
-    app.update(Message::SecurityAlertsLoaded(vec![alert]));
-
-    // Pre-populate the agent map
-    let fix_key = super::types::FixDispatchKey::new(
-        "acme/app".to_string(),
-        1,
-        crate::models::AlertKind::Dependabot,
-    );
-    app.security.fix_agents.insert(
-        fix_key.clone(),
-        super::types::FixAgentHandle {
-            tmux_window: "dispatch:fix-1".to_string(),
-            worktree: "/tmp/fix-wt".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    app.update(Message::ReviewStatusUpdated {
-        repo: "acme/app".to_string(),
-        number: 1,
-        status: crate::models::ReviewAgentStatus::Idle,
-    });
-
-    let handle = app.security.fix_agents.get(&fix_key).unwrap();
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Idle);
-}
-
-#[test]
-fn detach_review_agent_clears_fields_and_returns_commands() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        42,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-
-    // Pre-populate the agent map
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    app.review.review_agents.insert(
-        key.clone(),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch:review-42".to_string(),
-            worktree: "/tmp/wt".to_string(),
-            status: crate::models::ReviewAgentStatus::FindingsReady,
-        },
-    );
-
-    let cmds = app.update(Message::DetachReviewAgent {
-        repo: "acme/app".to_string(),
-        number: 42,
-    });
-
-    // Should have kill tmux and update agent status commands
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::KillTmuxWindow { .. })));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::UpdateAgentStatus { .. })));
-
-    // Agent handle should be removed from the map
-    assert!(!app.review.review_agents.contains_key(&key));
-}
-
-#[test]
-fn review_agent_dispatched_sets_agent_status_reviewing() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        99,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "org/my-repo",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-
-    app.update(Message::ReviewAgentDispatched {
-        github_repo: "org/my-repo".to_string(),
-        number: 99,
-        tmux_window: "review-my-repo-99".to_string(),
-        worktree: "/tmp/worktree".to_string(),
-    });
-
-    let key = crate::models::PrRef::new("org/my-repo".to_string(), 99);
-    let handle = app.review.review_agents.get(&key).unwrap();
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
-    assert_eq!(handle.tmux_window, "review-my-repo-99");
-}
-
-// ---------------------------------------------------------------------------
-// Review/Security board key binding tests for r and T
-// ---------------------------------------------------------------------------
-#[test]
-fn review_board_t_without_agent_does_nothing() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    let pr = make_review_pr_for_repo(
-        42,
-        "alice",
-        crate::models::ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-
-    let cmds = app.handle_key(KeyEvent::from(KeyCode::Char('T')));
-    assert!(cmds.is_empty());
-}
 
 /// Extract the foreground color of the first `[` bracket in the given row.
 fn first_bracket_fg(buf: &Buffer, row: u16) -> Option<Color> {
@@ -12152,199 +10631,18 @@ fn dispatch_failed_clears_mark_dispatching_guard() {
 // Review agent in-flight dispatch deduplication
 // ---------------------------------------------------------------------------
 
-fn make_review_agent_req(repo: &str, number: i64) -> ReviewAgentRequest {
-    ReviewAgentRequest {
-        github_repo: repo.to_string(),
-        number,
-        head_ref: "main".to_string(),
-        repo: "/home/user/Code/repo".to_string(),
-        is_dependabot: false,
-    }
-}
 
-#[test]
-fn review_agent_dispatch_in_flight_blocks_second_dispatch() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
-    let req = make_review_agent_req("acme/app", 42);
-    // First dispatch succeeds
-    let cmds = app.update(Message::DispatchReviewAgent(req.clone()));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
-    // Second dispatch of same PR is blocked
-    let cmds = app.update(Message::DispatchReviewAgent(req));
-    assert!(cmds.is_empty());
-}
 
-#[test]
-fn review_agent_dispatched_clears_in_flight() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
-    let req = make_review_agent_req("acme/app", 42);
-    app.update(Message::DispatchReviewAgent(req.clone()));
-    assert!(app.is_dispatching_review("acme/app", 42));
-    // Success message clears the guard
-    app.update(Message::ReviewAgentDispatched {
-        github_repo: "acme/app".to_string(),
-        number: 42,
-        tmux_window: "review-42".to_string(),
-        worktree: "/wt".to_string(),
-    });
-    assert!(!app.is_dispatching_review("acme/app", 42));
-}
 
-#[test]
-fn review_agent_failed_clears_in_flight() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
-    let req = make_review_agent_req("acme/app", 42);
-    app.update(Message::DispatchReviewAgent(req.clone()));
-    assert!(app.is_dispatching_review("acme/app", 42));
-    // Failure clears the guard
-    app.update(Message::ReviewAgentFailed {
-        github_repo: "acme/app".to_string(),
-        number: 42,
-        error: "boom".to_string(),
-    });
-    assert!(!app.is_dispatching_review("acme/app", 42));
-    // Can dispatch again
-    let cmds = app.update(Message::DispatchReviewAgent(req));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
-}
 
-#[test]
-fn review_agent_different_prs_both_dispatch() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/home/user/Code/repo".to_string()];
-    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req(
-        "acme/app", 42,
-    )));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
-    let cmds = app.update(Message::DispatchReviewAgent(make_review_agent_req(
-        "acme/app", 43,
-    )));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
-}
 
 // ---------------------------------------------------------------------------
 // Fix agent in-flight dispatch deduplication
 // ---------------------------------------------------------------------------
 
-#[test]
-fn fix_agent_dispatch_in_flight_blocks_second_dispatch() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/path/to/repo".to_string()];
-    let msg = Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "Alert 1".to_string(),
-        description: String::new(),
-        package: None,
-        fixed_version: None,
-    });
-    // First dispatch succeeds
-    let cmds = app.update(msg.clone());
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
-    // Second dispatch of same alert is blocked
-    let cmds = app.update(msg);
-    assert!(cmds.is_empty());
-}
 
-#[test]
-fn fix_agent_dispatched_clears_in_flight() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/path/to/repo".to_string()];
-    app.update(Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "Alert 1".to_string(),
-        description: String::new(),
-        package: None,
-        fixed_version: None,
-    }));
-    assert!(app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
-    // Success clears the guard
-    app.update(Message::FixAgentDispatched {
-        github_repo: "org/repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        tmux_window: "fix-1".to_string(),
-        worktree: "/wt".to_string(),
-    });
-    assert!(!app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
-}
 
-#[test]
-fn fix_agent_failed_clears_in_flight() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/path/to/repo".to_string()];
-    app.update(Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "Alert 1".to_string(),
-        description: String::new(),
-        package: None,
-        fixed_version: None,
-    }));
-    assert!(app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
-    // Failure clears the guard
-    app.update(Message::FixAgentFailed {
-        github_repo: "org/repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        error: "boom".to_string(),
-    });
-    assert!(!app.is_dispatching_fix("org/repo", 1, crate::models::AlertKind::Dependabot));
-}
 
-#[test]
-fn fix_agent_different_alerts_both_dispatch() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/path/to/repo".to_string()];
-    // Dependabot alert
-    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::Dependabot,
-        title: "Alert 1".to_string(),
-        description: String::new(),
-        package: None,
-        fixed_version: None,
-    }));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
-    // CodeScanning alert on same repo+number — different kind, should succeed
-    let cmds = app.update(Message::DispatchFixAgent(FixAgentRequest {
-        repo: String::new(),
-        github_repo: "org/repo".to_string(),
-        number: 1,
-        kind: crate::models::AlertKind::CodeScanning,
-        title: "Alert 1".to_string(),
-        description: String::new(),
-        package: None,
-        fixed_version: None,
-    }));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchFixAgent(..))));
-}
 
 // ---------------------------------------------------------------------------
 // Split mode tests
@@ -13133,53 +11431,7 @@ fn handle_key_text_input_enter_submits_typed_text() {
         .any(|c| matches!(c, Command::InsertTask { .. })));
 }
 
-#[test]
-fn handle_key_text_input_dispatch_repo_path_enter_selects_cursor() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/tmp".to_string()];
-    app.input.mode = InputMode::InputDispatchRepoPath;
-    app.input.buffer.clear();
-    app.input.repo_cursor = 0;
-    // Set up a pending dispatch
-    app.input.pending_dispatch = Some(PendingDispatch::Review(ReviewAgentRequest {
-        repo: "acme/app".to_string(),
-        github_repo: "acme/app".to_string(),
-        number: 1,
-        head_ref: String::new(),
-        is_dependabot: false,
-    }));
 
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::DispatchReviewAgent(_))));
-}
-
-#[test]
-fn digit_key_selects_in_dispatch_repo_path_mode() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/tmp".to_string(), "/var".to_string()];
-    app.input.mode = InputMode::InputDispatchRepoPath;
-    app.input.buffer.clear();
-    app.input.pending_dispatch = Some(PendingDispatch::Review(ReviewAgentRequest {
-        repo: "acme/app".to_string(),
-        github_repo: "acme/app".to_string(),
-        number: 1,
-        head_ref: String::new(),
-        is_dependabot: false,
-    }));
-    // With empty buffer, filtered = ["/tmp", "/var"]; pressing '1' should select /tmp, not append
-    let cmds = app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(
-        !app.input.buffer.contains('1'),
-        "digit should not append to buffer when a filtered match exists"
-    );
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::DispatchReviewAgent(_))),
-        "digit '1' should dispatch the first matching repo path"
-    );
-}
 
 #[test]
 fn handle_key_epic_repo_path_enter_selects_cursor() {
@@ -13453,126 +11705,20 @@ fn handle_key_confirm_merge_pr_other_cancels() {
 // Input handler coverage: review repo filter
 // =====================================================================
 
-#[test]
-fn handle_key_review_repo_filter_enter_closes() {
-    let mut app = make_review_board_app();
-    app.input.mode = InputMode::ReviewRepoFilter;
 
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(*app.mode(), InputMode::Normal);
-}
 
-#[test]
-fn handle_key_review_repo_filter_esc_closes() {
-    let mut app = make_review_board_app();
-    app.input.mode = InputMode::ReviewRepoFilter;
 
-    app.handle_key(make_key(KeyCode::Esc));
-    assert_eq!(*app.mode(), InputMode::Normal);
-}
 
-#[test]
-fn handle_key_review_repo_filter_tab_toggles_mode() {
-    let mut app = make_review_board_app();
-    app.input.mode = InputMode::ReviewRepoFilter;
-    let initial_mode = app.review.review.repo_filter_mode;
-
-    app.handle_key(make_key(KeyCode::Tab));
-    assert_ne!(app.review.review.repo_filter_mode, initial_mode);
-}
-
-#[test]
-fn handle_key_review_repo_filter_a_toggles_all() {
-    let mut app = make_review_board_app();
-    app.input.mode = InputMode::ReviewRepoFilter;
-
-    app.handle_key(make_key(KeyCode::Char('a')));
-    // All repos should be toggled
-    assert!(!app.review.review.repo_filter.is_empty());
-}
-
-#[test]
-fn handle_key_review_repo_filter_unknown_key_is_noop() {
-    let mut app = make_review_board_app();
-    app.input.mode = InputMode::ReviewRepoFilter;
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(cmds.is_empty());
-}
 
 // =====================================================================
 // Input handler coverage: security repo filter
 // =====================================================================
 
-#[test]
-fn handle_key_security_repo_filter_enter_closes() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
 
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(*app.mode(), InputMode::Normal);
-}
 
-#[test]
-fn handle_key_security_repo_filter_esc_closes() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
 
-    app.handle_key(make_key(KeyCode::Esc));
-    assert_eq!(*app.mode(), InputMode::Normal);
-}
 
-#[test]
-fn handle_key_security_repo_filter_tab_toggles_mode() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
-    let initial_mode = app.security.repo_filter_mode;
 
-    app.handle_key(make_key(KeyCode::Tab));
-    assert_ne!(app.security.repo_filter_mode, initial_mode);
-}
-
-#[test]
-fn handle_key_security_repo_filter_a_toggles_all() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
-
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(!app.security.repo_filter.is_empty());
-}
-
-#[test]
-fn handle_key_security_repo_filter_digit_toggles_repo() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
-
-    // There are repos loaded from security alerts
-    if !app.active_security_repos().is_empty() {
-        app.handle_key(make_key(KeyCode::Char('1')));
-        assert!(!app.security.repo_filter.is_empty());
-    }
-}
-
-#[test]
-fn handle_key_security_repo_filter_unknown_key_is_noop() {
-    let mut app = make_security_board_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(cmds.is_empty());
-}
-#[test]
-fn security_board_capital_t_no_window_is_noop() {
-    let mut app = make_security_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
-    assert!(cmds.is_empty());
-}
-#[test]
-fn review_board_capital_t_no_window_is_noop() {
-    let mut app = make_review_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('T')));
-    assert!(cmds.is_empty());
-}
 // =====================================================================
 // Input handler coverage: tag input mode completeness
 // =====================================================================
@@ -13805,21 +11951,6 @@ fn handle_key_normal_board_unknown_key_is_noop() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
 }
-/// In Normal mode on the SecurityBoard view, keys route to the security board handler.
-#[test]
-fn handle_key_normal_security_board_routes_correctly() {
-    let mut app = make_app();
-    app.board.view_mode = ViewMode::SecurityBoard {
-        mode: SecurityBoardMode::default(),
-        selection: SecurityBoardSelection::new(),
-        dependabot_selection: ReviewBoardSelection::new(),
-        saved_board: BoardSelection::new(),
-    };
-    // Tab should switch away from security board
-    let cmds = app.handle_key(make_key(KeyCode::Tab));
-    assert!(cmds.is_empty());
-    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
-}
 
 /// InputTitle mode routes to the text input handler.
 #[test]
@@ -13852,15 +11983,6 @@ fn handle_key_input_repo_path_routes_to_text_input() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-/// InputDispatchRepoPath mode routes to the text input handler.
-#[test]
-fn handle_key_input_dispatch_repo_path_routes_to_text_input() {
-    let mut app = make_app();
-    app.input.mode = InputMode::InputDispatchRepoPath;
-    let cmds = app.handle_key(make_key(KeyCode::Esc));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
 /// InputEpicTitle mode routes to the text input handler.
 #[test]
@@ -14052,25 +12174,7 @@ fn handle_key_repo_filter_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-/// ReviewRepoFilter mode routes correctly.
-#[test]
-fn handle_key_review_repo_filter_routes_correctly() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ReviewRepoFilter;
-    let cmds = app.handle_key(make_key(KeyCode::Esc));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
-/// SecurityRepoFilter mode routes correctly.
-#[test]
-fn handle_key_security_repo_filter_routes_correctly() {
-    let mut app = make_app();
-    app.input.mode = InputMode::SecurityRepoFilter;
-    let cmds = app.handle_key(make_key(KeyCode::Esc));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
 /// InputPresetName mode routes to the preset name handler.
 #[test]
@@ -14103,25 +12207,7 @@ fn handle_key_confirm_delete_repo_path_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
 
-/// ConfirmApproveBotPr mode routes correctly.
-#[test]
-fn handle_key_confirm_approve_bot_pr_routes_correctly() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmApproveBotPr("url".to_string());
-    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
-/// ConfirmMergeBotPr mode routes correctly.
-#[test]
-fn handle_key_confirm_merge_bot_pr_routes_correctly() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmMergeBotPr("url".to_string());
-    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
 /// ConfirmQuit mode routes correctly.
 #[test]
@@ -14625,38 +12711,6 @@ fn inactive_duration_near_zero_after_mark_active() {
     assert!(duration < Duration::from_secs(1));
 }
 
-#[test]
-fn reviewer_mode_column_sort_is_alphabetical_by_repo() {
-    // Confirms that PRs are sorted alphabetically by repo within a column.
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard); // starts in Reviewer mode
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr_for_repo(
-                1,
-                "alice",
-                crate::models::ReviewDecision::ReviewRequired,
-                "org/zebra",
-            ),
-            make_review_pr_for_repo(
-                2,
-                "bob",
-                crate::models::ReviewDecision::ReviewRequired,
-                "org/alpha",
-            ),
-        ],
-    ));
-
-    let col = crate::models::ReviewDecision::ReviewRequired.column_index();
-    let prs = app.active_prs_for_column(col);
-    assert_eq!(prs.len(), 2);
-    assert_eq!(
-        prs[0].repo, "org/alpha",
-        "alphabetical sort should still apply"
-    );
-    assert_eq!(prs[1].repo, "org/zebra");
-}
 
 #[test]
 fn epic_view_header_shows_auto_dispatch_indicator() {
@@ -14884,143 +12938,24 @@ fn render_repo_path_mode_shows_filtered_list_when_typing() {
 // SecurityBoardMode and DependabotBoardState tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn security_board_defaults_to_dependabot_mode() {
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    assert!(matches!(
-        app.board.view_mode,
-        ViewMode::SecurityBoard {
-            mode: SecurityBoardMode::Dependabot,
-            ..
-        }
-    ));
-}
 
-#[test]
-fn dependabot_board_state_starts_empty() {
-    let app = make_app();
-    assert!(app.security.dependabot.prs.prs.is_empty());
-    assert!(app.security.dependabot.selected_prs.is_empty());
-}
 
-#[test]
-fn prs_loaded_bot_populates_security_dependabot() {
-    let mut app = make_app();
-    let pr = make_review_pr(42, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr.clone()]));
-    assert_eq!(app.security.dependabot.prs.prs.len(), 1);
-    assert_eq!(app.security.dependabot.prs.prs[0].number, 42);
-}
 
-#[test]
-fn prs_loaded_review_still_populates_review_board() {
-    let mut app = make_app();
-    let pr = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    assert_eq!(app.review.review.prs.len(), 1);
-}
 
-#[test]
-fn refresh_bot_prs_sets_dependabot_loading() {
-    let mut app = make_app();
-    app.update(Message::RefreshBotPrs);
-    assert!(app.security.dependabot.prs.loading);
-}
 
 // ---------------------------------------------------------------------------
 // Task 5: Dependabot approve/merge with confirmation
 // ---------------------------------------------------------------------------
 
-fn make_security_dependabot_app_with_pr() -> (App, String) {
-    let mut app = make_security_board_app();
-    let mut pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr.ci_status = crate::models::CiStatus::Success;
-    let url = pr.url.clone();
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    app.update(Message::SwitchSecurityBoardMode(
-        SecurityBoardMode::Dependabot,
-    ));
-    (app, url)
-}
 
 // (dependabot approve/merge key binding tests removed — those keys now go
 //  through handle_key_security_board with the unified security board handler)
 
-#[test]
-fn bot_pr_repo_filter_enter_closes() {
-    let (mut app, _) = make_security_dependabot_app_with_pr();
-    app.update(Message::StartBotPrRepoFilter);
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
-#[test]
-fn bot_pr_repo_filter_esc_closes() {
-    let (mut app, _) = make_security_dependabot_app_with_pr();
-    app.update(Message::StartBotPrRepoFilter);
-    app.handle_key(make_key(KeyCode::Esc));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
 
-#[test]
-fn bot_pr_repo_filter_tab_toggles_mode() {
-    let (mut app, _) = make_security_dependabot_app_with_pr();
-    app.update(Message::StartBotPrRepoFilter);
-    assert_eq!(
-        app.security.dependabot.prs.repo_filter_mode,
-        RepoFilterMode::Include
-    );
-    app.handle_key(make_key(KeyCode::Tab));
-    assert_eq!(
-        app.security.dependabot.prs.repo_filter_mode,
-        RepoFilterMode::Exclude
-    );
-    app.handle_key(make_key(KeyCode::Tab));
-    assert_eq!(
-        app.security.dependabot.prs.repo_filter_mode,
-        RepoFilterMode::Include
-    );
-}
 
-#[test]
-fn bot_pr_repo_filter_a_toggles_all() {
-    let (mut app, _) = make_security_dependabot_app_with_pr();
-    app.update(Message::StartBotPrRepoFilter);
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(!app.security.dependabot.prs.repo_filter.is_empty());
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(app.security.dependabot.prs.repo_filter.is_empty());
-}
 
-#[test]
-fn bot_pr_repo_filter_digit_toggles_repo() {
-    let (mut app, _) = make_security_dependabot_app_with_pr();
-    app.update(Message::StartBotPrRepoFilter);
-    app.handle_key(make_key(KeyCode::Char('1')));
-    assert_eq!(app.security.dependabot.prs.repo_filter.len(), 1);
-    app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(app.security.dependabot.prs.repo_filter.is_empty());
-}
 
-#[test]
-fn bot_pr_repo_filter_filters_prs() {
-    let mut app = make_security_board_app();
-    let mut pr_a = make_review_pr(1, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr_a.repo = "org/repo-a".to_string();
-    let mut pr_b = make_review_pr(2, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr_b.repo = "org/repo-b".to_string();
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr_a, pr_b]));
-    app.update(Message::SwitchSecurityBoardMode(
-        SecurityBoardMode::Dependabot,
-    ));
-
-    assert_eq!(app.filtered_bot_prs().len(), 2);
-
-    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
-    assert_eq!(app.filtered_bot_prs().len(), 1);
-    assert_eq!(app.filtered_bot_prs()[0].repo, "org/repo-a");
-}
 
 #[test]
 fn render_repo_path_mode_shows_all_when_buffer_empty() {
@@ -15056,102 +12991,10 @@ fn typing_resets_repo_cursor_to_zero() {
     assert_eq!(app.input.repo_cursor, 0);
 }
 
-#[test]
-fn security_dependabot_d_no_pr_is_noop() {
-    let mut app = make_security_board_app();
-    app.update(Message::SwitchSecurityBoardMode(
-        SecurityBoardMode::Dependabot,
-    ));
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds.is_empty());
-}
 
-#[test]
-fn agent_status_preserved_on_dependabot_pr_refresh() {
-    let mut app = make_security_board_app();
-    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
 
-    // Insert agent state into the map (as would happen after dispatch)
-    let key = crate::models::PrRef::new("acme/app".to_string(), 10);
-    app.review.review_agents.insert(
-        key.clone(),
-        super::types::ReviewAgentHandle {
-            tmux_window: "dispatch-review-acme-app-10".to_string(),
-            worktree: ".worktrees/review-acme-app-10".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
 
-    // Simulate refresh with fresh PR data (no agent fields)
-    let fresh_pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![fresh_pr]));
 
-    // Agent state survives the refresh because it is in the map, not on the PR struct
-    let handle = app.review.review_agents.get(&key).unwrap();
-    assert_eq!(handle.tmux_window, "dispatch-review-acme-app-10");
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
-}
-
-#[test]
-fn find_and_set_pr_agent_finds_dependabot_pr() {
-    let mut app = make_security_board_app();
-    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-
-    let kind = app.find_and_set_pr_agent(
-        "acme/app",
-        10,
-        "win-acme-app-10",
-        ".worktrees/review-acme-app-10",
-    );
-
-    assert_eq!(kind, Some(crate::db::PrKind::Bot));
-    let key = crate::models::PrRef::new("acme/app".to_string(), 10);
-    let handle = app.review.review_agents.get(&key).unwrap();
-    assert_eq!(handle.tmux_window, "win-acme-app-10");
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
-}
-
-#[test]
-fn review_agent_dispatched_for_dependabot_pr_persists_to_bot_table() {
-    let mut app = make_security_board_app();
-    let pr = make_review_pr(10, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-
-    let cmds = app.update(Message::ReviewAgentDispatched {
-        github_repo: "acme/app".to_string(),
-        number: 10,
-        tmux_window: "review-app-10".to_string(),
-        worktree: "/home/user/repo/.worktrees/review-10".to_string(),
-    });
-
-    let persist = cmds.iter().find_map(|c| {
-        if let Command::PersistReviewAgent { pr_kind, .. } = c {
-            Some(*pr_kind)
-        } else {
-            None
-        }
-    });
-    assert_eq!(persist, Some(crate::db::PrKind::Bot));
-}
-
-#[test]
-fn review_agent_dispatched_for_unknown_pr_skips_persist() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-
-    let cmds = app.update(Message::ReviewAgentDispatched {
-        github_repo: "acme/app".to_string(),
-        number: 999,
-        tmux_window: "review-app-999".to_string(),
-        worktree: "/home/user/repo/.worktrees/review-999".to_string(),
-    });
-
-    assert!(!cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistReviewAgent { .. })));
-}
 
 // Regression note for: buffered editor keystrokes leaking into repo picker.
 //
@@ -15171,68 +13014,6 @@ fn review_agent_dispatched_for_unknown_pr_skips_persist() {
 #[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
 fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 
-#[test]
-fn dependabot_in_review_column_findings_ready_sorts_before_reviewing() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-
-    // Two PRs — both will have agent state set via the map
-    let reviewing_pr = make_bot_pr(
-        1,
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    let findings_ready_pr = make_bot_pr(
-        2,
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![reviewing_pr, findings_ready_pr],
-    ));
-
-    // Insert agent state into the map — Reviewing for PR#1, FindingsReady for PR#2
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::types::ReviewAgentHandle {
-            tmux_window: "win-1".to_string(),
-            worktree: ".worktrees/review-1".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 2),
-        super::types::ReviewAgentHandle {
-            tmux_window: "win-2".to_string(),
-            worktree: ".worktrees/review-2".to_string(),
-            status: crate::models::ReviewAgentStatus::FindingsReady,
-        },
-    );
-
-    // Filter to column 1 (in_review) — same logic as the column renderer
-    let in_review: Vec<_> = app
-        .filtered_bot_prs()
-        .into_iter()
-        .filter(|pr| super::bot_pr_column(pr, app.pr_agent(pr).map(|h| h.status)) == 1)
-        .collect();
-
-    assert_eq!(
-        in_review.len(),
-        2,
-        "both PRs should be in the in_review column"
-    );
-    assert_eq!(
-        app.pr_agent(in_review[0]).map(|h| h.status),
-        Some(crate::models::ReviewAgentStatus::FindingsReady),
-        "FindingsReady should sort before Reviewing"
-    );
-    assert_eq!(
-        app.pr_agent(in_review[1]).map(|h| h.status),
-        Some(crate::models::ReviewAgentStatus::Reviewing),
-        "Reviewing should sort after FindingsReady"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Epic-in-epic: TUI navigation tests
@@ -15838,80 +13619,7 @@ fn startup_always_empty_tips_returns_none() {
     assert!(determine_tips_start(&[], 0, crate::models::TipsShowMode::Always).is_none());
 }
 
-#[test]
-fn review_agents_map_survives_pr_refresh() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(10, "alice", crate::models::ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
 
-    let key = crate::models::PrRef::new("acme/app".to_string(), 10);
-    app.review.review_agents.insert(
-        key.clone(),
-        super::types::ReviewAgentHandle {
-            tmux_window: "win-10".to_string(),
-            worktree: ".worktrees/review-10".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    // Refresh PR list — new PR has no agent fields
-    let refreshed_pr = make_review_pr(10, "alice", crate::models::ReviewDecision::ReviewRequired);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![refreshed_pr]));
-
-    assert!(
-        app.review.review_agents.contains_key(&key),
-        "review_agents map should survive a PR list refresh"
-    );
-    assert_eq!(app.review.review_agents[&key].tmux_window, "win-10");
-}
-
-#[test]
-fn fix_agents_map_survives_alert_refresh() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let alert = make_security_alert(5, "org/repo", crate::models::AlertSeverity::High);
-    app.update(Message::SecurityAlertsLoaded(vec![alert]));
-
-    let key = super::types::FixDispatchKey::new(
-        "org/repo".to_string(),
-        5,
-        crate::models::AlertKind::Dependabot,
-    );
-    app.security.fix_agents.insert(
-        key.clone(),
-        super::types::FixAgentHandle {
-            tmux_window: "fix-win-5".to_string(),
-            worktree: ".worktrees/fix-5".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-
-    // Refresh alerts — new alerts have no agent fields
-    let refreshed_alert = make_security_alert(5, "org/repo", crate::models::AlertSeverity::High);
-    app.update(Message::SecurityAlertsLoaded(vec![refreshed_alert]));
-
-    assert!(
-        app.security.fix_agents.contains_key(&key),
-        "fix_agents map should survive an alert list refresh"
-    );
-    assert_eq!(app.security.fix_agents[&key].tmux_window, "fix-win-5");
-}
-#[test]
-fn security_board_r_refreshes_security_alerts_in_alerts_mode() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::FetchSecurityAlerts)),
-        "r in Alerts mode should emit FetchSecurityAlerts"
-    );
-    assert!(
-        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
-        "r in Alerts mode must not emit ReReview"
-    );
-}
 
 // == refresh_status: text and color helper ==
 
@@ -16009,88 +13717,11 @@ fn refresh_status_red_at_4x_interval() {
 // Bug fix: clamp_dependabot_selection after bot-PR filter changes
 // ---------------------------------------------------------------------------
 
-/// Helper: put app into Dependabot PR sub-view with two bot PRs from distinct repos.
-fn make_two_bot_pr_app() -> App {
-    let mut app = make_security_board_app();
-    let mut pr_a = make_review_pr(1, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr_a.repo = "org/repo-a".to_string();
-    let mut pr_b = make_review_pr(2, "dependabot[bot]", ReviewDecision::ReviewRequired);
-    pr_b.repo = "org/repo-b".to_string();
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr_a, pr_b]));
-    app.update(Message::SwitchSecurityBoardMode(
-        SecurityBoardMode::Dependabot,
-    ));
-    app
-}
 
-fn set_dependabot_row(app: &mut App, col: usize, row: usize) {
-    if let ViewMode::SecurityBoard {
-        dependabot_selection,
-        ..
-    } = &mut app.board.view_mode
-    {
-        dependabot_selection.selected_row[col] = row;
-    }
-}
 
-fn get_dependabot_row(app: &App, col: usize) -> usize {
-    match app.view_mode() {
-        ViewMode::SecurityBoard {
-            dependabot_selection,
-            ..
-        } => dependabot_selection.selected_row[col],
-        _ => panic!("get_dependabot_row called while not in SecurityBoard view mode"),
-    }
-}
 
-#[test]
-fn toggle_bot_pr_repo_filter_clamps_selection() {
-    let mut app = make_two_bot_pr_app();
-    set_dependabot_row(&mut app, 0, 1); // cursor at row 1 (2 PRs visible in backlog)
-                                        // Include only repo-a → 1 PR visible, cursor must clamp to 0
-    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
-    assert_eq!(app.filtered_bot_prs().len(), 1);
-    assert_eq!(get_dependabot_row(&app, 0), 0);
-}
 
-#[test]
-fn close_bot_pr_filter_clamps_selection() {
-    let mut app = make_two_bot_pr_app();
-    // Include only repo-a
-    app.update(Message::StartBotPrRepoFilter);
-    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
-    // Manually move cursor past end of filtered list
-    set_dependabot_row(&mut app, 0, 5);
-    // Close filter — must clamp
-    app.update(Message::CloseBotPrRepoFilter);
-    assert_eq!(get_dependabot_row(&app, 0), 0);
-}
 
-#[test]
-fn toggle_all_bot_pr_repo_filter_clamps_selection() {
-    let mut app = make_two_bot_pr_app();
-    set_dependabot_row(&mut app, 0, 1); // cursor at row 1 (2 PRs)
-                                        // Switch to exclude mode, then toggle-all selects all repos →
-                                        // exclude all repos → 0 PRs visible → cursor must clamp to 0
-    app.update(Message::ToggleBotPrRepoFilterMode); // switch to exclude
-    app.update(Message::ToggleAllBotPrRepoFilter); // select all repos → exclude all
-    assert_eq!(app.filtered_bot_prs().len(), 0);
-    assert_eq!(get_dependabot_row(&app, 0), 0);
-}
-
-#[test]
-fn toggle_bot_pr_filter_mode_clamps_selection() {
-    let mut app = make_two_bot_pr_app();
-    // Include both repos → 2 PRs; cursor at row 1
-    app.update(Message::ToggleBotPrRepoFilter("org/repo-a".to_string()));
-    app.update(Message::ToggleBotPrRepoFilter("org/repo-b".to_string()));
-    set_dependabot_row(&mut app, 0, 1);
-    assert_eq!(app.filtered_bot_prs().len(), 2);
-    // Toggle to exclude mode: exclude {repo-a, repo-b} → 0 PRs → cursor must clamp to 0
-    app.update(Message::ToggleBotPrRepoFilterMode);
-    assert_eq!(app.filtered_bot_prs().len(), 0);
-    assert_eq!(get_dependabot_row(&app, 0), 0);
-}
 
 // ---------------------------------------------------------------------------
 // Bug fix: bot-PR filter overlay renders
@@ -16100,214 +13731,20 @@ fn toggle_bot_pr_filter_mode_clamps_selection() {
 // removed from the security board in favour of the unified 4-column alert view.
 // The overlay rendering tests for that sub-view have been removed accordingly.
 
-#[test]
-fn bot_pr_filter_overlay_hidden_when_not_in_filter_mode() {
-    let mut app = make_two_bot_pr_app();
-    // Do NOT enter filter mode
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        !buffer_contains(&buf, "Filter Repos"),
-        "overlay must not appear when BotPrRepoFilter is not active"
-    );
-}
 
-#[test]
-fn security_alerts_unconfigured_message_sets_flag() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    assert!(!app.security.unconfigured);
-    app.update(Message::SecurityAlertsUnconfigured);
-    assert!(app.security.unconfigured);
-    assert!(!app.security.loading);
-}
-
-#[test]
-fn security_alerts_loaded_clears_unconfigured_flag() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.security.unconfigured = true;
-    app.update(Message::SecurityAlertsLoaded(vec![]));
-    assert!(!app.security.unconfigured);
-}
-
-#[test]
-fn security_alerts_fetch_failed_clears_unconfigured_flag() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.security.unconfigured = true;
-    app.update(Message::SecurityAlertsFetchFailed("network error".into()));
-    assert!(!app.security.unconfigured);
-}
 
 // ---------------------------------------------------------------------------
 // sort_prs_for_display tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn sort_prs_for_display_groups_by_repo_alphabetically() {
-    let pr1 = make_review_pr_for_repo(
-        1,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/zzz",
-    );
-    let pr2 = make_review_pr_for_repo(
-        2,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/aaa",
-    );
-    let pr3 = make_review_pr_for_repo(
-        3,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/zzz",
-    );
 
-    let mut prs = vec![&pr1, &pr2, &pr3];
-    super::sort_prs_for_display(&mut prs);
 
-    // acme/aaa comes before acme/zzz alphabetically
-    assert_eq!(prs[0].repo, "acme/aaa");
-    assert_eq!(prs[1].repo, "acme/zzz");
-    assert_eq!(prs[2].repo, "acme/zzz");
-}
-
-#[test]
-fn sort_prs_for_display_no_duplicate_consecutive_repos() {
-    // Simulate interleaved order as returned by GitHub (sorted by updated_at across repos).
-    let mut pr_backend_old = make_review_pr_for_repo(
-        1,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/backend",
-    );
-    pr_backend_old.updated_at = chrono::DateTime::from_timestamp(1000, 0).unwrap();
-    let mut pr_app_mid = make_review_pr_for_repo(
-        2,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    pr_app_mid.updated_at = chrono::DateTime::from_timestamp(2000, 0).unwrap();
-    let mut pr_backend_new = make_review_pr_for_repo(
-        3,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/backend",
-    );
-    pr_backend_new.updated_at = chrono::DateTime::from_timestamp(3000, 0).unwrap();
-
-    // Sorted globally by updated_at DESC: [backend_new(3000), app_mid(2000), backend_old(1000)]
-    // → interleaved repos → duplicate headers without sort_prs_for_display.
-    let mut prs = vec![&pr_backend_new, &pr_app_mid, &pr_backend_old];
-    super::sort_prs_for_display(&mut prs);
-
-    // After sort: all acme/app PRs consecutive, all acme/backend consecutive.
-    let mut seen_repos: Vec<&str> = Vec::new();
-    let mut prev_repo = "";
-    for pr in &prs {
-        if pr.repo != prev_repo {
-            assert!(
-                !seen_repos.contains(&pr.repo.as_str()),
-                "Duplicate repo group: {}",
-                pr.repo
-            );
-            seen_repos.push(&pr.repo);
-            prev_repo = &pr.repo;
-        }
-    }
-}
-
-#[test]
-fn sort_prs_for_display_stable_by_updated_at_within_repo() {
-    let mut pr_old = make_review_pr_for_repo(
-        1,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    pr_old.updated_at = chrono::DateTime::from_timestamp(1000, 0).unwrap();
-    let mut pr_new = make_review_pr_for_repo(
-        2,
-        "dependabot[bot]",
-        ReviewDecision::ReviewRequired,
-        "acme/app",
-    );
-    pr_new.updated_at = chrono::DateTime::from_timestamp(2000, 0).unwrap();
-
-    let mut prs = vec![&pr_old, &pr_new];
-    super::sort_prs_for_display(&mut prs);
-
-    // Within same repo: newer (2000) before older (1000)
-    assert_eq!(prs[0].number, 2);
-    assert_eq!(prs[1].number, 1);
-}
 
 // ---------------------------------------------------------------------------
 // Task: approve/merge from review tab
 // ---------------------------------------------------------------------------
 
-fn make_reviewer_app_with_pr(
-    decision: ReviewDecision,
-    ci: crate::models::CiStatus,
-) -> (App, String) {
-    let mut pr = make_review_pr(42, "alice", decision);
-    pr.ci_status = ci;
-    let url = pr.url.clone();
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    // PRs default to Backlog (col 0) unless workflow state is set.
-    // Stay at col 0 to select the PR.
-    (app, url)
-}
 
-fn make_dependabot_app_with_pr(
-    decision: ReviewDecision,
-    ci: crate::models::CiStatus,
-) -> (App, String) {
-    let mut pr = make_review_pr(42, "dependabot", decision);
-    pr.ci_status = ci;
-    let url = pr.url.clone();
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![pr]));
-    // PRs default to Backlog (col 0) — stay there to select the PR.
-    (app, url)
-}
-#[test]
-fn review_approve_dependabot_mode_is_noop() {
-    let (mut app, _url) = make_dependabot_app_with_pr(
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(
-        matches!(app.input.mode, InputMode::Normal),
-        "approve key should do nothing in dependabot mode (not reviewer)"
-    );
-}
-#[test]
-fn review_merge_blocked_when_not_ready_to_merge() {
-    // ctrl+m does nothing when ReadyToMerge sub_state is not set
-    let (mut app, _url) = make_reviewer_app_with_pr(
-        ReviewDecision::ReviewRequired,
-        crate::models::CiStatus::None,
-    );
-    let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL));
-    assert!(
-        matches!(app.input.mode, InputMode::Normal),
-        "ctrl+m should do nothing when ReadyToMerge is not set"
-    );
-    assert!(cmds.is_empty());
-}
-#[test]
-fn review_approve_no_pr_selected_is_noop() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-    // No PRs loaded
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(matches!(app.input.mode, InputMode::Normal));
-}
 
 // --- selection preservation ---
 
@@ -16512,85 +13949,12 @@ fn test_selection_survives_flatten_toggle() {
     assert_eq!(pre_id, post_id);
 }
 
-#[test]
-fn test_review_selection_preserved_on_refresh() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
 
-    let prs = vec![
-        make_review_pr(2, "alice", ReviewDecision::ReviewRequired), // col 0, row 0 — selected
-        make_review_pr(3, "alice", ReviewDecision::ReviewRequired), // col 0, row 1
-    ];
-    app.set_review_prs(prs);
-    // Set anchor on PR 2 at row 0 (acme/app repo)
-    app.update_review_anchor_from_current();
-    let selected = app.selected_review_pr().unwrap();
-    assert_eq!(selected.number, 2);
-
-    // PR from "aaa/repo" is inserted — it sorts before "acme/app" so PR 2 moves to row 1.
-    // With clamping, cursor stays at row 0 → new PR (wrong).
-    // With anchor, cursor follows PR 2 to row 1 (correct).
-    let mut pr1 = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    pr1.repo = "aaa/repo".to_string();
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            pr1,
-            make_review_pr(2, "alice", ReviewDecision::ReviewRequired),
-            make_review_pr(3, "alice", ReviewDecision::ReviewRequired),
-        ],
-    ));
-
-    let selected = app.selected_review_pr().unwrap();
-    assert_eq!(selected.number, 2);
-}
-
-#[test]
-fn test_security_selection_preserved_on_refresh() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-
-    let alerts = vec![
-        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High), // Backlog col 0, row 0 — selected
-        make_security_alert(3, "org/repo", crate::models::AlertSeverity::High), // Backlog col 0, row 1
-    ];
-    app.set_security_alerts(alerts);
-
-    // Both alerts have no fix agents → Backlog column (col 0). Selection already at col 0.
-    // Set anchor on alert 2 at row 0 (org/repo)
-    app.update_security_anchor_from_current();
-    let selected = app.selected_security_alert().unwrap();
-    assert_eq!(selected.number, 2);
-
-    // Alert from "aaa/repo" is inserted — it sorts before "org/repo" so alert 2 moves to row 1.
-    // With clamping, cursor stays at row 0 → new alert (wrong).
-    // With anchor, cursor follows alert 2 to row 1 (correct).
-    let mut alert1 = make_security_alert(1, "aaa/repo", crate::models::AlertSeverity::High);
-    alert1.repo = "aaa/repo".to_string();
-    app.update(Message::SecurityAlertsLoaded(vec![
-        alert1,
-        make_security_alert(2, "org/repo", crate::models::AlertSeverity::High),
-        make_security_alert(3, "org/repo", crate::models::AlertSeverity::High),
-    ]));
-
-    let selected = app.selected_security_alert().unwrap();
-    assert_eq!(selected.number, 2);
-}
 
 // ---------------------------------------------------------------------------
 // Security board: workflow column redesign (task #305)
 // ---------------------------------------------------------------------------
 
-fn make_fix_agent_handle(
-    status: crate::models::ReviewAgentStatus,
-) -> crate::tui::types::FixAgentHandle {
-    crate::tui::types::FixAgentHandle {
-        tmux_window: "fix-repo-1".to_string(),
-        worktree: "/tmp/fix-repo-1".to_string(),
-        status,
-    }
-}
 
 // -- SecurityWorkflowColumn enum --
 
@@ -16624,540 +13988,25 @@ fn workflow_column_count_is_three() {
 
 // -- Column assignment: workflow_column_for_alert --
 
-#[test]
-fn workflow_column_for_alert_no_agent_is_backlog() {
-    use crate::models::SecurityWorkflowColumn;
-    let state = crate::tui::types::SecurityBoardState::default();
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
-    assert_eq!(
-        state.workflow_column_for_alert(&alert),
-        SecurityWorkflowColumn::Backlog
-    );
-}
 
-#[test]
-fn workflow_column_for_alert_idle_agent_is_backlog() {
-    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
-    use crate::tui::types::FixDispatchKey;
-    let mut state = crate::tui::types::SecurityBoardState::default();
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
-    let key = FixDispatchKey::new("org/repo".to_string(), 1, AlertKind::Dependabot);
-    state
-        .fix_agents
-        .insert(key, make_fix_agent_handle(ReviewAgentStatus::Idle));
-    assert_eq!(
-        state.workflow_column_for_alert(&alert),
-        SecurityWorkflowColumn::Backlog
-    );
-}
 
-#[test]
-fn workflow_column_for_alert_reviewing_is_in_progress() {
-    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
-    use crate::tui::types::FixDispatchKey;
-    let mut state = crate::tui::types::SecurityBoardState::default();
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
-    let key = FixDispatchKey::new("org/repo".to_string(), 1, AlertKind::Dependabot);
-    state
-        .fix_agents
-        .insert(key, make_fix_agent_handle(ReviewAgentStatus::Reviewing));
-    assert_eq!(
-        state.workflow_column_for_alert(&alert),
-        SecurityWorkflowColumn::InProgress
-    );
-}
 
-#[test]
-fn workflow_column_for_alert_findings_ready_is_review() {
-    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
-    use crate::tui::types::FixDispatchKey;
-    let mut state = crate::tui::types::SecurityBoardState::default();
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
-    let key = FixDispatchKey::new("org/repo".to_string(), 1, AlertKind::Dependabot);
-    state
-        .fix_agents
-        .insert(key, make_fix_agent_handle(ReviewAgentStatus::FindingsReady));
-    assert_eq!(
-        state.workflow_column_for_alert(&alert),
-        SecurityWorkflowColumn::Review
-    );
-}
 
 // -- Column filtering: alerts_for_workflow_column --
 
-#[test]
-fn alerts_for_workflow_column_partitions_correctly() {
-    use crate::models::{AlertKind, ReviewAgentStatus, SecurityWorkflowColumn};
-    use crate::tui::types::FixDispatchKey;
-    let mut state = crate::tui::types::SecurityBoardState::default();
 
-    let a1 = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
-    let a2 = make_security_alert(2, "org/repo", crate::models::AlertSeverity::High);
-    let a3 = make_security_alert(3, "org/repo", crate::models::AlertSeverity::Medium);
 
-    state.set_alerts(vec![a1, a2, a3]);
 
-    // Alert 2 is being fixed (In Progress)
-    state.fix_agents.insert(
-        FixDispatchKey::new("org/repo".to_string(), 2, AlertKind::Dependabot),
-        make_fix_agent_handle(ReviewAgentStatus::Reviewing),
-    );
-    // Alert 3 is in review (PR open)
-    state.fix_agents.insert(
-        FixDispatchKey::new("org/repo".to_string(), 3, AlertKind::Dependabot),
-        make_fix_agent_handle(ReviewAgentStatus::FindingsReady),
-    );
 
-    let backlog = state.alerts_for_workflow_column(SecurityWorkflowColumn::Backlog);
-    let in_progress = state.alerts_for_workflow_column(SecurityWorkflowColumn::InProgress);
-    let review = state.alerts_for_workflow_column(SecurityWorkflowColumn::Review);
 
-    assert_eq!(backlog.len(), 1);
-    assert_eq!(backlog[0].number, 1);
-    assert_eq!(in_progress.len(), 1);
-    assert_eq!(in_progress[0].number, 2);
-    assert_eq!(review.len(), 1);
-    assert_eq!(review[0].number, 3);
-}
 
-#[test]
-fn review_board_mode_column_labels_v2() {
-    use crate::models::ReviewWorkflowState::*;
-    use crate::tui::types::ReviewBoardMode;
 
-    assert_eq!(ReviewBoardMode::column_label(Backlog), "Backlog");
-    assert_eq!(ReviewBoardMode::column_label(Ongoing), "Ongoing");
-    assert_eq!(
-        ReviewBoardMode::column_label(ActionRequired),
-        "Action Required"
-    );
-    assert_eq!(ReviewBoardMode::column_label(Done), "Done");
-}
 
-#[test]
-fn workflow_states_loaded_populates_review_board() {
-    use crate::db::PrWorkflowRow;
-    use crate::models::{ReviewWorkflowState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
 
-    let mut app = make_app();
-    let rows = vec![PrWorkflowRow {
-        repo: "org/repo".into(),
-        number: 1,
-        kind: WorkflowItemKind::ReviewerPr,
-        state: "ongoing".into(),
-        sub_state: Some("reviewing".into()),
-        updated_at: chrono::Utc::now(),
-    }];
-    app.update(Message::WorkflowStatesLoaded(rows));
 
-    let key = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::ReviewerPr);
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, ReviewWorkflowState::Ongoing);
-}
 
-#[test]
-fn workflow_states_loaded_populates_security_board() {
-    use crate::db::PrWorkflowRow;
-    use crate::models::{SecurityWorkflowState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
 
-    let mut app = make_app();
-    let rows = vec![PrWorkflowRow {
-        repo: "org/repo".into(),
-        number: 42,
-        kind: WorkflowItemKind::DependabotAlert,
-        state: "ongoing".into(),
-        sub_state: None,
-        updated_at: chrono::Utc::now(),
-    }];
-    app.update(Message::WorkflowStatesLoaded(rows));
 
-    let key = WorkflowKey::new("org/repo".into(), 42, WorkflowItemKind::DependabotAlert);
-    let (state, _) = app.security.security_workflow_states[&key];
-    assert_eq!(state, SecurityWorkflowState::Ongoing);
-}
 
-#[test]
-fn workflow_states_loaded_clears_pruned_review_rows() {
-    use crate::db::PrWorkflowRow;
-    use crate::models::{ReviewWorkflowState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
 
-    let mut app = make_app();
 
-    // First load: insert two review PRs
-    let key1 = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::ReviewerPr);
-    let key2 = WorkflowKey::new("org/repo".into(), 2, WorkflowItemKind::ReviewerPr);
-    let rows = vec![
-        PrWorkflowRow {
-            repo: "org/repo".into(),
-            number: 1,
-            kind: WorkflowItemKind::ReviewerPr,
-            state: "ongoing".into(),
-            sub_state: Some("reviewing".into()),
-            updated_at: chrono::Utc::now(),
-        },
-        PrWorkflowRow {
-            repo: "org/repo".into(),
-            number: 2,
-            kind: WorkflowItemKind::ReviewerPr,
-            state: "backlog".into(),
-            sub_state: None,
-            updated_at: chrono::Utc::now(),
-        },
-    ];
-    app.update(Message::WorkflowStatesLoaded(rows));
-
-    // Both should be in the map
-    assert!(app.review.review_workflow_states.contains_key(&key1));
-    assert!(app.review.review_workflow_states.contains_key(&key2));
-    let (state1, _) = app.review.review_workflow_states[&key1];
-    assert_eq!(state1, ReviewWorkflowState::Ongoing);
-
-    // Second load: only include PR 1 (PR 2 is pruned from the DB)
-    let rows = vec![PrWorkflowRow {
-        repo: "org/repo".into(),
-        number: 1,
-        kind: WorkflowItemKind::ReviewerPr,
-        state: "action_required".into(),
-        sub_state: Some("changes_requested".into()),
-        updated_at: chrono::Utc::now(),
-    }];
-    app.update(Message::WorkflowStatesLoaded(rows));
-
-    // PR 1 should be updated
-    let (state1, _) = app.review.review_workflow_states[&key1];
-    assert_eq!(state1, ReviewWorkflowState::ActionRequired);
-
-    // PR 2 should be removed (pruned from the fresh load)
-    assert!(!app.review.review_workflow_states.contains_key(&key2));
-}
-
-#[test]
-fn workflow_states_loaded_clears_pruned_security_rows() {
-    use crate::db::PrWorkflowRow;
-    use crate::models::{SecurityWorkflowState, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_app();
-
-    // First load: insert two security alerts
-    let key1 = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::DependabotAlert);
-    let key2 = WorkflowKey::new("org/repo".into(), 2, WorkflowItemKind::CodeScanAlert);
-    let rows = vec![
-        PrWorkflowRow {
-            repo: "org/repo".into(),
-            number: 1,
-            kind: WorkflowItemKind::DependabotAlert,
-            state: "ongoing".into(),
-            sub_state: None,
-            updated_at: chrono::Utc::now(),
-        },
-        PrWorkflowRow {
-            repo: "org/repo".into(),
-            number: 2,
-            kind: WorkflowItemKind::CodeScanAlert,
-            state: "backlog".into(),
-            sub_state: None,
-            updated_at: chrono::Utc::now(),
-        },
-    ];
-    app.update(Message::WorkflowStatesLoaded(rows));
-
-    // Both should be in the map
-    assert!(app.security.security_workflow_states.contains_key(&key1));
-    assert!(app.security.security_workflow_states.contains_key(&key2));
-
-    // Second load: only include alert 1 (alert 2 is pruned)
-    let rows = vec![PrWorkflowRow {
-        repo: "org/repo".into(),
-        number: 1,
-        kind: WorkflowItemKind::DependabotAlert,
-        state: "action_required".into(),
-        sub_state: None,
-        updated_at: chrono::Utc::now(),
-    }];
-    app.update(Message::WorkflowStatesLoaded(rows));
-
-    // Alert 1 should be updated
-    let (state1, _) = app.security.security_workflow_states[&key1];
-    assert_eq!(state1, SecurityWorkflowState::ActionRequired);
-
-    // Alert 2 should be removed (pruned from the fresh load)
-    assert!(!app.security.security_workflow_states.contains_key(&key2));
-}
-
-#[test]
-fn review_workflow_updated_sets_state() {
-    use crate::models::WorkflowItemKind;
-    use crate::models::{ReviewWorkflowState, ReviewWorkflowSubState};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_app();
-    let key = WorkflowKey::new("org/repo".into(), 5, WorkflowItemKind::ReviewerPr);
-    app.update(Message::ReviewWorkflowUpdated {
-        key: key.clone(),
-        state: ReviewWorkflowState::ActionRequired,
-        sub_state: Some(ReviewWorkflowSubState::ChangesRequested),
-    });
-
-    let (state, sub) = app.review.review_workflow_states[&key];
-    assert_eq!(state, ReviewWorkflowState::ActionRequired);
-    assert_eq!(sub, Some(ReviewWorkflowSubState::ChangesRequested));
-}
-
-#[test]
-fn security_workflow_updated_sets_state() {
-    use crate::models::WorkflowItemKind;
-    use crate::models::{SecurityWorkflowState, SecurityWorkflowSubState};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_app();
-    let key = WorkflowKey::new("org/repo".into(), 7, WorkflowItemKind::CodeScanAlert);
-    app.update(Message::SecurityWorkflowUpdated {
-        key: key.clone(),
-        state: SecurityWorkflowState::ActionRequired,
-        sub_state: Some(SecurityWorkflowSubState::FindingsReady),
-    });
-
-    let (state, sub) = app.security.security_workflow_states[&key];
-    assert_eq!(state, SecurityWorkflowState::ActionRequired);
-    assert_eq!(sub, Some(SecurityWorkflowSubState::FindingsReady));
-}
-
-#[test]
-fn move_review_item_forward_noop_when_not_in_review_board() {
-    let mut app = make_app();
-    // Not in review board mode — should be a no-op
-    let cmds = app.update(Message::MoveReviewItemForward);
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn move_security_item_forward_noop_when_not_in_security_board() {
-    let mut app = make_app();
-    // Not in security board mode — should be a no-op
-    let cmds = app.update(Message::MoveSecurityItemForward);
-    assert!(cmds.is_empty());
-}
-
-#[test]
-fn move_review_item_forward_advances_workflow_state() {
-    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    // make_review_board_app: PR #1 (alice, ReviewRequired) is at col 0, row 0
-    let mut app = make_review_board_app();
-    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
-
-    // Start at Backlog (default) — PR 1 is at col 0 row 0
-    let cmds = app.update(Message::MoveReviewItemForward);
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, Ongoing);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
-
-    // Now navigate to col 1 where PR 1 moved, select it, advance again
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(1);
-        sel.set_row(1, 0);
-    }
-    let cmds = app.update(Message::MoveReviewItemForward);
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, ActionRequired);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
-
-    // Navigate to col 2 and advance again
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-        sel.set_row(2, 0);
-    }
-    let cmds = app.update(Message::MoveReviewItemForward);
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, Done);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })));
-}
-
-#[test]
-fn move_review_item_back_retreats_workflow_state() {
-    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_review_board_app();
-    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
-
-    // Seed the state at Done and navigate cursor to col 3
-    app.review
-        .review_workflow_states
-        .insert(key.clone(), (Done, None));
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(3);
-        sel.set_row(3, 0);
-    }
-
-    // Done → ActionRequired
-    app.update(Message::MoveReviewItemBack);
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, ActionRequired);
-
-    // Navigate to col 2
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(2);
-        sel.set_row(2, 0);
-    }
-    // ActionRequired → Ongoing
-    app.update(Message::MoveReviewItemBack);
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, Ongoing);
-
-    // Navigate to col 1
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(1);
-        sel.set_row(1, 0);
-    }
-    // Ongoing → Backlog
-    app.update(Message::MoveReviewItemBack);
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, Backlog);
-}
-
-#[test]
-fn move_review_item_forward_noop_at_done() {
-    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_review_board_app();
-    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
-
-    // Seed the state at Done and navigate cursor to col 3
-    app.review
-        .review_workflow_states
-        .insert(key.clone(), (Done, None));
-    if let Some(sel) = app.review_selection_mut() {
-        sel.set_column(3);
-        sel.set_row(3, 0);
-    }
-
-    // At Done, forward should emit no command
-    let cmds = app.update(Message::MoveReviewItemForward);
-    assert!(cmds.is_empty(), "Expected no commands when already at Done");
-    // State should remain Done
-    let (state, _) = app.review.review_workflow_states[&key];
-    assert_eq!(state, Done);
-}
-
-#[test]
-fn move_review_item_back_noop_at_backlog() {
-    use crate::models::{ReviewWorkflowState::*, WorkflowItemKind};
-    use crate::tui::types::WorkflowKey;
-
-    let mut app = make_review_board_app();
-    let key = WorkflowKey::new("acme/app".into(), 1, WorkflowItemKind::ReviewerPr);
-
-    // State starts at Backlog (default — no entry in map)
-    let cmds = app.update(Message::MoveReviewItemBack);
-    assert!(
-        cmds.is_empty(),
-        "Expected no commands when already at Backlog"
-    );
-    // State should remain Backlog (not inserted into the map)
-    let state = app
-        .review
-        .review_workflow_states
-        .get(&key)
-        .map(|(s, _)| *s)
-        .unwrap_or(Backlog);
-    assert_eq!(state, Backlog);
-}
-
-#[test]
-fn prs_loaded_upgrades_sub_state_to_ready_to_merge() {
-    use crate::models::{
-        CiStatus, ReviewDecision, ReviewWorkflowState, ReviewWorkflowSubState, WorkflowItemKind,
-    };
-    use crate::tui::types::{PrListKind, WorkflowKey};
-
-    let mut app = make_app();
-    let key = WorkflowKey::new("org/repo".into(), 1, WorkflowItemKind::ReviewerPr);
-
-    // Pre-populate as ActionRequired/FindingsReady
-    app.review.review_workflow_states.insert(
-        key.clone(),
-        (
-            ReviewWorkflowState::ActionRequired,
-            Some(ReviewWorkflowSubState::FindingsReady),
-        ),
-    );
-
-    // Load a PR that is approved with CI passing
-    let mut pr = make_review_pr_for_repo(1, "alice", ReviewDecision::Approved, "org/repo");
-    pr.ci_status = CiStatus::Success;
-
-    let cmds = app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-
-    let (_, sub) = app.review.review_workflow_states[&key];
-    assert_eq!(sub, Some(ReviewWorkflowSubState::ReadyToMerge));
-    // Should emit PersistReviewWorkflow
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::PersistReviewWorkflow { .. })),
-        "Expected PersistReviewWorkflow command"
-    );
-}
-#[test]
-fn review_board_ctrl_m_noop_when_not_ready_to_merge() {
-    let mut app = make_review_board_app();
-    // PR #1 has no ReadyToMerge sub_state
-    let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL));
-    // Should NOT enter merge confirmation mode
-    assert!(
-        !matches!(app.input.mode, InputMode::ConfirmMergeReviewPr(_)),
-        "ctrl+m should not trigger merge when sub_state != ReadyToMerge"
-    );
-    assert!(
-        cmds.is_empty(),
-        "ctrl+m with no ReadyToMerge should return empty commands"
-    );
-}
-#[test]
-fn security_board_digit_1_is_noop() {
-    // After removing mode switching, '1' should not switch modes
-    let mut app = make_security_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(
-        cmds.is_empty(),
-        "'1' should be a noop on security board (mode switching removed)"
-    );
-}
-
-#[test]
-fn security_board_digit_2_is_noop() {
-    let mut app = make_security_board_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert!(
-        cmds.is_empty(),
-        "'2' should be a noop on security board (mode switching removed)"
-    );
-}
-
-#[test]
-fn security_board_t_is_noop() {
-    // 't' kind filter should be removed
-    let mut app = make_security_board_app();
-    let kind_before = app.security.kind_filter;
-    let cmds = app.handle_key(make_key(KeyCode::Char('t')));
-    assert!(
-        cmds.is_empty(),
-        "'t' should be a noop on security board (kind filter removed)"
-    );
-    assert_eq!(
-        app.security.kind_filter, kind_before,
-        "'t' should not change kind_filter"
-    );
-}

@@ -15,7 +15,7 @@ use crate::editor::{
 };
 use crate::process::ProcessRunner;
 use crate::service::{UpdateEpicParams, UpdateTaskParams};
-use crate::tui::{App, Command, EditKind, EditorOutcome, Message, PrListKind};
+use crate::tui::{App, Command, EditKind, EditorOutcome, Message};
 use crate::{models, tmux};
 
 /// Interval between `has_window` polls while waiting for the editor to exit.
@@ -80,7 +80,7 @@ where
 ///
 /// For `GithubQueries` / `SecurityQueries` variants this reads from the
 /// database settings layer. Returns `(prefix, content)`.
-fn initial_content_for(rt: &TuiRuntime, kind: &EditKind) -> (String, String) {
+fn initial_content_for(kind: &EditKind) -> (String, String) {
     match kind {
         EditKind::TaskEdit(task) => {
             let prefix = format!("task-{}-", task.id.0);
@@ -96,71 +96,6 @@ fn initial_content_for(rt: &TuiRuntime, kind: &EditKind) -> (String, String) {
             "description-".to_string(),
             format_description_for_editor(""),
         ),
-        EditKind::GithubQueries(PrListKind::Bot) => {
-            use crate::github::{format_dependabot_config, DependabotConfig};
-
-            let raw = rt
-                .database
-                .get_setting_string("dependabot_config")
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let current = if raw.trim().is_empty() {
-                format_dependabot_config(&DependabotConfig::default())
-            } else {
-                raw
-            };
-            let header = "# Dependabot / Renovate PR queries\n\
-                          #\n\
-                          # Base query: GitHub search filters applied to every repo.\n\
-                          # Repositories: one owner/repo slug per line.\n\
-                          # Lines starting with # are ignored.\n\n";
-            (
-                "dependabot-config-".to_string(),
-                format!("{header}{current}\n"),
-            )
-        }
-        EditKind::GithubQueries(kind) => {
-            let key = kind.settings_key();
-            let label = match kind {
-                PrListKind::Review => "Review PRs",
-                PrListKind::Bot => unreachable!("Bot handled above"),
-            };
-            let current = rt
-                .database
-                .get_setting_string(key)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let header = format!(
-                "# GitHub queries for: {label}\n\
-                 # One search query per line. Blank lines and lines starting with # are ignored.\n\
-                 # See: https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests\n\n"
-            );
-            (
-                "github-queries-".to_string(),
-                format!("{header}{current}\n"),
-            )
-        }
-        EditKind::SecurityQueries => {
-            let current = rt
-                .database
-                .get_setting_string("github_queries_security")
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let header = "# Security alert repositories — one owner/repo per line.\n\
-                          # Lines starting with # and blank lines are ignored.\n\
-                          #\n\
-                          # Examples:\n\
-                          #   myorg/backend\n\
-                          #   myorg/frontend\n\
-                          #   myorg/infra\n\n";
-            (
-                "security-queries-".to_string(),
-                format!("{header}{current}\n"),
-            )
-        }
     }
 }
 
@@ -191,7 +126,7 @@ impl TuiRuntime {
             return;
         }
 
-        let (prefix, content) = initial_content_for(self, &kind);
+        let (prefix, content) = initial_content_for(&kind);
 
         // Write tempfile.
         let mut tmp = match TempfileBuilder::new()
@@ -300,11 +235,6 @@ impl TuiRuntime {
                 tracing::warn!("FinalizeEditorResult received Description kind; ignoring");
                 vec![]
             }
-            EditKind::GithubQueries(PrListKind::Bot) => {
-                self.finalize_dependabot_config(app, outcome)
-            }
-            EditKind::GithubQueries(pr_kind) => self.finalize_github_queries(app, pr_kind, outcome),
-            EditKind::SecurityQueries => self.finalize_security_queries(app, outcome),
         }
     }
 
@@ -380,78 +310,6 @@ impl TuiRuntime {
         app.update(Message::EpicEdited(updated))
     }
 
-    fn finalize_github_queries(
-        &self,
-        app: &mut App,
-        kind: PrListKind,
-        outcome: EditorOutcome,
-    ) -> Vec<Command> {
-        let Some(text) = saved_text(outcome) else {
-            return vec![];
-        };
-        let queries: String = text
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        if let Err(e) = self
-            .database
-            .set_setting_string(kind.settings_key(), &queries)
-        {
-            app.update(Message::Error(Self::db_error("saving github queries", e)));
-            return vec![];
-        }
-        app.update(Message::RefreshReviewPrs)
-    }
-
-    fn finalize_dependabot_config(&self, app: &mut App, outcome: EditorOutcome) -> Vec<Command> {
-        use crate::github::{
-            assemble_dependabot_queries, format_dependabot_config, parse_dependabot_config,
-        };
-
-        let Some(text) = saved_text(outcome) else {
-            return vec![];
-        };
-        let config = parse_dependabot_config(&text);
-        let (_, warnings) = assemble_dependabot_queries(&config);
-        for w in &warnings {
-            app.update(Message::StatusInfo(w.clone()));
-        }
-        if let Err(e) = self
-            .database
-            .set_setting_string("dependabot_config", &format_dependabot_config(&config))
-        {
-            app.update(Message::Error(Self::db_error(
-                "saving dependabot config",
-                e,
-            )));
-            return vec![];
-        }
-        app.update(Message::RefreshBotPrs)
-    }
-
-    fn finalize_security_queries(&self, app: &mut App, outcome: EditorOutcome) -> Vec<Command> {
-        let Some(text) = saved_text(outcome) else {
-            return vec![];
-        };
-        let repos: String = text
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        if let Err(e) = self
-            .database
-            .set_setting_string("github_queries_security", &repos)
-        {
-            app.update(Message::Error(Self::db_error("saving security queries", e)));
-            return vec![];
-        }
-        app.update(Message::RefreshSecurityAlerts)
-    }
 }
 
 /// Extract the saved text from an [`EditorOutcome`], returning `None` if
@@ -633,7 +491,7 @@ mod tests {
             cleanup_runner: None,
         });
 
-        rt.exec_pop_out_editor(&mut app, EditKind::SecurityQueries);
+        rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false });
 
         // No tmux calls should have been issued.
         assert_eq!(mock.recorded_calls().len(), 0);
@@ -734,64 +592,6 @@ mod tests {
         let still = db.get_task(task.id).unwrap().unwrap();
         assert_eq!(still.title, task.title);
         assert_eq!(still.description, task.description);
-    }
-
-    #[test]
-    fn finalize_security_queries_persists_setting() {
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let (rt, mut app) = runtime_with_runner(runner);
-
-        let edited = "# a comment\n\n  myorg/a  \nmyorg/b\n# trailing\n";
-        rt.exec_finalize_editor_result(
-            &mut app,
-            EditKind::SecurityQueries,
-            EditorOutcome::Saved(edited.into()),
-        );
-
-        let stored = rt
-            .database
-            .get_setting_string("github_queries_security")
-            .unwrap()
-            .unwrap();
-        assert_eq!(stored, "myorg/a\nmyorg/b");
-    }
-
-    #[test]
-    fn finalize_github_queries_review_persists_setting() {
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let (rt, mut app) = runtime_with_runner(runner);
-
-        let edited = "# header\nis:open is:pr review-requested:@me\n";
-        rt.exec_finalize_editor_result(
-            &mut app,
-            EditKind::GithubQueries(PrListKind::Review),
-            EditorOutcome::Saved(edited.into()),
-        );
-
-        let stored = rt
-            .database
-            .get_setting_string("github_queries_review")
-            .unwrap()
-            .unwrap();
-        assert_eq!(stored, "is:open is:pr review-requested:@me");
-    }
-
-    #[test]
-    fn finalize_cancelled_does_not_write_settings() {
-        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-        let (rt, mut app) = runtime_with_runner(runner);
-
-        rt.exec_finalize_editor_result(
-            &mut app,
-            EditKind::SecurityQueries,
-            EditorOutcome::Cancelled,
-        );
-
-        let stored = rt
-            .database
-            .get_setting_string("github_queries_security")
-            .unwrap();
-        assert!(stored.is_none());
     }
 
     #[test]

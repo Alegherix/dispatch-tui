@@ -4672,10 +4672,11 @@ async fn update_review_status_updates_pr() {
     .await;
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
-    let agents = state.db.load_pr_agent_states().unwrap();
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    let handle = agents.get(&key).expect("agent handle should be present");
-    assert_eq!(handle.status, ReviewAgentStatus::FindingsReady);
+    let status = state
+        .db
+        .pr_agent_status("review_prs", "acme/app", 42)
+        .unwrap();
+    assert_eq!(status, Some(ReviewAgentStatus::FindingsReady));
 }
 
 #[tokio::test]
@@ -5812,14 +5813,12 @@ async fn dispatch_review_agent_success() {
         "expected dispatch confirmation: {text}"
     );
 
-    let agents = db.load_pr_agent_states().unwrap();
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    let handle = agents
-        .get(&key)
-        .expect("agent handle should be present after dispatch");
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
-    assert!(!handle.tmux_window.is_empty());
-    assert!(!handle.worktree.is_empty());
+    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
+    assert_eq!(
+        status,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        "agent should be reviewing after dispatch"
+    );
 }
 
 #[tokio::test]
@@ -5889,15 +5888,14 @@ async fn dispatch_fix_agent_success() {
         "expected dispatch confirmation: {text}"
     );
 
-    use crate::tui::types::FixDispatchKey;
-    let agents = db.load_alert_agent_states().unwrap();
-    let key = FixDispatchKey::new("acme/api".to_string(), 7, AlertKind::Dependabot);
-    let handle = agents
-        .get(&key)
-        .expect("agent handle should be present after dispatch");
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
-    assert!(!handle.tmux_window.is_empty());
-    assert!(!handle.worktree.is_empty());
+    let status = db
+        .alert_agent_status("acme/api", 7, AlertKind::Dependabot)
+        .unwrap();
+    assert_eq!(
+        status,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        "agent should be reviewing after dispatch"
+    );
 }
 
 // ---------------------------------------------------------------------------

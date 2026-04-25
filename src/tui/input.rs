@@ -20,7 +20,6 @@ impl App {
             InputMode::InputTitle
             | InputMode::InputDescription
             | InputMode::InputRepoPath
-            | InputMode::InputDispatchRepoPath
             | InputMode::InputEpicTitle
             | InputMode::InputEpicDescription
             | InputMode::InputEpicRepoPath
@@ -41,16 +40,9 @@ impl App {
             InputMode::ConfirmEditTask(id) => self.handle_key_confirm_edit_task(key, id),
             InputMode::Help => self.handle_key_help(key),
             InputMode::RepoFilter => self.handle_key_repo_filter(key),
-            InputMode::ReviewRepoFilter => self.handle_key_review_repo_filter(key),
-            InputMode::BotPrRepoFilter => self.handle_key_bot_pr_repo_filter(key),
-            InputMode::SecurityRepoFilter => self.handle_key_security_repo_filter(key),
             InputMode::InputPresetName => self.handle_key_input_preset_name(key),
             InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
-            InputMode::ConfirmApproveBotPr(_) => self.handle_key_confirm_pr_op(key, true),
-            InputMode::ConfirmMergeBotPr(_) => self.handle_key_confirm_pr_op(key, false),
-            InputMode::ConfirmApproveReviewPr(_) => self.handle_key_confirm_review_pr_op(key, true),
-            InputMode::ConfirmMergeReviewPr(_) => self.handle_key_confirm_review_pr_op(key, false),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
         }
     }
@@ -91,14 +83,6 @@ impl App {
     fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
         if self.archive.visible {
             return self.handle_key_archive(key);
-        }
-
-        if matches!(self.board.view_mode, ViewMode::SecurityBoard { .. }) {
-            return self.handle_key_security_board(key);
-        }
-
-        if matches!(self.board.view_mode, ViewMode::ReviewBoard { .. }) {
-            return self.handle_key_review_board(key);
         }
 
         match key.code {
@@ -464,9 +448,7 @@ impl App {
         // In repo path modes, j/k navigate the filtered repo list
         let is_repo_mode = matches!(
             self.input.mode,
-            InputMode::InputRepoPath
-                | InputMode::InputEpicRepoPath
-                | InputMode::InputDispatchRepoPath
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
         );
         if is_repo_mode {
             match key.code {
@@ -488,9 +470,6 @@ impl App {
                         let path = filtered[idx].clone();
                         let msg = match self.input.mode {
                             InputMode::InputEpicRepoPath => Message::SubmitEpicRepoPath(path),
-                            InputMode::InputDispatchRepoPath => {
-                                Message::SubmitDispatchRepoPath(path)
-                            }
                             _ => Message::SubmitRepoPath(path),
                         };
                         return self.update(msg);
@@ -502,9 +481,6 @@ impl App {
                     InputMode::InputTitle => self.update(Message::SubmitTitle(value)),
                     InputMode::InputDescription => self.update(Message::SubmitDescription(value)),
                     InputMode::InputRepoPath => self.update(Message::SubmitRepoPath(value)),
-                    InputMode::InputDispatchRepoPath => {
-                        self.update(Message::SubmitDispatchRepoPath(value))
-                    }
                     InputMode::InputEpicTitle => self.update(Message::SubmitEpicTitle(value)),
                     InputMode::InputEpicDescription => {
                         self.update(Message::SubmitEpicDescription(value))
@@ -720,24 +696,6 @@ impl App {
         }
     }
 
-    fn handle_key_review_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseReviewRepoFilter),
-            KeyCode::Tab => self.update(Message::ToggleReviewRepoFilterMode),
-            KeyCode::Char('a') => self.update(Message::ToggleAllReviewRepoFilter),
-            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
-                let idx = (c as usize) - ('1' as usize);
-                if let Some(repo) = self.active_review_repos().get(idx) {
-                    let repo = repo.clone();
-                    self.update(Message::ToggleReviewRepoFilter(repo))
-                } else {
-                    vec![]
-                }
-            }
-            _ => vec![],
-        }
-    }
-
     fn handle_key_input_preset_name(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Enter => {
@@ -819,93 +777,6 @@ impl App {
             KeyCode::Char('p') => self.update(Message::EpicWrapUpPr),
             KeyCode::Esc => self.update(Message::CancelEpicWrapUp),
             _ => vec![],
-        }
-    }
-
-    fn handle_key_security_board(&mut self, _key: KeyEvent) -> Vec<Command> {
-        // Pkg B (epic #29): security board is no longer user-reachable.
-        // Defensive belt-and-braces — kick back to the kanban on any key.
-        self.update(Message::SwitchToTaskBoard)
-    }
-
-    fn handle_key_bot_pr_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseBotPrRepoFilter),
-            KeyCode::Tab => self.update(Message::ToggleBotPrRepoFilterMode),
-            KeyCode::Char('a') => self.update(Message::ToggleAllBotPrRepoFilter),
-            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
-                let idx = (c as usize) - ('1' as usize);
-                if let Some(repo) = self.active_bot_pr_repos().get(idx) {
-                    let repo = repo.clone();
-                    self.update(Message::ToggleBotPrRepoFilter(repo))
-                } else {
-                    vec![]
-                }
-            }
-            _ => vec![],
-        }
-    }
-
-    fn handle_key_security_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Enter | KeyCode::Esc => self.update(Message::CloseSecurityRepoFilter),
-            KeyCode::Tab => self.update(Message::ToggleSecurityRepoFilterMode),
-            KeyCode::Char('a') => self.update(Message::ToggleAllSecurityRepoFilter),
-            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
-                let idx = (c as usize) - ('1' as usize);
-                if let Some(repo) = self.active_security_repos().get(idx) {
-                    let repo = repo.clone();
-                    self.update(Message::ToggleSecurityRepoFilter(repo))
-                } else {
-                    vec![]
-                }
-            }
-            _ => vec![],
-        }
-    }
-
-    pub(super) fn selected_dependabot_pr(&self) -> Option<&crate::models::ReviewPr> {
-        let dependabot_selection = match &self.board.view_mode {
-            ViewMode::SecurityBoard {
-                dependabot_selection,
-                ..
-            } => dependabot_selection,
-            _ => return None,
-        };
-        let col = dependabot_selection.selected_column;
-        let row = dependabot_selection.selected_row[col];
-        self.bot_prs_for_column(col).into_iter().nth(row)
-    }
-
-    fn handle_key_review_board(&mut self, _key: KeyEvent) -> Vec<Command> {
-        // Pkg B (epic #29): review board is no longer user-reachable.
-        // Defensive belt-and-braces — kick back to the kanban on any key.
-        self.update(Message::SwitchToTaskBoard)
-    }
-
-    fn handle_key_confirm_pr_op(&mut self, key: KeyEvent, is_approve: bool) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                if is_approve {
-                    self.update(Message::ConfirmApproveBotPr)
-                } else {
-                    self.update(Message::ConfirmMergeBotPr)
-                }
-            }
-            _ => self.update(Message::CancelPrOperation),
-        }
-    }
-
-    fn handle_key_confirm_review_pr_op(&mut self, key: KeyEvent, is_approve: bool) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                if is_approve {
-                    self.update(Message::ConfirmApproveReviewPr)
-                } else {
-                    self.update(Message::ConfirmMergeReviewPr)
-                }
-            }
-            _ => self.update(Message::CancelPrOperation),
         }
     }
 

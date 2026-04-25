@@ -909,46 +909,6 @@ impl super::PrStore for Database {
         anyhow::bail!("No active agent found for {repo}#{number}");
     }
 
-    fn load_pr_agent_states(
-        &self,
-    ) -> Result<std::collections::HashMap<crate::models::PrRef, crate::tui::types::ReviewAgentHandle>>
-    {
-        let conn = self.conn()?;
-        let mut map = std::collections::HashMap::new();
-        for table in &["review_prs", "my_prs", "bot_prs"] {
-            let mut stmt = conn.prepare(&format!(
-                "SELECT repo, number, tmux_window, worktree, agent_status
-                 FROM {table}
-                 WHERE tmux_window IS NOT NULL"
-            ))?;
-            let rows = stmt.query_map([], |row| {
-                let repo: String = row.get(0)?;
-                let number: i64 = row.get(1)?;
-                let tmux_window: String = row.get(2)?;
-                let worktree: String = row.get(3).unwrap_or_default();
-                let agent_status_str: Option<String> = row.get(4)?;
-                Ok((repo, number, tmux_window, worktree, agent_status_str))
-            })?;
-            for row in rows {
-                let (repo, number, tmux_window, worktree, agent_status_str) = row?;
-                let status = agent_status_str
-                    .as_deref()
-                    .and_then(ReviewAgentStatus::from_db_str)
-                    .unwrap_or(ReviewAgentStatus::Reviewing);
-                let key = crate::models::PrRef::new(repo, number);
-                map.insert(
-                    key,
-                    crate::tui::types::ReviewAgentHandle {
-                        tmux_window,
-                        worktree,
-                        status,
-                    },
-                );
-            }
-        }
-        Ok(map)
-    }
-
     fn pr_agent_status(
         &self,
         table: &str,
@@ -1028,58 +988,6 @@ impl super::AlertStore for Database {
             return Ok(Some(parse_security_alert_row(row)?));
         }
         Ok(None)
-    }
-
-    fn load_alert_agent_states(
-        &self,
-    ) -> Result<
-        std::collections::HashMap<
-            crate::tui::types::FixDispatchKey,
-            crate::tui::types::FixAgentHandle,
-        >,
-    > {
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT repo, number, kind, tmux_window, worktree, agent_status
-             FROM security_alerts
-             WHERE tmux_window IS NOT NULL",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let repo: String = row.get(0)?;
-            let number: i64 = row.get(1)?;
-            let kind_str: String = row.get(2)?;
-            let tmux_window: String = row.get(3)?;
-            let worktree: String = row.get(4).unwrap_or_default();
-            let agent_status_str: Option<String> = row.get(5)?;
-            Ok((
-                repo,
-                number,
-                kind_str,
-                tmux_window,
-                worktree,
-                agent_status_str,
-            ))
-        })?;
-        let mut map = std::collections::HashMap::new();
-        for row in rows {
-            let (repo, number, kind_str, tmux_window, worktree, agent_status_str) = row?;
-            let kind = crate::models::AlertKind::from_db_str(&kind_str)
-                .unwrap_or(crate::models::AlertKind::Dependabot);
-            let status = agent_status_str
-                .as_deref()
-                .and_then(ReviewAgentStatus::from_db_str)
-                .unwrap_or(ReviewAgentStatus::Reviewing);
-            let key = crate::tui::types::FixDispatchKey::new(repo, number, kind);
-            map.insert(
-                key,
-                crate::tui::types::FixAgentHandle {
-                    tmux_window,
-                    worktree,
-                    status,
-                },
-            );
-        }
-        Ok(map)
     }
 
     fn alert_agent_status(

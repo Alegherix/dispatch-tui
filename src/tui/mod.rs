@@ -9,65 +9,12 @@ use std::time::{Duration, Instant};
 
 use crate::dispatch;
 use crate::models::{
-    epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewDecision, SubStatus,
-    Task, TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn, DEFAULT_BASE_BRANCH,
+    epic_substatus, DispatchMode, Epic, EpicId, EpicSubstatus, ReviewDecision, SubStatus, Task,
+    TaskId, TaskStatus, TaskTag, TaskUsage, VisualColumn, DEFAULT_BASE_BRANCH,
     DEFAULT_QUICK_TASK_TITLE,
 };
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Column index for a bot PR in the Dependabot sub-view (3 columns: Backlog, In Review, Approved).
-fn bot_pr_column(
-    pr: &crate::models::ReviewPr,
-    agent_status: Option<crate::models::ReviewAgentStatus>,
-) -> usize {
-    if pr.review_decision == crate::models::ReviewDecision::Approved {
-        2
-    } else if matches!(
-        agent_status,
-        Some(
-            crate::models::ReviewAgentStatus::Reviewing
-                | crate::models::ReviewAgentStatus::FindingsReady
-        )
-    ) {
-        1
-    } else {
-        0
-    }
-}
-
-/// Derive the sub-state for a PR in the ActionRequired workflow column based
-/// on GitHub signals (review decision + CI status). Falls back to `current`
-/// when no stronger signal is present.
-fn derive_review_sub_state(
-    pr: &crate::models::ReviewPr,
-    current: Option<crate::models::ReviewWorkflowSubState>,
-) -> crate::models::ReviewWorkflowSubState {
-    use crate::models::{CiStatus, ReviewDecision, ReviewWorkflowSubState::*};
-    match (pr.review_decision, pr.ci_status) {
-        (ReviewDecision::Approved, CiStatus::Success) => ReadyToMerge,
-        (ReviewDecision::Approved, CiStatus::Failure) => CiFailing,
-        (ReviewDecision::ChangesRequested, _) => ChangesRequested,
-        _ => current.unwrap_or(FindingsReady),
-    }
-}
-
-/// Sort a slice of bot-PR references for display within a column.
-///
-/// Primary key: repo name (alphabetical). Secondary key: `updated_at` DESC
-/// within the same repo. This guarantees that all PRs from the same repo form
-/// a single consecutive block, so the repo group header is emitted exactly
-/// once per repo regardless of the order returned by GitHub.
-pub(in crate::tui) fn sort_prs_for_display(prs: &mut Vec<&crate::models::ReviewPr>) {
-    prs.sort_by(|a, b| {
-        a.repo
-            .cmp(&b.repo)
-            .then_with(|| b.updated_at.cmp(&a.updated_at))
-    });
-}
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -77,12 +24,6 @@ const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(5);
 
 /// Interval between PR status polls for tasks in review.
 const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
-
-/// Interval between review board data refreshes.
-pub(in crate::tui) const REVIEW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
-
-/// Interval between security board data refreshes (5 minutes).
-pub(in crate::tui) const SECURITY_POLL_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Max character width for task titles shown in confirmation popups and status messages.
 pub(in crate::tui) const TITLE_DISPLAY_LENGTH: usize = 30;
@@ -101,16 +42,10 @@ pub struct App {
     pub(in crate::tui) archive: ArchiveState,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
-    pub(in crate::tui) review: ReviewBoardState,
-    pub(in crate::tui) security: SecurityBoardState,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
     /// Task IDs with an in-flight dispatch (worktree + tmux setup running).
     /// Prevents duplicate dispatches when the user presses Enter rapidly.
     pub(in crate::tui) dispatching: HashSet<TaskId>,
-    /// Review agent dispatches in-flight, keyed by repo + PR number.
-    pub(in crate::tui) dispatching_review: HashSet<PrRef>,
-    /// Fix agent dispatches in-flight, keyed by repo + alert number + kind.
-    pub(in crate::tui) dispatching_fix: HashSet<FixDispatchKey>,
     pub(in crate::tui) tips: Option<TipsOverlayState>,
 }
 
@@ -171,12 +106,8 @@ impl App {
             archive: ArchiveState::default(),
             select: SelectionState::default(),
             filter: FilterState::default(),
-            review: ReviewBoardState::default(),
-            security: SecurityBoardState::default(),
             merge_queue: None,
             dispatching: HashSet::new(),
-            dispatching_review: HashSet::new(),
-            dispatching_fix: HashSet::new(),
             tips: None,
         };
         app.update_anchor_from_current();
@@ -188,30 +119,11 @@ impl App {
         self.dispatching.contains(&id)
     }
 
-    /// Returns true if a review agent dispatch is in-flight for the given PR.
-    pub fn is_dispatching_review(&self, repo: &str, number: i64) -> bool {
-        self.dispatching_review
-            .contains(&PrRef::new(repo.to_string(), number))
-    }
-
-    /// Returns true if a fix agent dispatch is in-flight for the given alert.
-    pub fn is_dispatching_fix(
-        &self,
-        repo: &str,
-        number: i64,
-        kind: crate::models::AlertKind,
-    ) -> bool {
-        self.dispatching_fix
-            .contains(&FixDispatchKey::new(repo.to_string(), number, kind))
-    }
-
     /// Get the current selection state (from whichever view mode is active).
     pub fn selection(&self) -> &BoardSelection {
         match &self.board.view_mode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
-            ViewMode::ReviewBoard { saved_board, .. } => saved_board,
-            ViewMode::SecurityBoard { saved_board, .. } => saved_board,
         }
     }
 
@@ -220,8 +132,6 @@ impl App {
         match &mut self.board.view_mode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
-            ViewMode::ReviewBoard { saved_board, .. } => saved_board,
-            ViewMode::SecurityBoard { saved_board, .. } => saved_board,
         }
     }
 
@@ -325,55 +235,6 @@ impl App {
     pub fn filter_presets(&self) -> &[(String, HashSet<String>, RepoFilterMode)] {
         &self.filter.presets
     }
-    pub fn review_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.review.review.prs
-    }
-    pub fn review_board_loading(&self) -> bool {
-        self.review.review.loading
-    }
-    pub fn review_last_fetch(&self) -> Option<Instant> {
-        self.review.review.last_fetch
-    }
-    pub fn review_bot_prs_last_fetch(&self) -> Option<Instant> {
-        self.review.bot.last_fetch
-    }
-    pub fn last_review_error(&self) -> Option<&str> {
-        self.review.review.last_error.as_deref()
-    }
-    pub fn last_bot_error(&self) -> Option<&str> {
-        self.security.dependabot.prs.last_error.as_deref()
-    }
-    pub fn review_detail_visible(&self) -> bool {
-        self.review.detail_visible
-    }
-    pub fn review_agent_handle(&self, repo: &str, number: i64) -> Option<&ReviewAgentHandle> {
-        let key = crate::models::PrRef::new(repo.to_string(), number);
-        self.review.review_agents.get(&key)
-    }
-    pub fn review_repo_filter(&self) -> &HashSet<String> {
-        &self.review.review.repo_filter
-    }
-    pub fn review_repo_filter_mode(&self) -> RepoFilterMode {
-        self.review.review.repo_filter_mode
-    }
-    pub fn review_bot_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.review.bot.prs
-    }
-    pub fn review_bot_prs_loading(&self) -> bool {
-        self.review.bot.loading
-    }
-    pub fn bot_prs(&self) -> &[crate::models::ReviewPr] {
-        &self.security.dependabot.prs.prs
-    }
-    pub fn bot_prs_loading(&self) -> bool {
-        self.security.dependabot.prs.loading
-    }
-    pub fn selected_bot_prs(&self) -> &HashSet<String> {
-        &self.security.dependabot.selected_prs
-    }
-    pub fn has_bot_pr_selection(&self) -> bool {
-        !self.security.dependabot.selected_prs.is_empty()
-    }
 
     /// Set of PR URLs from dispatch tasks (for matching against ReviewPr entries).
     pub fn dispatch_pr_urls(&self) -> HashSet<String> {
@@ -384,285 +245,8 @@ impl App {
             .collect()
     }
 
-    /// Get the review board selection state, if currently in review board mode.
-    pub fn review_selection(&self) -> Option<&ReviewBoardSelection> {
-        match &self.board.view_mode {
-            ViewMode::ReviewBoard { selection, .. } => Some(selection),
-            _ => None,
-        }
-    }
-
-    pub(in crate::tui) fn review_selection_mut(&mut self) -> Option<&mut ReviewBoardSelection> {
-        match &mut self.board.view_mode {
-            ViewMode::ReviewBoard { selection, .. } => Some(selection),
-            _ => None,
-        }
-    }
-
-    pub fn security_selection(&self) -> Option<&SecurityBoardSelection> {
-        match &self.board.view_mode {
-            ViewMode::SecurityBoard { selection, .. } => Some(selection),
-            _ => None,
-        }
-    }
-
-    pub(in crate::tui) fn security_selection_mut(&mut self) -> Option<&mut SecurityBoardSelection> {
-        match &mut self.board.view_mode {
-            ViewMode::SecurityBoard { selection, .. } => Some(selection),
-            _ => None,
-        }
-    }
-
-    pub fn security_detail_visible(&self) -> bool {
-        self.security.detail_visible
-    }
-
-    pub fn security_loading(&self) -> bool {
-        self.security.loading
-    }
-    pub fn security_last_fetch(&self) -> Option<Instant> {
-        self.security.last_fetch
-    }
-    pub fn bot_prs_last_fetch(&self) -> Option<Instant> {
-        self.security.dependabot.prs.last_fetch
-    }
-
-    pub fn last_security_error(&self) -> Option<&str> {
-        self.security.last_error.as_deref()
-    }
-
-    pub fn security_kind_filter(&self) -> Option<crate::models::AlertKind> {
-        self.security.kind_filter
-    }
-
-    /// Return alerts filtered by the security board's filters.
-    pub fn filtered_security_alerts(&self) -> Vec<&crate::models::SecurityAlert> {
-        self.security.filtered_alerts()
-    }
-
-    /// Return alerts for a specific workflow column (0=Backlog, 1=Ongoing, 2=ActionRequired, 3=Done)
-    /// using `security_workflow_states` for placement.
-    pub fn security_alerts_for_column(&self, col: usize) -> Vec<&crate::models::SecurityAlert> {
-        use crate::models::SecurityWorkflowState;
-        use crate::tui::types::WorkflowKey;
-        let wf_state = match col {
-            0 => SecurityWorkflowState::Backlog,
-            1 => SecurityWorkflowState::Ongoing,
-            2 => SecurityWorkflowState::ActionRequired,
-            3 => SecurityWorkflowState::Done,
-            _ => SecurityWorkflowState::Backlog,
-        };
-        let mut alerts: Vec<_> = self
-            .security
-            .filtered_alerts()
-            .into_iter()
-            .filter(|a| {
-                let kind = match a.kind {
-                    crate::models::AlertKind::Dependabot => {
-                        crate::models::WorkflowItemKind::DependabotAlert
-                    }
-                    crate::models::AlertKind::CodeScanning => {
-                        crate::models::WorkflowItemKind::CodeScanAlert
-                    }
-                };
-                let key = WorkflowKey::new(a.repo.clone(), a.number, kind);
-                let (state, _) = self
-                    .security
-                    .security_workflow_states
-                    .get(&key)
-                    .copied()
-                    .unwrap_or((SecurityWorkflowState::Backlog, None));
-                state == wf_state
-            })
-            .collect();
-        alerts.sort_by(|a, b| {
-            a.severity
-                .column_index()
-                .cmp(&b.severity.column_index())
-                .then_with(|| {
-                    b.cvss_score
-                        .unwrap_or(0.0)
-                        .partial_cmp(&a.cvss_score.unwrap_or(0.0))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .then(a.repo.cmp(&b.repo))
-                .then(a.number.cmp(&b.number))
-        });
-        alerts
-    }
-
-    pub fn bot_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
-        let mut prs: Vec<_> = self
-            .filtered_bot_prs()
-            .into_iter()
-            .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
-            .collect();
-        sort_prs_for_display(&mut prs);
-        prs
-    }
-
-    /// Get the currently selected SecurityAlert, if in security board mode.
-    pub fn selected_security_alert(&self) -> Option<&crate::models::SecurityAlert> {
-        let sel = self.security_selection()?;
-        let col = sel.column();
-        let row = sel.row(col);
-        self.security_alerts_for_column(col).into_iter().nth(row)
-    }
-
-    pub fn active_security_repos(&self) -> &[String] {
-        &self.security.repos
-    }
-
-    // Used only by board tests; removed by epic #29 Pkg D alongside the security board.
-    #[allow(dead_code)]
-    pub(in crate::tui) fn navigate_security_row(&mut self, delta: isize) {
-        let (col, count) = match self.security_selection() {
-            Some(sel) => {
-                let col = sel.selected_column;
-                let count = self.security_alerts_for_column(col).len();
-                (col, count)
-            }
-            None => return,
-        };
-        if count == 0 {
-            return;
-        }
-        if let Some(sel) = self.security_selection_mut() {
-            let current = sel.selected_row[col] as isize;
-            let new = (current + delta).clamp(0, (count - 1) as isize) as usize;
-            sel.selected_row[col] = new;
-        }
-    }
-
-    // Used only by board tests; removed by epic #29 Pkg D alongside the security board.
-    #[allow(dead_code)]
-    pub(in crate::tui) fn update_security_anchor_from_current(&mut self) {
-        let (col, row) = match self.security_selection() {
-            Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),
-            None => return,
-        };
-        let anchor = self
-            .security_alerts_for_column(col)
-            .into_iter()
-            .nth(row)
-            .map(|a| crate::models::PrRef::new(a.repo.clone(), a.number));
-        if let Some(sel) = self.security_selection_mut() {
-            sel.anchor_pr = anchor;
-        }
-    }
-
-    pub(in crate::tui) fn clamp_security_selection(&mut self) {
-        let counts: [usize; crate::models::SecurityWorkflowState::COLUMN_COUNT] =
-            std::array::from_fn(|col| self.security_alerts_for_column(col).len());
-        if let Some(sel) = self.security_selection_mut() {
-            for (col, &count) in counts.iter().enumerate() {
-                if count == 0 {
-                    sel.selected_row[col] = 0;
-                } else if sel.selected_row[col] >= count {
-                    sel.selected_row[col] = count - 1;
-                }
-            }
-        }
-    }
-
-    fn sync_security_selection(&mut self) {
-        let anchor = match self.security_selection() {
-            Some(sel) => sel.anchor_pr.clone(),
-            None => None,
-        };
-
-        let Some(anchor_pr) = anchor else {
-            return self.clamp_security_selection();
-        };
-
-        let counts: [usize; crate::models::SecurityWorkflowState::COLUMN_COUNT] =
-            std::array::from_fn(|col| self.security_alerts_for_column(col).len());
-
-        let mut found: Option<(usize, usize)> = None;
-        'outer: for col in 0..crate::models::SecurityWorkflowState::COLUMN_COUNT {
-            let alerts = self.security_alerts_for_column(col);
-            for (row, alert) in alerts.iter().enumerate() {
-                if anchor_pr.matches(alert.number, &alert.repo) {
-                    found = Some((col, row));
-                    break 'outer;
-                }
-            }
-        }
-
-        if let Some((found_col, found_row)) = found {
-            if let Some(sel) = self.security_selection_mut() {
-                for (col, &count) in counts.iter().enumerate() {
-                    if col == found_col {
-                        continue;
-                    }
-                    if count == 0 {
-                        sel.selected_row[col] = 0;
-                    } else if sel.selected_row[col] >= count {
-                        sel.selected_row[col] = count - 1;
-                    }
-                }
-                sel.selected_column = found_col;
-                sel.selected_row[found_col] = found_row;
-            }
-        } else {
-            self.clamp_security_selection();
-        }
-    }
-
     pub fn set_notifications_enabled(&mut self, enabled: bool) {
         self.notifications_enabled = enabled;
-    }
-
-    pub fn set_review_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
-        self.review.review.set_prs(prs);
-    }
-
-    pub fn set_bot_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
-        self.security.dependabot.prs.set_prs(prs);
-    }
-
-    pub fn set_security_alerts(&mut self, alerts: Vec<crate::models::SecurityAlert>) {
-        self.security.set_alerts(alerts);
-    }
-
-    /// Restore PR agent handles loaded from the database on startup.
-    pub fn set_pr_agent_states(
-        &mut self,
-        states: std::collections::HashMap<
-            crate::models::PrRef,
-            crate::tui::types::ReviewAgentHandle,
-        >,
-    ) {
-        self.review.review_agents = states;
-    }
-
-    /// Restore fix agent handles loaded from the database on startup.
-    pub fn set_alert_agent_states(
-        &mut self,
-        states: std::collections::HashMap<
-            crate::tui::types::FixDispatchKey,
-            crate::tui::types::FixAgentHandle,
-        >,
-    ) {
-        self.security.fix_agents = states;
-    }
-
-    /// Look up the agent handle for a PR (review, authored, or dependabot).
-    pub fn pr_agent(
-        &self,
-        pr: &crate::models::ReviewPr,
-    ) -> Option<&crate::tui::types::ReviewAgentHandle> {
-        let key = crate::models::PrRef::new(pr.repo.clone(), pr.number);
-        self.review.review_agents.get(&key)
-    }
-
-    /// Look up the agent handle for a security alert.
-    pub fn alert_agent(
-        &self,
-        alert: &crate::models::SecurityAlert,
-    ) -> Option<&crate::tui::types::FixAgentHandle> {
-        let key = FixDispatchKey::new(alert.repo.clone(), alert.number, alert.kind);
-        self.security.fix_agents.get(&key)
     }
 
     pub fn set_repo_filter(&mut self, filter: HashSet<String>) {
@@ -730,7 +314,6 @@ impl App {
                         .collect()
                 }
             }
-            ViewMode::ReviewBoard { .. } | ViewMode::SecurityBoard { .. } => vec![],
         }
     }
 
@@ -815,7 +398,6 @@ impl App {
                         }
                     }
                 }
-                _ => {}
             }
         }
 
@@ -872,7 +454,6 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current) && e.status == status)
                     .count()
             }
-            _ => 0,
         };
         task_count + epic_count
     }
@@ -906,7 +487,6 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current))
                     .collect()
             }
-            _ => vec![],
         };
 
         if !epics_to_show.is_empty() {
@@ -1037,7 +617,6 @@ impl App {
     pub fn sync_board_selection(&mut self) {
         let anchor = match &self.board.view_mode {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
-            _ => return self.clamp_selection(),
         };
 
         let Some(anchor) = anchor else {
@@ -1202,7 +781,6 @@ impl App {
             | Message::DescriptionEditorResult(_)
             | Message::EditorResult { .. }
             | Message::SubmitRepoPath(_)
-            | Message::SubmitDispatchRepoPath(_)
             | Message::SubmitTag(_)
             | Message::SubmitBaseBranch(_)
             | Message::InputChar(_)
@@ -1235,65 +813,18 @@ impl App {
             | Message::BatchArchiveEpics(_)
             | Message::ToggleEpicAutoDispatch(_)) => self.dispatch_epic(msg),
 
-            // Review board, PR flow, review agents, bot PRs
-            msg @ (Message::SwitchToReviewBoard
-            | Message::SwitchToTaskBoard
-            | Message::SwitchReviewBoardMode(_)
-            | Message::PrsLoaded(..)
-            | Message::PrsFetchFailed(..)
-            | Message::ToggleReviewDetail
-            | Message::DispatchReviewAgent(_)
-            | Message::ReviewAgentDispatched { .. }
-            | Message::ReviewAgentFailed { .. }
-            | Message::RefreshReviewPrs
-            | Message::RefreshBotPrs
-            | Message::BotPrsMerged(..)
-            | Message::ToggleSelectBotPr(_)
-            | Message::ClearBotPrSelection
-            | Message::PrCreated { .. }
+            // PR flow
+            msg @ (Message::PrCreated { .. }
             | Message::PrFailed { .. }
             | Message::PrMerged(_)
             | Message::StartMergePr(_)
             | Message::ConfirmMergePr
             | Message::CancelMergePr
             | Message::MergePrFailed { .. }
-            | Message::PrReviewState { .. }
-            | Message::ReviewStatusUpdated { .. }
-            | Message::DetachReviewAgent { .. }
-            | Message::StartReviewRepoFilter
-            | Message::CloseReviewRepoFilter
-            | Message::ToggleReviewRepoFilter(_)
-            | Message::ToggleAllReviewRepoFilter
-            | Message::ToggleReviewRepoFilterMode
-            | Message::ToggleDispatchPrFilter
-            | Message::StartApproveReviewPr
-            | Message::ConfirmApproveReviewPr
-            | Message::StartMergeReviewPr
-            | Message::ConfirmMergeReviewPr) => self.dispatch_review(msg),
+            | Message::PrReviewState { .. }) => self.dispatch_review(msg),
 
-            // Security board, fix agents, task filters, filter presets
-            msg @ (Message::SwitchToSecurityBoard
-            | Message::SecurityAlertsLoaded(_)
-            | Message::SecurityAlertsFetchFailed(_)
-            | Message::SecurityAlertsUnconfigured
-            | Message::RefreshSecurityAlerts
-            | Message::ToggleSecurityDetail
-            | Message::ToggleSecurityKindFilter
-            | Message::StartSecurityRepoFilter
-            | Message::CloseSecurityRepoFilter
-            | Message::ToggleSecurityRepoFilter(_)
-            | Message::ToggleAllSecurityRepoFilter
-            | Message::ToggleSecurityRepoFilterMode
-            | Message::StartBotPrRepoFilter
-            | Message::CloseBotPrRepoFilter
-            | Message::ToggleBotPrRepoFilter(_)
-            | Message::ToggleAllBotPrRepoFilter
-            | Message::ToggleBotPrRepoFilterMode
-            | Message::DispatchFixAgent { .. }
-            | Message::FixAgentDispatched { .. }
-            | Message::FixAgentFailed { .. }
-            | Message::DetachFixAgent { .. }
-            | Message::StartRepoFilter
+            // Task repo filters and filter presets
+            msg @ (Message::StartRepoFilter
             | Message::CloseRepoFilter
             | Message::ToggleRepoFilter(_)
             | Message::ToggleAllRepoFilter
@@ -1307,13 +838,7 @@ impl App {
             | Message::StartDeleteRepoPath
             | Message::DeleteRepoPath(_)
             | Message::CancelPresetInput
-            | Message::FilterPresetsLoaded(_)
-            | Message::SwitchSecurityBoardMode(_)
-            | Message::StartApproveBotPr
-            | Message::StartMergeBotPr
-            | Message::ConfirmApproveBotPr
-            | Message::ConfirmMergeBotPr
-            | Message::CancelPrOperation) => self.dispatch_security_and_filters(msg),
+            | Message::FilterPresetsLoaded(_)) => self.dispatch_security_and_filters(msg),
             Message::ShowTips {
                 tips,
                 starting_index,
@@ -1365,68 +890,6 @@ impl App {
                 } else {
                     vec![]
                 }
-            }
-            Message::WorkflowStatesLoaded(rows) => {
-                use crate::models::WorkflowItemKind::{
-                    CodeScanAlert, DependabotAlert, DependabotPr, ReviewerPr,
-                };
-                use crate::models::{
-                    ReviewWorkflowState, ReviewWorkflowSubState, SecurityWorkflowState,
-                    SecurityWorkflowSubState,
-                };
-                // Replace maps entirely so pruned rows don't linger in memory.
-                self.review.review_workflow_states.clear();
-                self.security.security_workflow_states.clear();
-                for row in rows {
-                    let key = WorkflowKey::new(row.repo.clone(), row.number, row.kind);
-                    match row.kind {
-                        ReviewerPr | DependabotPr => {
-                            let state = ReviewWorkflowState::from_db_str(&row.state)
-                                .unwrap_or(ReviewWorkflowState::Backlog);
-                            let sub = row
-                                .sub_state
-                                .as_deref()
-                                .and_then(ReviewWorkflowSubState::from_db_str);
-                            self.review.review_workflow_states.insert(key, (state, sub));
-                        }
-                        DependabotAlert | CodeScanAlert => {
-                            let state = SecurityWorkflowState::from_db_str(&row.state)
-                                .unwrap_or(SecurityWorkflowState::Backlog);
-                            let sub = row
-                                .sub_state
-                                .as_deref()
-                                .and_then(SecurityWorkflowSubState::from_db_str);
-                            self.security
-                                .security_workflow_states
-                                .insert(key, (state, sub));
-                        }
-                    }
-                }
-                vec![]
-            }
-            Message::MoveReviewItemForward => self.handle_move_review_item_forward(),
-            Message::MoveReviewItemBack => self.handle_move_review_item_back(),
-            Message::MoveSecurityItemForward => self.handle_move_security_item_forward(),
-            Message::MoveSecurityItemBack => self.handle_move_security_item_back(),
-            Message::ReviewWorkflowUpdated {
-                key,
-                state,
-                sub_state,
-            } => {
-                self.review
-                    .review_workflow_states
-                    .insert(key, (state, sub_state));
-                vec![]
-            }
-            Message::SecurityWorkflowUpdated {
-                key,
-                state,
-                sub_state,
-            } => {
-                self.security
-                    .security_workflow_states
-                    .insert(key, (state, sub_state));
-                vec![]
             }
         }
     }
@@ -1544,7 +1007,6 @@ impl App {
             Message::DescriptionEditorResult(value) => self.handle_description_editor_result(value),
             Message::EditorResult { kind, outcome } => self.handle_editor_result(kind, outcome),
             Message::SubmitRepoPath(value) => self.handle_submit_repo_path(value),
-            Message::SubmitDispatchRepoPath(value) => self.handle_submit_dispatch_repo_path(value),
             Message::SubmitTag(tag) => self.handle_submit_tag(tag),
             Message::SubmitBaseBranch(value) => self.handle_submit_base_branch(value),
             Message::InputChar(c) => self.handle_input_char(c),
@@ -1585,32 +1047,9 @@ impl App {
         }
     }
 
-    /// Review board: PR flow, review agents, bot PRs, review filters.
+    /// PR flow: creation, merge, review state.
     fn dispatch_review(&mut self, msg: Message) -> Vec<Command> {
         match msg {
-            Message::SwitchToReviewBoard => self.handle_switch_to_review_board(),
-            Message::SwitchToTaskBoard => self.handle_switch_to_task_board(),
-            Message::SwitchReviewBoardMode(mode) => self.handle_switch_review_board_mode(mode),
-            Message::PrsLoaded(kind, prs) => self.handle_prs_loaded(kind, prs),
-            Message::PrsFetchFailed(kind, err) => self.handle_prs_fetch_failed(kind, err),
-            Message::ToggleReviewDetail => self.handle_toggle_review_detail(),
-            Message::DispatchReviewAgent(req) => self.handle_dispatch_review_agent(req),
-            Message::ReviewAgentDispatched {
-                github_repo,
-                number,
-                tmux_window,
-                worktree,
-            } => self.handle_review_agent_dispatched(github_repo, number, tmux_window, worktree),
-            Message::ReviewAgentFailed {
-                github_repo,
-                number,
-                error,
-            } => self.handle_review_agent_failed(github_repo, number, error),
-            Message::RefreshReviewPrs => self.handle_refresh_review_prs(),
-            Message::RefreshBotPrs => self.handle_refresh_bot_prs(),
-            Message::BotPrsMerged(urls) => self.handle_bot_prs_merged(urls),
-            Message::ToggleSelectBotPr(url) => self.handle_toggle_select_bot_pr(url),
-            Message::ClearBotPrSelection => self.handle_clear_bot_pr_selection(),
             Message::PrCreated { id, pr_url } => self.handle_pr_created(id, pr_url),
             Message::PrFailed { id, error } => self.handle_pr_failed(id, error),
             Message::PrMerged(id) => self.handle_pr_merged(id),
@@ -1622,69 +1061,13 @@ impl App {
                 id,
                 review_decision,
             } => self.handle_pr_review_state(id, review_decision),
-            Message::ReviewStatusUpdated {
-                repo,
-                number,
-                status,
-            } => self.handle_review_status_updated(repo, number, status),
-            Message::DetachReviewAgent { repo, number } => {
-                self.handle_detach_review_agent(repo, number)
-            }
-            Message::StartReviewRepoFilter => self.handle_start_review_repo_filter(),
-            Message::CloseReviewRepoFilter => self.handle_close_review_repo_filter(),
-            Message::ToggleReviewRepoFilter(repo) => self.handle_toggle_review_repo_filter(repo),
-            Message::ToggleAllReviewRepoFilter => self.handle_toggle_all_review_repo_filter(),
-            Message::ToggleReviewRepoFilterMode => self.handle_toggle_review_repo_filter_mode(),
-            Message::ToggleDispatchPrFilter => self.handle_toggle_dispatch_pr_filter(),
-            Message::StartApproveReviewPr => self.handle_start_approve_review_pr(),
-            Message::ConfirmApproveReviewPr => self.handle_confirm_approve_review_pr(),
-            Message::StartMergeReviewPr => self.handle_start_merge_review_pr(),
-            Message::ConfirmMergeReviewPr => self.handle_confirm_merge_review_pr(),
             _ => unreachable!(),
         }
     }
 
-    /// Security board, fix agents, task repo filters, and filter presets.
+    /// Task repo filters and filter presets.
     fn dispatch_security_and_filters(&mut self, msg: Message) -> Vec<Command> {
         match msg {
-            Message::SwitchToSecurityBoard => self.handle_switch_to_security_board(),
-            Message::SecurityAlertsLoaded(alerts) => self.handle_security_alerts_loaded(alerts),
-            Message::SecurityAlertsFetchFailed(err) => {
-                self.handle_security_alerts_fetch_failed(err)
-            }
-            Message::SecurityAlertsUnconfigured => self.handle_security_alerts_unconfigured(),
-            Message::RefreshSecurityAlerts => self.handle_refresh_security_alerts(),
-            Message::ToggleSecurityDetail => self.handle_toggle_security_detail(),
-            Message::ToggleSecurityKindFilter => self.handle_toggle_security_kind_filter(),
-            Message::StartSecurityRepoFilter => self.handle_start_security_repo_filter(),
-            Message::CloseSecurityRepoFilter => self.handle_close_security_repo_filter(),
-            Message::ToggleSecurityRepoFilter(repo) => {
-                self.handle_toggle_security_repo_filter(repo)
-            }
-            Message::ToggleAllSecurityRepoFilter => self.handle_toggle_all_security_repo_filter(),
-            Message::ToggleSecurityRepoFilterMode => self.handle_toggle_security_repo_filter_mode(),
-            Message::StartBotPrRepoFilter => self.handle_start_bot_pr_repo_filter(),
-            Message::CloseBotPrRepoFilter => self.handle_close_bot_pr_repo_filter(),
-            Message::ToggleBotPrRepoFilter(repo) => self.handle_toggle_bot_pr_repo_filter(repo),
-            Message::ToggleAllBotPrRepoFilter => self.handle_toggle_all_bot_pr_repo_filter(),
-            Message::ToggleBotPrRepoFilterMode => self.handle_toggle_bot_pr_repo_filter_mode(),
-            Message::DispatchFixAgent(req) => self.handle_dispatch_fix_agent(req),
-            Message::FixAgentDispatched {
-                github_repo,
-                number,
-                kind,
-                tmux_window,
-                worktree,
-            } => self.handle_fix_agent_dispatched(github_repo, number, kind, tmux_window, worktree),
-            Message::FixAgentFailed {
-                github_repo,
-                number,
-                kind,
-                error,
-            } => self.handle_fix_agent_failed(github_repo, number, kind, error),
-            Message::DetachFixAgent { repo, number, kind } => {
-                self.handle_detach_fix_agent(repo, number, kind)
-            }
             Message::StartRepoFilter => self.handle_start_repo_filter(),
             Message::CloseRepoFilter => self.handle_close_repo_filter(),
             Message::ToggleRepoFilter(path) => self.handle_toggle_repo_filter(path),
@@ -1700,12 +1083,6 @@ impl App {
             Message::DeleteRepoPath(path) => self.handle_delete_repo_path(path),
             Message::CancelPresetInput => self.handle_cancel_preset_input(),
             Message::FilterPresetsLoaded(presets) => self.handle_filter_presets_loaded(presets),
-            Message::SwitchSecurityBoardMode(mode) => self.handle_switch_security_board_mode(mode),
-            Message::StartApproveBotPr => self.handle_start_approve_bot_pr(),
-            Message::StartMergeBotPr => self.handle_start_merge_bot_pr(),
-            Message::ConfirmApproveBotPr => self.handle_confirm_approve_bot_pr(),
-            Message::ConfirmMergeBotPr => self.handle_confirm_merge_bot_pr(),
-            Message::CancelPrOperation => self.handle_cancel_pr_operation(),
             _ => unreachable!(),
         }
     }
@@ -2077,11 +1454,6 @@ impl App {
         vec![]
     }
 
-    fn handle_toggle_review_detail(&mut self) -> Vec<Command> {
-        self.review.detail_visible = !self.review.detail_visible;
-        vec![]
-    }
-
     fn handle_tmux_output(&mut self, id: TaskId, output: String, activity_ts: u64) -> Vec<Command> {
         let mut cmds = Vec::new();
         let activity_changed = self
@@ -2214,12 +1586,6 @@ impl App {
         self.agents
             .message_flash
             .retain(|_, t| t.elapsed().as_secs() < 3);
-        self.review
-            .review_flash
-            .retain(|_, t| t.elapsed().as_secs() < 3);
-        self.security
-            .review_flash
-            .retain(|_, t| t.elapsed().as_secs() < 3);
 
         // Skip capturing the split-pinned task: its window has been joined as a
         // pane and is no longer visible to `has_window`, which would falsely
@@ -2287,24 +1653,6 @@ impl App {
         for (id, pr_url) in pr_tasks {
             self.agents.last_pr_poll.insert(id, Instant::now());
             cmds.push(Command::CheckPrStatus { id, pr_url });
-        }
-
-        // Refresh review board data if stale (> 30s), regardless of active tab
-        if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
-            self.review.review.loading = true;
-            cmds.push(Command::FetchPrs(PrListKind::Review));
-        }
-
-        // Also refresh bot PRs data if stale (> 30s)
-        if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.bot.loading {
-            self.review.bot.loading = true;
-            cmds.push(Command::FetchPrs(PrListKind::Bot));
-        }
-
-        // Refresh security alerts if stale (> 5m)
-        if self.security.needs_fetch(SECURITY_POLL_INTERVAL) && !self.security.loading {
-            self.security.loading = true;
-            cmds.push(Command::FetchSecurityAlerts);
         }
 
         // Check if split mode right pane still exists
@@ -2782,7 +2130,6 @@ impl App {
         self.input.buffer.clear();
         self.input.task_draft = None;
         self.input.pending_epic_id = None;
-        self.input.pending_dispatch = None;
         self.clear_status();
         vec![]
     }
@@ -2912,9 +2259,7 @@ impl App {
     fn handle_input_char(&mut self, c: char) -> Vec<Command> {
         let is_repo_mode = matches!(
             self.input.mode,
-            InputMode::InputRepoPath
-                | InputMode::InputEpicRepoPath
-                | InputMode::InputDispatchRepoPath
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
         );
         if is_repo_mode && c.is_ascii_digit() && c != '0' {
             let idx = (c as usize) - ('1' as usize);
@@ -2924,9 +2269,6 @@ impl App {
                 self.input.buffer.clear();
                 return match self.input.mode {
                     InputMode::InputEpicRepoPath => self.finish_epic_creation(repo_path),
-                    InputMode::InputDispatchRepoPath => {
-                        self.update(Message::SubmitDispatchRepoPath(repo_path))
-                    }
                     _ => self.update(Message::SubmitRepoPath(repo_path)),
                 };
             }
@@ -2934,9 +2276,7 @@ impl App {
         // Per spec: cursor resets to 0 whenever the query changes
         if matches!(
             self.input.mode,
-            InputMode::InputRepoPath
-                | InputMode::InputEpicRepoPath
-                | InputMode::InputDispatchRepoPath
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
         ) {
             self.input.repo_cursor = 0;
         }
@@ -2948,9 +2288,7 @@ impl App {
         // Per spec: cursor resets to 0 whenever the query changes
         if matches!(
             self.input.mode,
-            InputMode::InputRepoPath
-                | InputMode::InputEpicRepoPath
-                | InputMode::InputDispatchRepoPath
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
         ) {
             self.input.repo_cursor = 0;
         }
@@ -3243,7 +2581,6 @@ impl App {
 
     fn handle_pr_merged(&mut self, id: TaskId) -> Vec<Command> {
         let mut cmds = Vec::new();
-        let mut review_pr_ref: Option<(String, i64)> = None;
 
         if let Some(task) = self.find_task_mut(id) {
             if task.status != TaskStatus::Review {
@@ -3256,13 +2593,6 @@ impl App {
                 .and_then(crate::models::pr_number_from_url)
                 .map_or("PR".to_string(), |n| format!("PR #{n}"));
             let title = task.title.clone();
-
-            // Capture (repo, number) for review board cleanup after this borrow ends
-            if let Some(url) = &task.pr_url {
-                let repo = crate::models::github_repo_from_pr_url(url);
-                let number = crate::models::pr_number_from_url(url);
-                review_pr_ref = repo.zip(number);
-            }
 
             // Detach: kill tmux window but preserve worktree
             if let Some(window) = task.tmux_window.take() {
@@ -3287,11 +2617,6 @@ impl App {
                     urgent: false,
                 });
             }
-        }
-
-        // Kill any active review agent window on the Review Board for this PR
-        if let Some((repo, number)) = review_pr_ref {
-            cmds.extend(self.cleanup_review_board_pr(repo, number));
         }
 
         cmds.extend(self.maybe_respawn_split_pane(id));
@@ -3655,938 +2980,6 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
-    // Review board handlers
-    // -----------------------------------------------------------------------
-
-    /// Resolve the `BoardSelection` to save when switching to review/security board.
-    /// For Epic views, walks up the parent chain to find the root BoardSelection.
-    fn board_selection_for_tab_switch(&self) -> BoardSelection {
-        let mut view = &self.board.view_mode;
-        loop {
-            match view {
-                ViewMode::Board(sel) => return sel.clone(),
-                ViewMode::Epic { parent, .. } => view = parent,
-                ViewMode::ReviewBoard { saved_board, .. }
-                | ViewMode::SecurityBoard { saved_board, .. } => return saved_board.clone(),
-            }
-        }
-    }
-
-    fn handle_switch_to_security_board(&mut self) -> Vec<Command> {
-        let saved_board = self.board_selection_for_tab_switch();
-        self.board.view_mode = ViewMode::SecurityBoard {
-            mode: SecurityBoardMode::default(),
-            selection: SecurityBoardSelection::new(),
-            dependabot_selection: ReviewBoardSelection::new(),
-            saved_board,
-        };
-        if self.security.needs_fetch(SECURITY_POLL_INTERVAL) && !self.security.loading {
-            self.security.loading = true;
-            vec![Command::FetchSecurityAlerts]
-        } else {
-            vec![]
-        }
-    }
-
-    fn handle_switch_security_board_mode(&mut self, new_mode: SecurityBoardMode) -> Vec<Command> {
-        let ViewMode::SecurityBoard { mode, .. } = &mut self.board.view_mode else {
-            return vec![];
-        };
-        *mode = new_mode;
-        let mut cmds = vec![];
-        if new_mode == SecurityBoardMode::Dependabot {
-            if self
-                .security
-                .dependabot
-                .prs
-                .needs_fetch(REVIEW_REFRESH_INTERVAL)
-                && !self.security.dependabot.prs.loading
-            {
-                self.security.dependabot.prs.loading = true;
-                cmds.push(Command::FetchPrs(PrListKind::Bot));
-            }
-        } else if self.security.needs_fetch(SECURITY_POLL_INTERVAL) && !self.security.loading {
-            self.security.loading = true;
-            cmds.push(Command::FetchSecurityAlerts);
-        }
-        cmds
-    }
-
-    fn handle_security_alerts_loaded(
-        &mut self,
-        alerts: Vec<crate::models::SecurityAlert>,
-    ) -> Vec<Command> {
-        self.security.unconfigured = false;
-        let cmds = vec![Command::PersistSecurityAlerts(alerts.clone())];
-        self.security.set_alerts(alerts);
-        self.security.loading = false;
-        self.security.last_fetch = Some(Instant::now());
-        self.security.last_error = None;
-        self.sync_security_selection();
-        // TODO: derive sub-state upgrades for security alerts in ActionRequired
-        // when a fix PR is detected on GitHub. SecurityAlert does not currently
-        // carry fix-PR CI/review data — this would require a separate gh API call
-        // per alert or enrichment in the fetcher before this point.
-        cmds
-    }
-
-    fn handle_switch_to_review_board(&mut self) -> Vec<Command> {
-        let saved_board = self.board_selection_for_tab_switch();
-        self.board.view_mode = ViewMode::ReviewBoard {
-            mode: ReviewBoardMode::Reviewer,
-            selection: ReviewBoardSelection::new(),
-            saved_board,
-        };
-        if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL) && !self.review.review.loading {
-            self.review.review.loading = true;
-            vec![Command::FetchPrs(PrListKind::Review)]
-        } else {
-            vec![]
-        }
-    }
-
-    fn handle_switch_to_task_board(&mut self) -> Vec<Command> {
-        match &self.board.view_mode {
-            ViewMode::ReviewBoard { saved_board, .. }
-            | ViewMode::SecurityBoard { saved_board, .. } => {
-                self.board.view_mode = ViewMode::Board(saved_board.clone());
-            }
-            _ => {}
-        }
-        vec![]
-    }
-
-    fn handle_switch_review_board_mode(&mut self, new_mode: ReviewBoardMode) -> Vec<Command> {
-        let ViewMode::ReviewBoard { mode, .. } = &mut self.board.view_mode else {
-            return vec![];
-        };
-        *mode = new_mode;
-        self.sync_review_selection();
-        let mut cmds = vec![];
-        if let ViewMode::ReviewBoard { mode, .. } = &self.board.view_mode {
-            match mode {
-                ReviewBoardMode::Dependabot => {
-                    if self.review.bot.needs_fetch(REVIEW_REFRESH_INTERVAL)
-                        && !self.review.bot.loading
-                    {
-                        self.review.bot.loading = true;
-                        cmds.push(Command::FetchPrs(PrListKind::Bot));
-                    }
-                }
-                ReviewBoardMode::Reviewer => {
-                    if self.review.review.needs_fetch(REVIEW_REFRESH_INTERVAL)
-                        && !self.review.review.loading
-                    {
-                        self.review.review.loading = true;
-                        cmds.push(Command::FetchPrs(PrListKind::Review));
-                    }
-                }
-            }
-        }
-        cmds
-    }
-
-    /// Remove review agents whose PR is no longer present in any of the three PR
-    /// lists (reviewer, bot, dependabot). Called after any list refreshes.
-    fn cleanup_stale_review_agents(&mut self) -> Vec<Command> {
-        let pr_keys: HashSet<crate::models::PrRef> = [PrListKind::Review, PrListKind::Bot]
-            .iter()
-            .flat_map(|k| self.review.list(*k).into_iter().flat_map(|l| l.prs.iter()))
-            .chain(self.security.dependabot.prs.prs.iter())
-            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number))
-            .collect();
-
-        let gone: Vec<crate::models::PrRef> = self
-            .review
-            .review_agents
-            .keys()
-            .filter(|k| !pr_keys.contains(*k))
-            .cloned()
-            .collect();
-
-        let mut cmds = Vec::new();
-        for key in gone {
-            cmds.extend(self.cleanup_review_board_pr(key.repo().to_string(), key.number()));
-        }
-        cmds
-    }
-
-    fn handle_prs_loaded(
-        &mut self,
-        kind: PrListKind,
-        prs: Vec<crate::models::ReviewPr>,
-    ) -> Vec<Command> {
-        let mut cmds = vec![Command::PersistPrs(kind, prs.clone())];
-        if kind == PrListKind::Bot {
-            // Bot PRs feed both the review board Dependabot mode and the security board
-            self.security.dependabot.prs.set_prs(prs.clone());
-            self.security.dependabot.prs.loading = false;
-            self.security.dependabot.prs.last_fetch = Some(Instant::now());
-            self.security.dependabot.prs.last_error = None;
-            self.sync_dependabot_selection();
-            self.review.bot.set_prs(prs.clone());
-            self.review.bot.loading = false;
-            self.review.bot.last_fetch = Some(Instant::now());
-            self.review.bot.last_error = None;
-            self.sync_review_selection();
-        } else {
-            let list = self.review.list_mut(kind).unwrap();
-            list.set_prs(prs.clone());
-            list.loading = false;
-            list.last_fetch = Some(Instant::now());
-            list.last_error = None;
-            self.sync_review_selection();
-        }
-        // Derive sub-state updates for items already in ActionRequired
-        let item_kind = match kind {
-            PrListKind::Bot => crate::models::WorkflowItemKind::DependabotPr,
-            PrListKind::Review => crate::models::WorkflowItemKind::ReviewerPr,
-        };
-        for pr in &prs {
-            let key = WorkflowKey::new(pr.repo.clone(), pr.number, item_kind);
-            if let Some((crate::models::ReviewWorkflowState::ActionRequired, sub)) =
-                self.review.review_workflow_states.get(&key).copied()
-            {
-                let new_sub = derive_review_sub_state(pr, sub);
-                if Some(new_sub) != sub {
-                    self.review.review_workflow_states.insert(
-                        key.clone(),
-                        (
-                            crate::models::ReviewWorkflowState::ActionRequired,
-                            Some(new_sub),
-                        ),
-                    );
-                    cmds.push(Command::PersistReviewWorkflow {
-                        key,
-                        state: crate::models::ReviewWorkflowState::ActionRequired,
-                        sub_state: Some(new_sub),
-                    });
-                }
-            }
-        }
-        cmds.extend(self.cleanup_stale_review_agents());
-        cmds
-    }
-
-    fn clamp_review_selection(&mut self) {
-        let col_count = ReviewBoardMode::column_count();
-        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
-            if col >= col_count {
-                return 0;
-            }
-            self.active_prs_for_column(col).len()
-        });
-        if let Some(sel) = self.review_selection_mut() {
-            for (col, &count) in counts.iter().enumerate() {
-                if count == 0 {
-                    sel.selected_row[col] = 0;
-                } else if sel.selected_row[col] >= count {
-                    sel.selected_row[col] = count - 1;
-                }
-            }
-        }
-    }
-
-    fn sync_review_selection(&mut self) {
-        let anchor = match &self.board.view_mode {
-            ViewMode::ReviewBoard { selection, .. } => selection.anchor_pr.clone(),
-            _ => None,
-        };
-
-        let Some(anchor_pr) = anchor else {
-            return self.clamp_review_selection();
-        };
-
-        let col_count = ReviewBoardMode::column_count();
-
-        // Search for anchor PR across all columns (using workflow state)
-        let mut found: Option<(usize, usize)> = None;
-        'outer: for col in 0..col_count {
-            let col_prs = self.active_prs_for_column(col);
-            for (row, pr) in col_prs.iter().enumerate() {
-                if anchor_pr.matches(pr.number, &pr.repo) {
-                    found = Some((col, row));
-                    break 'outer;
-                }
-            }
-        }
-
-        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
-            if col >= col_count {
-                return 0;
-            }
-            self.active_prs_for_column(col).len()
-        });
-
-        if let Some((found_col, found_row)) = found {
-            if let Some(sel) = self.review_selection_mut() {
-                for (col, &count) in counts.iter().enumerate() {
-                    if col == found_col {
-                        continue;
-                    }
-                    if count == 0 {
-                        sel.selected_row[col] = 0;
-                    } else if sel.selected_row[col] >= count {
-                        sel.selected_row[col] = count - 1;
-                    }
-                }
-                sel.selected_column = found_col;
-                sel.selected_row[found_col] = found_row;
-            }
-        } else {
-            self.clamp_review_selection();
-        }
-    }
-
-    fn clamp_dependabot_selection(&mut self) {
-        // If the view is not SecurityBoard this is a silent no-op: the `if let` below
-        // simply does not match, so the selection is left unchanged until the user
-        // navigates back to the Security Board.
-        let filtered = self.filtered_bot_prs();
-        // Dependabot sub-view has 3 columns: Backlog (0), In Review (1), Approved (2)
-        let col_count = 3usize;
-        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
-            if col >= col_count {
-                return 0;
-            }
-            filtered
-                .iter()
-                .filter(|pr| bot_pr_column(pr, self.pr_agent(pr).map(|h| h.status)) == col)
-                .count()
-        });
-        if let ViewMode::SecurityBoard {
-            dependabot_selection,
-            ..
-        } = &mut self.board.view_mode
-        {
-            for (col, &count) in counts.iter().enumerate() {
-                if count == 0 {
-                    dependabot_selection.selected_row[col] = 0;
-                } else if dependabot_selection.selected_row[col] >= count {
-                    dependabot_selection.selected_row[col] = count - 1;
-                }
-            }
-        }
-    }
-
-    fn sync_dependabot_selection(&mut self) {
-        let anchor = match &self.board.view_mode {
-            ViewMode::SecurityBoard {
-                dependabot_selection,
-                ..
-            } => dependabot_selection.anchor_pr.clone(),
-            _ => return,
-        };
-
-        let Some(anchor_pr) = anchor else {
-            return self.clamp_dependabot_selection();
-        };
-
-        let col_count = 3usize; // Backlog(0), In Review(1), Approved(2)
-
-        let mut found: Option<(usize, usize)> = None;
-        'outer: for col in 0..col_count {
-            let col_prs = self.bot_prs_for_column(col);
-            for (row, pr) in col_prs.iter().enumerate() {
-                if anchor_pr.matches(pr.number, &pr.repo) {
-                    found = Some((col, row));
-                    break 'outer;
-                }
-            }
-        }
-
-        let counts: [usize; ReviewDecision::COLUMN_COUNT] = std::array::from_fn(|col| {
-            if col >= col_count {
-                return 0;
-            }
-            self.bot_prs_for_column(col).len()
-        });
-
-        if let Some((found_col, found_row)) = found {
-            if let ViewMode::SecurityBoard {
-                dependabot_selection,
-                ..
-            } = &mut self.board.view_mode
-            {
-                for (col, &count) in counts.iter().enumerate() {
-                    if col == found_col {
-                        continue;
-                    }
-                    if count == 0 {
-                        dependabot_selection.selected_row[col] = 0;
-                    } else if dependabot_selection.selected_row[col] >= count {
-                        dependabot_selection.selected_row[col] = count - 1;
-                    }
-                }
-                dependabot_selection.selected_column = found_col;
-                dependabot_selection.selected_row[found_col] = found_row;
-            }
-        } else {
-            self.clamp_dependabot_selection();
-        }
-    }
-
-    fn handle_prs_fetch_failed(&mut self, kind: PrListKind, error: String) -> Vec<Command> {
-        tracing::warn!(kind = kind.label(), error = %error, "PR fetch failed");
-        if kind == PrListKind::Bot {
-            self.security.dependabot.prs.loading = false;
-            self.security.dependabot.prs.last_error = Some(error);
-        } else {
-            let list = self.review.list_mut(kind).unwrap();
-            list.loading = false;
-            list.last_error = Some(error.clone());
-            self.set_status(format!("Failed to fetch {} PRs: {error}", kind.label()));
-        }
-        vec![]
-    }
-
-    fn handle_dispatch_review_agent(&mut self, mut req: ReviewAgentRequest) -> Vec<Command> {
-        let key = PrRef::new(req.github_repo.clone(), req.number);
-        if self.dispatching_review.contains(&key) {
-            return vec![];
-        }
-        let known = self.known_repo_paths();
-        if let Some(path) = dispatch::resolve_repo_path(&req.repo, &known) {
-            req.repo = path;
-            self.dispatching_review.insert(key);
-            self.set_status(format!("Dispatching review agent for #{}...", req.number));
-            vec![Command::DispatchReviewAgent(req)]
-        } else {
-            self.set_status(format!(
-                "No local repo found for {} — select a path",
-                req.repo
-            ));
-            self.input.pending_dispatch = Some(PendingDispatch::Review(req));
-            self.input.mode = InputMode::InputDispatchRepoPath;
-            self.input.buffer.clear();
-            self.input.repo_cursor = 0;
-            vec![]
-        }
-    }
-
-    fn handle_submit_dispatch_repo_path(&mut self, value: String) -> Vec<Command> {
-        self.input.buffer.clear();
-        let repo_path = if value.is_empty() {
-            if let Some(first) = self.board.repo_paths.first() {
-                first.clone()
-            } else {
-                self.set_status("Repo path required (no saved paths available)".to_string());
-                return vec![];
-            }
-        } else {
-            value
-        };
-        if let Err(msg) = crate::dispatch::validate_repo_path(&repo_path) {
-            self.set_status(msg);
-            return vec![];
-        }
-        self.input.mode = InputMode::Normal;
-        let pending = self.input.pending_dispatch.take();
-        match pending {
-            Some(PendingDispatch::Review(mut req)) => {
-                let save = Command::SaveRepoPath(repo_path.clone());
-                req.repo = repo_path;
-                self.set_status(format!("Dispatching review agent for #{}...", req.number));
-                vec![Command::DispatchReviewAgent(req), save]
-            }
-            Some(PendingDispatch::Fix(mut req)) => {
-                self.set_status(format!(
-                    "Dispatching fix agent for {}#{}...",
-                    req.github_repo, req.number
-                ));
-                req.repo = repo_path.clone();
-                vec![
-                    Command::DispatchFixAgent(req),
-                    Command::SaveRepoPath(repo_path),
-                ]
-            }
-            None => {
-                self.set_status("No pending dispatch".to_string());
-                vec![]
-            }
-        }
-    }
-
-    pub(in crate::tui) fn find_and_set_pr_agent(
-        &mut self,
-        github_repo: &str,
-        number: i64,
-        tmux_window: &str,
-        worktree: &str,
-    ) -> Option<crate::db::PrKind> {
-        let handle = crate::tui::types::ReviewAgentHandle {
-            tmux_window: tmux_window.to_string(),
-            worktree: worktree.to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        };
-        let key = crate::models::PrRef::new(github_repo.to_string(), number);
-        self.review.review_agents.insert(key, handle);
-
-        if self
-            .review
-            .review
-            .prs
-            .iter()
-            .any(|pr| pr.repo == github_repo && pr.number == number)
-        {
-            return Some(crate::db::PrKind::Review);
-        }
-        if self
-            .review
-            .bot
-            .prs
-            .iter()
-            .any(|pr| pr.repo == github_repo && pr.number == number)
-        {
-            return Some(crate::db::PrKind::Bot);
-        }
-        if self
-            .security
-            .dependabot
-            .prs
-            .prs
-            .iter()
-            .any(|pr| pr.repo == github_repo && pr.number == number)
-        {
-            return Some(crate::db::PrKind::Bot);
-        }
-        None
-    }
-
-    /// Collect known local repo paths from saved paths and existing tasks.
-    fn known_repo_paths(&self) -> Vec<String> {
-        let mut known = self.board.repo_paths.clone();
-        for t in &self.board.tasks {
-            if !known.contains(&t.repo_path) {
-                known.push(t.repo_path.clone());
-            }
-        }
-        known
-    }
-
-    fn handle_start_approve_bot_pr(&mut self) -> Vec<Command> {
-        let pr = self.selected_dependabot_pr();
-        let Some(pr) = pr else {
-            self.set_status("No PR selected".into());
-            return vec![];
-        };
-        let url = pr.url.clone();
-        let number_str = format!("#{}", pr.number);
-        self.set_status(format!("Approve PR {number_str}? (y/N)"));
-        self.input.mode = InputMode::ConfirmApproveBotPr(url);
-        vec![]
-    }
-
-    fn handle_start_merge_bot_pr(&mut self) -> Vec<Command> {
-        let pr = self.selected_dependabot_pr();
-        let Some(pr) = pr else {
-            self.set_status("No PR selected".into());
-            return vec![];
-        };
-        let url = pr.url.clone();
-        let number_str = format!("#{}", pr.number);
-        self.set_status(format!("Merge PR {number_str}? (y/N)"));
-        self.input.mode = InputMode::ConfirmMergeBotPr(url);
-        vec![]
-    }
-
-    fn handle_confirm_approve_bot_pr(&mut self) -> Vec<Command> {
-        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
-            InputMode::ConfirmApproveBotPr(url) => url,
-            other => {
-                self.input.mode = other;
-                return vec![];
-            }
-        };
-        self.security.dependabot.selected_prs.clear();
-        self.set_status("Approving PR...".into());
-        vec![Command::ApproveBotPr(url)]
-    }
-
-    fn handle_confirm_merge_bot_pr(&mut self) -> Vec<Command> {
-        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
-            InputMode::ConfirmMergeBotPr(url) => url,
-            other => {
-                self.input.mode = other;
-                return vec![];
-            }
-        };
-        self.security.dependabot.selected_prs.clear();
-        self.set_status("Merging PR...".into());
-        vec![Command::MergeBotPr(url)]
-    }
-
-    fn handle_start_approve_review_pr(&mut self) -> Vec<Command> {
-        let pr = self.selected_review_pr();
-        let Some(pr) = pr else {
-            self.set_status("No PR selected".into());
-            return vec![];
-        };
-        use crate::models::ReviewDecision;
-        let can_approve = matches!(
-            pr.review_decision,
-            ReviewDecision::ReviewRequired | ReviewDecision::WaitingForResponse
-        );
-        if !can_approve {
-            self.set_status("PR doesn't need your review".into());
-            return vec![];
-        }
-        let url = pr.url.clone();
-        let number_str = format!("#{}", pr.number);
-        self.set_status(format!("Approve PR {number_str}? (y/N)"));
-        self.input.mode = InputMode::ConfirmApproveReviewPr(url);
-        vec![]
-    }
-
-    fn handle_confirm_approve_review_pr(&mut self) -> Vec<Command> {
-        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
-            InputMode::ConfirmApproveReviewPr(url) => url,
-            other => {
-                self.input.mode = other;
-                return vec![];
-            }
-        };
-        self.set_status("Approving PR...".into());
-        vec![Command::ApproveReviewPr(url)]
-    }
-
-    fn handle_start_merge_review_pr(&mut self) -> Vec<Command> {
-        let pr = self.selected_review_pr();
-        let Some(pr) = pr else {
-            self.set_status("No PR selected".into());
-            return vec![];
-        };
-        use crate::models::{CiStatus, ReviewDecision};
-        if pr.review_decision != ReviewDecision::Approved {
-            self.set_status("PR is not approved yet".into());
-            return vec![];
-        }
-        if pr.ci_status == CiStatus::Failure {
-            self.set_status("CI is failing — cannot merge".into());
-            return vec![];
-        }
-        let url = pr.url.clone();
-        let number_str = format!("#{}", pr.number);
-        self.set_status(format!("Merge PR {number_str}? (y/N)"));
-        self.input.mode = InputMode::ConfirmMergeReviewPr(url);
-        vec![]
-    }
-
-    fn handle_confirm_merge_review_pr(&mut self) -> Vec<Command> {
-        let url = match std::mem::replace(&mut self.input.mode, InputMode::Normal) {
-            InputMode::ConfirmMergeReviewPr(url) => url,
-            other => {
-                self.input.mode = other;
-                return vec![];
-            }
-        };
-        self.set_status("Merging PR...".into());
-        vec![Command::MergeReviewPr(url)]
-    }
-
-    fn handle_cancel_pr_operation(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        vec![]
-    }
-
-    /// Return review PRs filtered by the review repo filter.
-    /// When the filter is empty, all PRs are returned.
-    pub fn filtered_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.review.review.filtered()
-    }
-
-    pub fn filtered_review_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        self.review.bot.filtered()
-    }
-
-    pub fn filtered_bot_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        let mut prs = self.security.dependabot.prs.filtered();
-        // Within the in_review column, findings_ready PRs sort above reviewing PRs
-        // (InReviewSortPriority rule). Stable sort preserves relative order for equal keys.
-        prs.sort_by_key(|pr| match self.pr_agent(pr).map(|h| h.status) {
-            Some(crate::models::ReviewAgentStatus::FindingsReady) => 0,
-            Some(crate::models::ReviewAgentStatus::Reviewing) => 1,
-            _ => 2,
-        });
-        prs
-    }
-
-    /// Return the PR list appropriate for the current review board mode.
-    pub fn active_review_prs(&self) -> Vec<&crate::models::ReviewPr> {
-        match &self.board.view_mode {
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => self.filtered_review_bot_prs(),
-            _ => self.filtered_review_prs(),
-        }
-    }
-
-    /// Sorted distinct repos for the currently active review board mode.
-    pub fn active_review_repos(&self) -> &[String] {
-        match &self.board.view_mode {
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => &self.review.bot.repos,
-            _ => &self.review.review.repos,
-        }
-    }
-
-    /// Get PRs for a specific review decision column using the active PR list.
-    pub fn active_prs_by_decision(
-        &self,
-        decision: crate::models::ReviewDecision,
-    ) -> Vec<&crate::models::ReviewPr> {
-        self.active_review_prs()
-            .into_iter()
-            .filter(|pr| pr.review_decision == decision)
-            .collect()
-    }
-
-    /// Return PRs for a given workflow column index, using review_workflow_states.
-    /// Falls back to Backlog (col 0) for PRs with no recorded state.
-    pub fn active_prs_for_column(&self, col: usize) -> Vec<&crate::models::ReviewPr> {
-        let mode_kind = match &self.board.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => mode.workflow_item_kind(),
-            _ => crate::models::WorkflowItemKind::ReviewerPr,
-        };
-        let mut prs: Vec<_> = self
-            .active_review_prs()
-            .into_iter()
-            .filter(|pr| {
-                let key = WorkflowKey::new(pr.repo.clone(), pr.number, mode_kind);
-                let (state, _) = self
-                    .review
-                    .review_workflow_states
-                    .get(&key)
-                    .copied()
-                    .unwrap_or((crate::models::ReviewWorkflowState::Backlog, None));
-                state.column_index() == col
-            })
-            .collect();
-        prs.sort_by(|a, b| a.repo.cmp(&b.repo));
-        prs
-    }
-
-    /// Get the currently selected ReviewPr, if in review board mode.
-    pub fn selected_review_pr(&self) -> Option<&crate::models::ReviewPr> {
-        let sel = self.review_selection()?;
-        let col = sel.column();
-        let row = sel.row(col);
-        self.active_prs_for_column(col).into_iter().nth(row)
-    }
-
-    /// Get the currently selected ReviewPr along with its workflow kind,
-    /// based on the current ReviewBoardMode.
-    fn selected_review_pr_with_kind(
-        &self,
-    ) -> Option<(&crate::models::ReviewPr, crate::models::WorkflowItemKind)> {
-        let mode = match &self.board.view_mode {
-            ViewMode::ReviewBoard { mode, .. } => *mode,
-            _ => return None,
-        };
-        let kind = mode.workflow_item_kind();
-        let pr = self.selected_review_pr()?;
-        Some((pr, kind))
-    }
-
-    /// Get the currently selected SecurityAlert along with its workflow kind.
-    fn selected_alert_with_kind(
-        &self,
-    ) -> Option<(
-        &crate::models::SecurityAlert,
-        crate::models::WorkflowItemKind,
-    )> {
-        let alert = self.selected_security_alert()?;
-        let kind = match alert.kind {
-            crate::models::AlertKind::Dependabot => {
-                crate::models::WorkflowItemKind::DependabotAlert
-            }
-            crate::models::AlertKind::CodeScanning => {
-                crate::models::WorkflowItemKind::CodeScanAlert
-            }
-        };
-        Some((alert, kind))
-    }
-
-    fn handle_move_review_item_forward(&mut self) -> Vec<Command> {
-        use crate::models::ReviewWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
-        let Some((pr, kind)) = self.selected_review_pr_with_kind() else {
-            return vec![];
-        };
-        let key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
-        let (current, _) = self
-            .review
-            .review_workflow_states
-            .get(&key)
-            .copied()
-            .unwrap_or((Backlog, None));
-        let next = match current {
-            Backlog => Ongoing,
-            Ongoing => ActionRequired,
-            ActionRequired => Done,
-            Done => Done,
-        };
-        // Don't persist no-op (already at Done)
-        if next == current {
-            return vec![];
-        }
-        self.review
-            .review_workflow_states
-            .insert(key.clone(), (next, None));
-        vec![Command::PersistReviewWorkflow {
-            key,
-            state: next,
-            sub_state: None,
-        }]
-    }
-
-    fn handle_move_review_item_back(&mut self) -> Vec<Command> {
-        use crate::models::ReviewWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
-        let Some((pr, kind)) = self.selected_review_pr_with_kind() else {
-            return vec![];
-        };
-        let key = WorkflowKey::new(pr.repo.clone(), pr.number, kind);
-        let (current, _) = self
-            .review
-            .review_workflow_states
-            .get(&key)
-            .copied()
-            .unwrap_or((Backlog, None));
-        let prev = match current {
-            Backlog => Backlog,
-            Ongoing => Backlog,
-            ActionRequired => Ongoing,
-            Done => ActionRequired,
-        };
-        // Don't persist no-op (already at Backlog)
-        if prev == current {
-            return vec![];
-        }
-        self.review
-            .review_workflow_states
-            .insert(key.clone(), (prev, None));
-        vec![Command::PersistReviewWorkflow {
-            key,
-            state: prev,
-            sub_state: None,
-        }]
-    }
-
-    fn handle_move_security_item_forward(&mut self) -> Vec<Command> {
-        use crate::models::SecurityWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
-        let Some((alert, kind)) = self.selected_alert_with_kind() else {
-            return vec![];
-        };
-        let key = WorkflowKey::new(alert.repo.clone(), alert.number, kind);
-        let (current, _) = self
-            .security
-            .security_workflow_states
-            .get(&key)
-            .copied()
-            .unwrap_or((Backlog, None));
-        let next = match current {
-            Backlog => Ongoing,
-            Ongoing => ActionRequired,
-            ActionRequired => Done,
-            Done => Done,
-        };
-        // Don't persist no-op (already at Done)
-        if next == current {
-            return vec![];
-        }
-        self.security
-            .security_workflow_states
-            .insert(key.clone(), (next, None));
-        vec![Command::PersistSecurityWorkflow {
-            key,
-            state: next,
-            sub_state: None,
-        }]
-    }
-
-    fn handle_move_security_item_back(&mut self) -> Vec<Command> {
-        use crate::models::SecurityWorkflowState::{ActionRequired, Backlog, Done, Ongoing};
-        let Some((alert, kind)) = self.selected_alert_with_kind() else {
-            return vec![];
-        };
-        let key = WorkflowKey::new(alert.repo.clone(), alert.number, kind);
-        let (current, _) = self
-            .security
-            .security_workflow_states
-            .get(&key)
-            .copied()
-            .unwrap_or((Backlog, None));
-        let prev = match current {
-            Backlog => Backlog,
-            Ongoing => Backlog,
-            ActionRequired => Ongoing,
-            Done => ActionRequired,
-        };
-        // Don't persist no-op (already at Backlog)
-        if prev == current {
-            return vec![];
-        }
-        self.security
-            .security_workflow_states
-            .insert(key.clone(), (prev, None));
-        vec![Command::PersistSecurityWorkflow {
-            key,
-            state: prev,
-            sub_state: None,
-        }]
-    }
-
-    // Used only by board tests; removed by epic #29 Pkg D alongside the review board.
-    #[allow(dead_code)]
-    pub(in crate::tui) fn navigate_review_row(&mut self, delta: isize) {
-        let (col, count) = match self.review_selection() {
-            Some(sel) => {
-                let col = sel.selected_column;
-                let count = self.active_prs_for_column(col).len();
-                (col, count)
-            }
-            None => return,
-        };
-        if count == 0 {
-            return;
-        }
-        if let Some(sel) = self.review_selection_mut() {
-            let current = sel.selected_row[col] as isize;
-            let new = (current + delta).clamp(0, (count - 1) as isize) as usize;
-            sel.selected_row[col] = new;
-        }
-    }
-
-    // Used only by board tests; removed by epic #29 Pkg D alongside the review board.
-    #[allow(dead_code)]
-    pub(in crate::tui) fn update_review_anchor_from_current(&mut self) {
-        let (col, row) = match self.review_selection() {
-            Some(sel) => (sel.selected_column, sel.selected_row[sel.selected_column]),
-            None => return,
-        };
-        let col_prs = self.active_prs_for_column(col);
-        let anchor = col_prs
-            .get(row)
-            .map(|pr| crate::models::PrRef::new(pr.repo.clone(), pr.number));
-        if let Some(sel) = self.review_selection_mut() {
-            sel.anchor_pr = anchor;
-        }
-    }
-
-    /// Get PRs for a specific review decision column (respects active filter).
-    pub fn review_prs_by_decision(
-        &self,
-        decision: crate::models::ReviewDecision,
-    ) -> Vec<&crate::models::ReviewPr> {
-        self.filtered_review_prs()
-            .into_iter()
-            .filter(|pr| pr.review_decision == decision)
-            .collect()
-    }
-
-    // -----------------------------------------------------------------------
     // Epic handlers
     // -----------------------------------------------------------------------
 
@@ -4672,7 +3065,6 @@ impl App {
                 }
                 // Not a feed epic — no-op
             }
-            _ => {}
         }
         vec![]
     }
@@ -4932,9 +3324,7 @@ impl App {
     fn handle_move_repo_cursor(&mut self, delta: isize) -> Vec<Command> {
         let count = if matches!(
             self.input.mode,
-            InputMode::InputRepoPath
-                | InputMode::InputEpicRepoPath
-                | InputMode::InputDispatchRepoPath
+            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
         ) {
             filtered_repos(&self.board.repo_paths, &self.input.buffer).len()
         } else {
@@ -4996,56 +3386,6 @@ impl App {
         vec![]
     }
 
-    fn handle_start_review_repo_filter(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::ReviewRepoFilter;
-        vec![]
-    }
-
-    fn handle_close_review_repo_filter(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.sync_review_selection();
-        vec![]
-    }
-
-    fn handle_toggle_review_repo_filter(&mut self, repo: String) -> Vec<Command> {
-        if !self.review.review.repo_filter.remove(&repo) {
-            self.review.review.repo_filter.insert(repo);
-        }
-        self.sync_review_selection();
-        vec![]
-    }
-
-    fn handle_toggle_all_review_repo_filter(&mut self) -> Vec<Command> {
-        let all_repos = self.active_review_repos();
-        if self.review.review.repo_filter.len() == all_repos.len() {
-            self.review.review.repo_filter.clear();
-        } else {
-            self.review.review.repo_filter = all_repos.iter().cloned().collect();
-        }
-        self.sync_review_selection();
-        vec![]
-    }
-
-    fn handle_toggle_review_repo_filter_mode(&mut self) -> Vec<Command> {
-        self.review.review.repo_filter_mode = match self.review.review.repo_filter_mode {
-            RepoFilterMode::Include => RepoFilterMode::Exclude,
-            RepoFilterMode::Exclude => RepoFilterMode::Include,
-        };
-        self.sync_review_selection();
-        vec![]
-    }
-
-    fn handle_toggle_dispatch_pr_filter(&mut self) -> Vec<Command> {
-        // dispatch_pr_filter removed in v2 layout
-        vec![]
-    }
-
-    fn handle_start_save_preset(&mut self) -> Vec<Command> {
-        self.input.buffer.clear();
-        self.input.mode = InputMode::InputPresetName;
-        vec![]
-    }
-
     fn handle_save_filter_preset(&mut self, name: String) -> Vec<Command> {
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -5087,6 +3427,11 @@ impl App {
             self.sync_board_selection();
             self.set_status(format!("Loaded preset \"{name}\""));
         }
+        vec![]
+    }
+
+    fn handle_start_save_preset(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::InputPresetName;
         vec![]
     }
 
@@ -5183,364 +3528,6 @@ impl App {
     fn handle_open_in_browser(&self, url: String) -> Vec<Command> {
         vec![Command::OpenInBrowser { url }]
     }
-
-    fn handle_review_agent_dispatched(
-        &mut self,
-        github_repo: String,
-        number: i64,
-        tmux_window: String,
-        worktree: String,
-    ) -> Vec<Command> {
-        self.dispatching_review
-            .remove(&PrRef::new(github_repo.clone(), number));
-        let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
-        self.set_status(format!("Review agent dispatched for {repo_short}#{number}"));
-        let Some(pr_kind) =
-            self.find_and_set_pr_agent(&github_repo, number, &tmux_window, &worktree)
-        else {
-            self.set_status(format!(
-                "No PR record found for {github_repo}#{number} — agent tracking unavailable"
-            ));
-            return vec![];
-        };
-        vec![Command::PersistReviewAgent {
-            pr_kind,
-            github_repo,
-            number,
-            tmux_window,
-            worktree,
-        }]
-    }
-
-    fn handle_review_agent_failed(
-        &mut self,
-        github_repo: String,
-        number: i64,
-        error: String,
-    ) -> Vec<Command> {
-        self.dispatching_review
-            .remove(&PrRef::new(github_repo, number));
-        self.set_status(format!("Review dispatch failed: {error}"));
-        vec![]
-    }
-
-    fn handle_refresh_review_prs(&mut self) -> Vec<Command> {
-        let kind = match &self.board.view_mode {
-            ViewMode::ReviewBoard {
-                mode: ReviewBoardMode::Dependabot,
-                ..
-            } => PrListKind::Bot,
-            _ => PrListKind::Review,
-        };
-        self.review.list_mut(kind).unwrap().loading = true;
-        vec![Command::FetchPrs(kind)]
-    }
-
-    fn handle_refresh_bot_prs(&mut self) -> Vec<Command> {
-        self.security.dependabot.prs.loading = true;
-        vec![Command::FetchPrs(PrListKind::Bot)]
-    }
-
-    /// Clean up any active review agent session for the given (repo, number) pair.
-    /// Only emits commands when there is actual agent state to clear.
-    fn cleanup_review_board_pr(&mut self, repo: String, number: i64) -> Vec<Command> {
-        let mut cmds = Vec::new();
-        let key = crate::models::PrRef::new(repo.clone(), number);
-        if let Some(handle) = self.review.review_agents.remove(&key) {
-            cmds.push(Command::KillTmuxWindow {
-                window: handle.tmux_window,
-            });
-            cmds.push(Command::UpdateAgentStatus {
-                repo,
-                number,
-                status: None,
-            });
-        }
-        cmds
-    }
-
-    fn handle_bot_prs_merged(&mut self, urls: Vec<String>) -> Vec<Command> {
-        let mut cmds = Vec::new();
-        for url in urls {
-            if let Some((repo, number)) = crate::models::github_repo_from_pr_url(&url)
-                .zip(crate::models::pr_number_from_url(&url))
-            {
-                cmds.extend(self.cleanup_review_board_pr(repo, number));
-            }
-        }
-        cmds
-    }
-
-    fn handle_toggle_select_bot_pr(&mut self, url: String) -> Vec<Command> {
-        if !self.security.dependabot.selected_prs.remove(&url) {
-            self.security.dependabot.selected_prs.insert(url);
-        }
-        vec![]
-    }
-
-    fn handle_clear_bot_pr_selection(&mut self) -> Vec<Command> {
-        self.security.dependabot.selected_prs.clear();
-        vec![]
-    }
-
-    fn handle_review_status_updated(
-        &mut self,
-        repo: String,
-        number: i64,
-        status: crate::models::ReviewAgentStatus,
-    ) -> Vec<Command> {
-        // Update the review agent map (covers review, authored, and dependabot PRs)
-        let pr_key = crate::models::PrRef::new(repo.clone(), number);
-        if let Some(handle) = self.review.review_agents.get_mut(&pr_key) {
-            handle.status = status;
-        }
-        // Update fix agent map (security alerts)
-        for key in self.security.fix_agents.keys().cloned().collect::<Vec<_>>() {
-            if key.repo == repo && key.number == number {
-                if let Some(handle) = self.security.fix_agents.get_mut(&key) {
-                    handle.status = status;
-                }
-            }
-        }
-        // Insert flash on findings_ready
-        if status == crate::models::ReviewAgentStatus::FindingsReady {
-            let now = std::time::Instant::now();
-            self.review
-                .review_flash
-                .insert(crate::models::PrRef::new(repo.clone(), number), now);
-            self.security
-                .review_flash
-                .insert(crate::models::PrRef::new(repo, number), now);
-        }
-        vec![]
-    }
-
-    fn handle_detach_review_agent(&mut self, repo: String, number: i64) -> Vec<Command> {
-        let mut cmds = Vec::new();
-        let key = crate::models::PrRef::new(repo.clone(), number);
-        if let Some(handle) = self.review.review_agents.remove(&key) {
-            cmds.push(Command::KillTmuxWindow {
-                window: handle.tmux_window,
-            });
-        }
-        cmds.push(Command::UpdateAgentStatus {
-            repo,
-            number,
-            status: None,
-        });
-        cmds
-    }
-
-    fn handle_security_alerts_fetch_failed(&mut self, err: String) -> Vec<Command> {
-        self.security.loading = false;
-        self.security.unconfigured = false;
-        self.security.last_error = Some(err);
-        vec![]
-    }
-
-    fn handle_security_alerts_unconfigured(&mut self) -> Vec<Command> {
-        self.security.unconfigured = true;
-        self.security.loading = false;
-        vec![]
-    }
-
-    fn handle_refresh_security_alerts(&mut self) -> Vec<Command> {
-        self.security.loading = true;
-        self.security.unconfigured = false;
-        vec![Command::FetchSecurityAlerts]
-    }
-
-    fn handle_toggle_security_detail(&mut self) -> Vec<Command> {
-        self.security.detail_visible = !self.security.detail_visible;
-        vec![]
-    }
-
-    fn handle_toggle_security_kind_filter(&mut self) -> Vec<Command> {
-        self.security.kind_filter = match self.security.kind_filter {
-            None => Some(crate::models::AlertKind::Dependabot),
-            Some(crate::models::AlertKind::Dependabot) => {
-                Some(crate::models::AlertKind::CodeScanning)
-            }
-            Some(crate::models::AlertKind::CodeScanning) => None,
-        };
-        self.sync_security_selection();
-        vec![]
-    }
-
-    fn handle_start_security_repo_filter(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::SecurityRepoFilter;
-        vec![]
-    }
-
-    fn handle_close_security_repo_filter(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.sync_security_selection();
-        vec![]
-    }
-
-    fn handle_toggle_security_repo_filter(&mut self, repo: String) -> Vec<Command> {
-        if !self.security.repo_filter.remove(&repo) {
-            self.security.repo_filter.insert(repo);
-        }
-        self.sync_security_selection();
-        vec![]
-    }
-
-    fn handle_toggle_all_security_repo_filter(&mut self) -> Vec<Command> {
-        let all_repos = self.security.repos.clone();
-        if self.security.repo_filter.len() == all_repos.len() {
-            self.security.repo_filter.clear();
-        } else {
-            self.security.repo_filter = all_repos.into_iter().collect();
-        }
-        self.sync_security_selection();
-        vec![]
-    }
-
-    fn handle_toggle_security_repo_filter_mode(&mut self) -> Vec<Command> {
-        self.security.repo_filter_mode = match self.security.repo_filter_mode {
-            RepoFilterMode::Include => RepoFilterMode::Exclude,
-            RepoFilterMode::Exclude => RepoFilterMode::Include,
-        };
-        self.sync_security_selection();
-        vec![]
-    }
-
-    fn handle_start_bot_pr_repo_filter(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::BotPrRepoFilter;
-        vec![]
-    }
-
-    fn handle_close_bot_pr_repo_filter(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.sync_dependabot_selection();
-        vec![]
-    }
-
-    fn handle_toggle_bot_pr_repo_filter(&mut self, repo: String) -> Vec<Command> {
-        if !self.security.dependabot.prs.repo_filter.remove(&repo) {
-            self.security.dependabot.prs.repo_filter.insert(repo);
-        }
-        self.sync_dependabot_selection();
-        vec![]
-    }
-
-    fn handle_toggle_all_bot_pr_repo_filter(&mut self) -> Vec<Command> {
-        let all_repos = self.security.dependabot.prs.repos.clone();
-        if self.security.dependabot.prs.repo_filter.len() == all_repos.len() {
-            self.security.dependabot.prs.repo_filter.clear();
-        } else {
-            self.security.dependabot.prs.repo_filter = all_repos.into_iter().collect();
-        }
-        self.sync_dependabot_selection();
-        vec![]
-    }
-
-    fn handle_toggle_bot_pr_repo_filter_mode(&mut self) -> Vec<Command> {
-        self.security.dependabot.prs.repo_filter_mode =
-            match self.security.dependabot.prs.repo_filter_mode {
-                RepoFilterMode::Include => RepoFilterMode::Exclude,
-                RepoFilterMode::Exclude => RepoFilterMode::Include,
-            };
-        self.sync_dependabot_selection();
-        vec![]
-    }
-
-    pub fn active_bot_pr_repos(&self) -> &[String] {
-        &self.security.dependabot.prs.repos
-    }
-
-    fn handle_dispatch_fix_agent(&mut self, mut req: FixAgentRequest) -> Vec<Command> {
-        let fix_key = FixDispatchKey::new(req.github_repo.clone(), req.number, req.kind);
-        if self.dispatching_fix.contains(&fix_key) {
-            return vec![];
-        }
-        let known = self.known_repo_paths();
-        if let Some(path) = dispatch::resolve_repo_path(&req.github_repo, &known) {
-            self.dispatching_fix.insert(fix_key);
-            self.set_status(format!(
-                "Dispatching fix agent for {}#{}...",
-                req.github_repo, req.number
-            ));
-            req.repo = path;
-            vec![Command::DispatchFixAgent(req)]
-        } else {
-            self.set_status(format!(
-                "No local repo found for {} — select a path",
-                req.github_repo
-            ));
-            self.input.pending_dispatch = Some(PendingDispatch::Fix(req));
-            self.input.mode = InputMode::InputDispatchRepoPath;
-            self.input.buffer.clear();
-            self.input.repo_cursor = 0;
-            vec![]
-        }
-    }
-
-    fn handle_fix_agent_dispatched(
-        &mut self,
-        github_repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        tmux_window: String,
-        worktree: String,
-    ) -> Vec<Command> {
-        self.dispatching_fix
-            .remove(&FixDispatchKey::new(github_repo.clone(), number, kind));
-        let repo_short = github_repo.split('/').next_back().unwrap_or(&github_repo);
-        self.set_status(format!("Fix agent dispatched for {repo_short}#{number}"));
-        let fix_key = FixDispatchKey::new(github_repo.clone(), number, kind);
-        self.security.fix_agents.insert(
-            fix_key,
-            crate::tui::types::FixAgentHandle {
-                tmux_window: tmux_window.clone(),
-                worktree: worktree.clone(),
-                status: crate::models::ReviewAgentStatus::Reviewing,
-            },
-        );
-        vec![Command::PersistFixAgent {
-            github_repo,
-            number,
-            kind,
-            tmux_window,
-            worktree,
-        }]
-    }
-
-    fn handle_fix_agent_failed(
-        &mut self,
-        github_repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        error: String,
-    ) -> Vec<Command> {
-        self.dispatching_fix
-            .remove(&FixDispatchKey::new(github_repo, number, kind));
-        self.set_status(format!("Fix agent failed: {error}"));
-        vec![]
-    }
-
-    fn handle_detach_fix_agent(
-        &mut self,
-        repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-    ) -> Vec<Command> {
-        let mut cmds = Vec::new();
-        let key = FixDispatchKey::new(repo.clone(), number, kind);
-        if let Some(handle) = self.security.fix_agents.remove(&key) {
-            cmds.push(Command::KillTmuxWindow {
-                window: handle.tmux_window,
-            });
-        }
-        cmds.push(Command::UpdateAgentStatus {
-            repo,
-            number,
-            status: None,
-        });
-        cmds
-    }
-
     fn finish_epic_creation(&mut self, repo_path: String) -> Vec<Command> {
         let mut draft = self.input.epic_draft.take().unwrap_or_default();
         draft.repo_path = repo_path.clone();

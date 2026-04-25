@@ -139,62 +139,6 @@ fn scenario_tab_from_board_without_feed_epics_is_noop_for_board_switch() {
 }
 
 #[test]
-fn scenario_any_key_in_review_board_returns_to_task_board() {
-    // Pkg B: review board is no longer user-reachable. Any key forces back
-    // to the kanban as a defensive belt-and-braces in case stale state
-    // somehow leaves the app in ViewMode::ReviewBoard.
-    for code in [
-        KeyCode::Tab,
-        KeyCode::Char('h'),
-        KeyCode::Char('j'),
-        KeyCode::Char('k'),
-        KeyCode::Char('l'),
-        KeyCode::Enter,
-    ] {
-        let mut s = Scenario::new();
-        s.app.update(Message::SwitchToReviewBoard);
-        assert!(
-            matches!(s.app.board.view_mode, ViewMode::ReviewBoard { .. }),
-            "should be on ReviewBoard before key"
-        );
-        s.key(code);
-        assert!(
-            matches!(s.app.board.view_mode, ViewMode::Board(_)),
-            "{:?} on ReviewBoard should return to Board, got {:?}",
-            code,
-            s.app.board.view_mode
-        );
-    }
-}
-
-#[test]
-fn scenario_any_key_in_security_board_returns_to_task_board() {
-    // Pkg B: security board is no longer user-reachable.
-    for code in [
-        KeyCode::Tab,
-        KeyCode::Char('h'),
-        KeyCode::Char('j'),
-        KeyCode::Char('k'),
-        KeyCode::Char('l'),
-        KeyCode::Enter,
-    ] {
-        let mut s = Scenario::new();
-        s.app.update(Message::SwitchToSecurityBoard);
-        assert!(
-            matches!(s.app.board.view_mode, ViewMode::SecurityBoard { .. }),
-            "should be on SecurityBoard before key"
-        );
-        s.key(code);
-        assert!(
-            matches!(s.app.board.view_mode, ViewMode::Board(_)),
-            "{:?} on SecurityBoard should return to Board, got {:?}",
-            code,
-            s.app.board.view_mode
-        );
-    }
-}
-
-#[test]
 fn scenario_help_overlay_opens_on_question_mark() {
     let mut s = Scenario::new();
     s.key(KeyCode::Char('?'));

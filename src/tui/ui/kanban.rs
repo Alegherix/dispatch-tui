@@ -92,11 +92,6 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
             let rows = app.board.repo_paths.len() as u16 + 7;
             rows.clamp(8, max_height)
         }
-        InputMode::InputDispatchRepoPath if app.input.buffer.is_empty() => {
-            // repo(1) + path_input(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 6
-            let rows = app.board.repo_paths.len() as u16 + 6;
-            rows.clamp(8, max_height)
-        }
         _ => 8,
     }
 }
@@ -1174,44 +1169,6 @@ fn input_base_branch_lines(
     ]
 }
 
-fn dispatch_repo_path_lines<'a>(
-    app: &'a App,
-    area: Rect,
-    active: Style,
-    hint: Style,
-) -> Vec<Line<'a>> {
-    let github_repo = app
-        .input
-        .pending_dispatch
-        .as_ref()
-        .map(|p| p.github_repo())
-        .unwrap_or("unknown");
-    let mut lines = vec![
-        Line::from(Span::styled(format!("  Repo: {github_repo}"), hint)),
-        Line::from(Span::styled(
-            format!("  Local path: {}_ ", app.input.buffer),
-            active,
-        )),
-    ];
-    let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-    if !filtered.is_empty() {
-        append_repo_path_list(
-            &mut lines,
-            &filtered,
-            app.input.repo_cursor,
-            5,
-            area.height,
-            hint,
-        );
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Type to filter · [j/k] navigate · [Enter] select · [Esc] cancel",
-        hint,
-    )));
-    lines
-}
-
 fn quick_dispatch_lines<'a>(app: &'a App, area: Rect, active: Style, hint: Style) -> Vec<Line<'a>> {
     let mut lines = vec![
         Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
@@ -1370,7 +1327,6 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::InputEpicRepoPath => {
             input_epic_repo_path_lines(app, area, completed, active, hint)
         }
-        InputMode::InputDispatchRepoPath => dispatch_repo_path_lines(app, area, active, hint),
         _ => return false,
     };
 
@@ -1382,14 +1338,12 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     let block_title = match &app.input.mode {
         InputMode::QuickDispatch => " Quick Dispatch ",
         InputMode::ConfirmRetry(_) => " Retry Agent ",
-        InputMode::InputDispatchRepoPath => " Select Repo Path ",
         _ if is_epic_input => " New Epic ",
         _ => " New Task ",
     };
 
     let border_color = match &app.input.mode {
         InputMode::ConfirmRetry(_) => Color::Red,
-        InputMode::InputDispatchRepoPath => Color::Cyan,
         _ if is_epic_input => Color::Magenta,
         _ => Color::Yellow,
     };
@@ -1692,10 +1646,6 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" notify on/off  ", desc),
             Span::styled("[q]", key),
             Span::styled(" quit (or exit epic)", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [Tab]", key),
-            Span::styled(" switch to Review Board", desc),
         ]),
         Line::from(""),
         Line::from(Span::styled("  [?] or [Esc] to close", note)),
@@ -2040,15 +1990,6 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
-        InputMode::InputDispatchRepoPath => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Select local repo path for dispatch");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
         InputMode::ConfirmRetry(_) => {
             let bar = Paragraph::new("[r] Resume  [f] Fresh start  [Esc] Cancel")
                 .style(Style::default().fg(Color::Red));
@@ -2154,44 +2095,9 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
-        InputMode::ReviewRepoFilter => {
-            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [Enter/Esc] close")
-                .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
-        InputMode::BotPrRepoFilter => {
-            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [Enter/Esc] close")
-                .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
-        InputMode::SecurityRepoFilter => {
-            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [Enter/Esc] close")
-                .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
         InputMode::ConfirmEditTask(_) => {
             let text = app.status.message.as_deref().unwrap_or("Edit task? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::ConfirmApproveBotPr(_) => {
-            let text = app.status.message.as_deref().unwrap_or("Approve PR? [y/n]");
-            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::ConfirmMergeBotPr(_) => {
-            let text = app.status.message.as_deref().unwrap_or("Merge PR? [y/n]");
-            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Green));
-            frame.render_widget(bar, area);
-        }
-        InputMode::ConfirmApproveReviewPr(_) => {
-            let text = app.status.message.as_deref().unwrap_or("Approve PR? [y/n]");
-            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::ConfirmMergeReviewPr(_) => {
-            let text = app.status.message.as_deref().unwrap_or("Merge PR? [y/n]");
-            let bar = Paragraph::new(text.to_owned()).style(Style::default().fg(Color::Green));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmQuit => {

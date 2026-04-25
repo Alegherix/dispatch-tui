@@ -34,9 +34,9 @@ expression: rendered
                         ║                                                                      ║
                         ║  General                                                             ║
 ────────────────────────║  [?] this help  [N] notify on/off  [q] quit (or exit epic)           ║────────────────────────
-                        ║  [Tab] switch to Review Board                                        ║
                         ║                                                                      ║
                         ║  [?] or [Esc] to close                                               ║
+                        ║                                                                      ║
                         ╚══════════════════════════════════════════════════════════════════════╝
 
 

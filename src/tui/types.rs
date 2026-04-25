@@ -1,12 +1,11 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, PrRef, ReviewAgentStatus, SecurityAlert,
-    SecurityWorkflowColumn, SecurityWorkflowState, SubStatus, Task, TaskId, TaskStatus, TaskTag,
-    TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
+    AlertKind, DispatchMode, Epic, EpicId, EpicSubstatus, SubStatus, Task, TaskId, TaskStatus,
+    TaskTag, TaskUsage, TipsShowMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -46,33 +45,6 @@ pub enum MoveDirection {
 }
 
 // ---------------------------------------------------------------------------
-// ReviewBoardMode
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReviewBoardMode {
-    Reviewer,
-    Dependabot,
-}
-
-impl ReviewBoardMode {
-    pub fn column_count() -> usize {
-        4
-    }
-
-    pub fn column_label(state: crate::models::ReviewWorkflowState) -> &'static str {
-        state.column_label()
-    }
-
-    pub fn workflow_item_kind(self) -> crate::models::WorkflowItemKind {
-        match self {
-            Self::Reviewer => crate::models::WorkflowItemKind::ReviewerPr,
-            Self::Dependabot => crate::models::WorkflowItemKind::DependabotPr,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // ReviewAgentRequest
 // ---------------------------------------------------------------------------
 
@@ -99,83 +71,6 @@ pub struct FixAgentRequest {
     pub description: String,
     pub package: Option<String>,
     pub fixed_version: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// FixDispatchKey — newtype for in-flight fix agent dispatch deduplication
-// ---------------------------------------------------------------------------
-
-/// Identifies a fix agent dispatch in-flight, keyed by repo, alert number, and kind.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FixDispatchKey {
-    pub repo: String,
-    pub number: i64,
-    pub kind: AlertKind,
-}
-
-impl FixDispatchKey {
-    pub fn new(repo: String, number: i64, kind: AlertKind) -> Self {
-        Self { repo, number, kind }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// WorkflowKey — composite key into pr_workflow_states
-// ---------------------------------------------------------------------------
-
-/// Composite key into pr_workflow_states.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WorkflowKey {
-    pub repo: String,
-    pub number: i64,
-    pub kind: crate::models::WorkflowItemKind,
-}
-
-impl WorkflowKey {
-    pub fn new(repo: String, number: i64, kind: crate::models::WorkflowItemKind) -> Self {
-        Self { repo, number, kind }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ReviewAgentHandle — execution state for a dispatched review agent
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct ReviewAgentHandle {
-    pub tmux_window: String,
-    pub worktree: String,
-    pub status: ReviewAgentStatus,
-}
-
-// ---------------------------------------------------------------------------
-// FixAgentHandle — execution state for a dispatched fix agent
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct FixAgentHandle {
-    pub tmux_window: String,
-    pub worktree: String,
-    pub status: ReviewAgentStatus,
-}
-
-// ---------------------------------------------------------------------------
-// PendingDispatch — held while user selects a repo path for dispatch
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub enum PendingDispatch {
-    Review(ReviewAgentRequest),
-    Fix(FixAgentRequest),
-}
-
-impl PendingDispatch {
-    pub fn github_repo(&self) -> &str {
-        match self {
-            PendingDispatch::Review(req) => &req.github_repo,
-            PendingDispatch::Fix(req) => &req.github_repo,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +104,7 @@ impl std::str::FromStr for RepoFilterMode {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn repo_filter_matches(
     filter: &HashSet<String>,
     mode: RepoFilterMode,
@@ -238,11 +134,6 @@ pub enum EditKind {
     /// Description-only editor used during task/epic creation.
     /// `is_epic` distinguishes the epic-create flow from the task-create flow.
     Description { is_epic: bool },
-    /// GitHub PR search queries for a given [`PrListKind`]. The Bot variant
-    /// additionally routes through the dependabot_config two-section format.
-    GithubQueries(PrListKind),
-    /// Repo list for the security alerts board.
-    SecurityQueries,
 }
 
 /// Result of a pop-out editor session. `Saved` carries the final tempfile
@@ -341,7 +232,6 @@ pub enum Message {
         outcome: EditorOutcome,
     },
     SubmitRepoPath(String),
-    SubmitDispatchRepoPath(String),
     SubmitTag(Option<TaskTag>),
     SubmitBaseBranch(String),
     InputChar(char),
@@ -411,28 +301,8 @@ pub enum Message {
     CancelDone,
     ToggleNotifications,
     TabCycle,
-    // Review board
-    SwitchToReviewBoard,
-    SwitchToTaskBoard,
-    SwitchReviewBoardMode(ReviewBoardMode),
-    PrsLoaded(PrListKind, Vec<crate::models::ReviewPr>),
-    PrsFetchFailed(PrListKind, String),
     OpenInBrowser {
         url: String,
-    },
-    ToggleReviewDetail,
-    RefreshReviewPrs,
-    DispatchReviewAgent(ReviewAgentRequest),
-    ReviewAgentDispatched {
-        github_repo: String,
-        number: i64,
-        tmux_window: String,
-        worktree: String,
-    },
-    ReviewAgentFailed {
-        github_repo: String,
-        number: i64,
-        error: String,
     },
     // Repo filter
     StartRepoFilter,
@@ -441,66 +311,6 @@ pub enum Message {
     ToggleAllRepoFilter,
     MoveRepoCursor(isize),
     ToggleRepoFilterMode,
-    // Review repo filter
-    StartReviewRepoFilter,
-    CloseReviewRepoFilter,
-    ToggleReviewRepoFilter(String),
-    ToggleAllReviewRepoFilter,
-    ToggleReviewRepoFilterMode,
-    // Dispatch PR filter (My PRs tab)
-    ToggleDispatchPrFilter,
-    // Bot PRs (dependabot/renovate)
-    RefreshBotPrs,
-    BotPrsMerged(Vec<String>),
-    ToggleSelectBotPr(String),
-    ClearBotPrSelection,
-    // Bot PR repo filter
-    StartBotPrRepoFilter,
-    CloseBotPrRepoFilter,
-    ToggleBotPrRepoFilter(String),
-    ToggleAllBotPrRepoFilter,
-    ToggleBotPrRepoFilterMode,
-    // Security board
-    SwitchToSecurityBoard,
-    SecurityAlertsLoaded(Vec<SecurityAlert>),
-    SecurityAlertsFetchFailed(String),
-    SecurityAlertsUnconfigured,
-    RefreshSecurityAlerts,
-    ToggleSecurityDetail,
-    ToggleSecurityKindFilter,
-    StartSecurityRepoFilter,
-    CloseSecurityRepoFilter,
-    ToggleSecurityRepoFilter(String),
-    ToggleAllSecurityRepoFilter,
-    ToggleSecurityRepoFilterMode,
-    DispatchFixAgent(FixAgentRequest),
-    FixAgentDispatched {
-        github_repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        tmux_window: String,
-        worktree: String,
-    },
-    FixAgentFailed {
-        github_repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        error: String,
-    },
-    ReviewStatusUpdated {
-        repo: String,
-        number: i64,
-        status: crate::models::ReviewAgentStatus,
-    },
-    DetachReviewAgent {
-        repo: String,
-        number: i64,
-    },
-    DetachFixAgent {
-        repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-    },
     // Filter presets
     StartSavePreset,
     SaveFilterPreset(String),
@@ -528,19 +338,6 @@ pub enum Message {
     ConfirmDetachTmux,
     // Inter-agent messaging
     MessageReceived(TaskId),
-    // Security board sub-mode switching
-    SwitchSecurityBoardMode(SecurityBoardMode),
-    // Dependabot approve/merge
-    StartApproveBotPr,
-    StartMergeBotPr,
-    ConfirmApproveBotPr,
-    ConfirmMergeBotPr,
-    CancelPrOperation,
-    // Review board approve/merge
-    StartApproveReviewPr,
-    ConfirmApproveReviewPr,
-    StartMergeReviewPr,
-    ConfirmMergeReviewPr,
     // Tips overlay
     ShowTips {
         tips: Vec<crate::tips::Tip>,
@@ -552,25 +349,6 @@ pub enum Message {
     PrevTip,
     SetTipsMode(TipsShowMode),
     CloseTips,
-    // Workflow state loaded from DB on startup
-    WorkflowStatesLoaded(Vec<crate::db::PrWorkflowRow>),
-    // Manual column movement — review board
-    MoveReviewItemForward,
-    MoveReviewItemBack,
-    // Manual column movement — security board
-    MoveSecurityItemForward,
-    MoveSecurityItemBack,
-    // Workflow state transition (from runtime after persisting)
-    ReviewWorkflowUpdated {
-        key: WorkflowKey,
-        state: crate::models::ReviewWorkflowState,
-        sub_state: Option<crate::models::ReviewWorkflowSubState>,
-    },
-    SecurityWorkflowUpdated {
-        key: WorkflowKey,
-        state: crate::models::SecurityWorkflowState,
-        sub_state: Option<crate::models::SecurityWorkflowSubState>,
-    },
 }
 
 // ---------------------------------------------------------------------------
@@ -580,20 +358,6 @@ pub enum Message {
 #[derive(Debug, Clone)]
 pub enum Command {
     PersistTask(Task),
-    PersistReviewAgent {
-        pr_kind: crate::db::PrKind,
-        github_repo: String,
-        number: i64,
-        tmux_window: String,
-        worktree: String,
-    },
-    PersistFixAgent {
-        github_repo: String,
-        number: i64,
-        kind: crate::models::AlertKind,
-        tmux_window: String,
-        worktree: String,
-    },
     InsertTask {
         draft: TaskDraft,
         epic_id: Option<EpicId>,
@@ -724,12 +488,6 @@ pub enum Command {
         id: TaskId,
         pr_url: String,
     },
-    FetchPrs(PrListKind),
-    PersistPrs(PrListKind, Vec<crate::models::ReviewPr>),
-    ApproveBotPr(String),
-    MergeBotPr(String),
-    ApproveReviewPr(String),
-    MergeReviewPr(String),
     OpenInBrowser {
         url: String,
     },
@@ -737,36 +495,10 @@ pub enum Command {
         id: TaskId,
         sub_status: SubStatus,
     },
-    DispatchReviewAgent(ReviewAgentRequest),
-    FetchSecurityAlerts,
-    PersistSecurityAlerts(Vec<SecurityAlert>),
-    DispatchFixAgent(FixAgentRequest),
-    UpdateAgentStatus {
-        repo: String,
-        number: i64,
-        status: Option<crate::models::ReviewAgentStatus>,
-    },
-    ReReview {
-        repo: String,
-        number: i64,
-        tmux_window: String,
-    },
     // Tips persistence
     SaveTipsState {
         seen_up_to: u32,
         show_mode: TipsShowMode,
-    },
-    // Persist a review workflow state change
-    PersistReviewWorkflow {
-        key: WorkflowKey,
-        state: crate::models::ReviewWorkflowState,
-        sub_state: Option<crate::models::ReviewWorkflowSubState>,
-    },
-    // Persist a security workflow state change
-    PersistSecurityWorkflow {
-        key: WorkflowKey,
-        state: crate::models::SecurityWorkflowState,
-        sub_state: Option<crate::models::SecurityWorkflowSubState>,
     },
 }
 
@@ -801,22 +533,11 @@ pub enum InputMode {
     // Overlay modes
     Help,
     RepoFilter,
-    ReviewRepoFilter,
-    BotPrRepoFilter,
-    SecurityRepoFilter,
     InputPresetName,
     ConfirmDeletePreset,
     ConfirmDeleteRepoPath,
     ConfirmEditTask(TaskId),
-    // Dependabot approve/merge confirmation
-    ConfirmApproveBotPr(String),
-    ConfirmMergeBotPr(String),
-    // Review PR approve/merge confirmation
-    ConfirmApproveReviewPr(String),
-    ConfirmMergeReviewPr(String),
     ConfirmQuit,
-    // Dispatch repo path input (review/security tab fallback)
-    InputDispatchRepoPath,
     InputBaseBranch,
 }
 
@@ -951,8 +672,6 @@ pub struct InputState {
     pub repo_cursor: usize,
     /// Tracks epic_id during quick-dispatch repo selection in epic view.
     pub pending_epic_id: Option<EpicId>,
-    /// Holds a pending review/fix dispatch while user selects a repo path.
-    pub pending_dispatch: Option<PendingDispatch>,
 }
 
 impl Default for InputState {
@@ -964,7 +683,6 @@ impl Default for InputState {
             epic_draft: None,
             repo_cursor: 0,
             pending_epic_id: None,
-            pending_dispatch: None,
         }
     }
 }
@@ -1049,165 +767,6 @@ impl FilterState {
 }
 
 // ---------------------------------------------------------------------------
-// PrListKind — discriminator for the three PR lists
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PrListKind {
-    Review,
-    Bot,
-}
-
-impl PrListKind {
-    /// Settings key for the GitHub query strings.
-    pub fn settings_key(self) -> &'static str {
-        match self {
-            Self::Review => "github_queries_review",
-            Self::Bot => "github_queries_bot",
-        }
-    }
-
-    /// Database table name.
-    pub fn table_name(self) -> &'static str {
-        self.to_pr_kind().table_name()
-    }
-
-    pub fn to_pr_kind(self) -> crate::db::PrKind {
-        match self {
-            Self::Review => crate::db::PrKind::Review,
-            Self::Bot => crate::db::PrKind::Bot,
-        }
-    }
-
-    /// Human-readable label for log messages.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Review => "review",
-            Self::Bot => "bot",
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// PrListState — per-list state shared by review / authored / bot PR lists
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Default)]
-pub struct PrListState {
-    pub prs: Vec<crate::models::ReviewPr>,
-    pub repos: Vec<String>,
-    pub loading: bool,
-    pub last_fetch: Option<Instant>,
-    pub last_error: Option<String>,
-    pub repo_filter: HashSet<String>,
-    pub repo_filter_mode: RepoFilterMode,
-}
-
-impl PrListState {
-    /// Replace the PR list and rebuild the cached distinct repos list.
-    pub fn set_prs(&mut self, prs: Vec<crate::models::ReviewPr>) {
-        self.repos = distinct_repos(&prs);
-        self.prs = prs;
-    }
-
-    /// Return PRs filtered by repo filter. Empty filter means all PRs.
-    pub fn filtered(&self) -> Vec<&crate::models::ReviewPr> {
-        self.prs
-            .iter()
-            .filter(|pr| self.repo_matches(&pr.repo))
-            .collect()
-    }
-
-    pub fn repo_matches(&self, repo: &str) -> bool {
-        repo_filter_matches(&self.repo_filter, self.repo_filter_mode, repo)
-    }
-
-    /// Whether this list needs a refresh given the interval.
-    pub fn needs_fetch(&self, interval: Duration) -> bool {
-        self.last_fetch
-            .map(|t| t.elapsed() > interval)
-            .unwrap_or(true)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ReviewBoardState — review board data and loading state
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Default)]
-pub struct ReviewBoardState {
-    pub review: PrListState,
-    pub bot: PrListState,
-    pub detail_visible: bool,
-    pub review_flash: HashMap<PrRef, Instant>,
-    pub review_agents: HashMap<PrRef, ReviewAgentHandle>,
-    /// Column placement authority: (repo, number, kind) → (state, sub_state)
-    pub review_workflow_states: HashMap<
-        WorkflowKey,
-        (
-            crate::models::ReviewWorkflowState,
-            Option<crate::models::ReviewWorkflowSubState>,
-        ),
-    >,
-}
-
-impl ReviewBoardState {
-    pub fn list(&self, kind: PrListKind) -> Option<&PrListState> {
-        match kind {
-            PrListKind::Review => Some(&self.review),
-            PrListKind::Bot => Some(&self.bot),
-        }
-    }
-
-    pub fn list_mut(&mut self, kind: PrListKind) -> Option<&mut PrListState> {
-        match kind {
-            PrListKind::Review => Some(&mut self.review),
-            PrListKind::Bot => Some(&mut self.bot),
-        }
-    }
-
-    /// Insert a review agent handle and return the DB table kind for the PR.
-    /// Returns `None` if the PR is not found in any tracked list.
-    pub fn find_and_set_pr_agent(
-        &mut self,
-        github_repo: &str,
-        number: i64,
-        tmux_window: &str,
-        worktree: &str,
-    ) -> Option<crate::db::PrKind> {
-        let handle = ReviewAgentHandle {
-            tmux_window: tmux_window.to_string(),
-            worktree: worktree.to_string(),
-            status: ReviewAgentStatus::Reviewing,
-        };
-        let key = PrRef::new(github_repo.to_string(), number);
-        self.review_agents.insert(key, handle);
-
-        for kind in [PrListKind::Review, PrListKind::Bot] {
-            if self
-                .list(kind)
-                .unwrap()
-                .prs
-                .iter()
-                .any(|pr| pr.repo == github_repo && pr.number == number)
-            {
-                return Some(kind.to_pr_kind());
-            }
-        }
-        None
-    }
-}
-
-/// Compute a sorted, deduplicated list of repo names from a slice of review PRs.
-fn distinct_repos(prs: &[crate::models::ReviewPr]) -> Vec<String> {
-    prs.iter()
-        .map(|pr| pr.repo.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
 // TaskEdit — bundled fields for Message::TaskEdited
 // ---------------------------------------------------------------------------
 
@@ -1282,221 +841,6 @@ impl Default for BoardSelection {
 }
 
 // ---------------------------------------------------------------------------
-// ReviewBoardSelection — column + row selection state for review board
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct ReviewBoardSelection {
-    pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; crate::models::ReviewWorkflowState::COLUMN_COUNT],
-    #[allow(dead_code)] // removed in epic #29 package D
-    pub(in crate::tui) list_states: [ListState; crate::models::ReviewWorkflowState::COLUMN_COUNT],
-    pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
-}
-
-impl ReviewBoardSelection {
-    pub fn new() -> Self {
-        Self {
-            selected_column: 0,
-            selected_row: [0; crate::models::ReviewWorkflowState::COLUMN_COUNT],
-            list_states: std::array::from_fn(|_| ListState::default()),
-            anchor_pr: None,
-        }
-    }
-
-    pub fn column(&self) -> usize {
-        self.selected_column
-    }
-
-    pub fn row(&self, col: usize) -> usize {
-        self.selected_row[col]
-    }
-
-    pub fn set_column(&mut self, col: usize) {
-        self.selected_column = col;
-    }
-
-    pub fn set_row(&mut self, col: usize, row: usize) {
-        self.selected_row[col] = row;
-    }
-
-    pub fn list_state_index(&self, col: usize) -> Option<usize> {
-        Some(self.selected_row[col])
-    }
-}
-
-impl Default for ReviewBoardSelection {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SecurityBoardSelection — column + row selection state for security board
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct SecurityBoardSelection {
-    pub(in crate::tui) selected_column: usize,
-    pub(in crate::tui) selected_row: [usize; SecurityWorkflowState::COLUMN_COUNT],
-    #[allow(dead_code)] // removed in epic #29 package D
-    pub(in crate::tui) list_states: [ListState; SecurityWorkflowState::COLUMN_COUNT],
-    pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
-}
-
-impl SecurityBoardSelection {
-    pub fn new() -> Self {
-        Self {
-            selected_column: 0,
-            selected_row: [0; SecurityWorkflowState::COLUMN_COUNT],
-            list_states: std::array::from_fn(|_| ListState::default()),
-            anchor_pr: None,
-        }
-    }
-
-    pub fn column(&self) -> usize {
-        self.selected_column
-    }
-
-    pub fn row(&self, col: usize) -> usize {
-        self.selected_row[col]
-    }
-
-    pub fn set_column(&mut self, col: usize) {
-        self.selected_column = col;
-    }
-
-    pub fn set_row(&mut self, col: usize, row: usize) {
-        self.selected_row[col] = row;
-    }
-
-    pub fn list_state_index(&self, col: usize) -> Option<usize> {
-        Some(self.selected_row[col])
-    }
-}
-
-impl Default for SecurityBoardSelection {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SecurityBoardMode — sub-view selector for the Security Board
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SecurityBoardMode {
-    #[default]
-    Dependabot,
-    Alerts,
-}
-
-// ---------------------------------------------------------------------------
-// DependabotBoardState — state for the Dependabot PR sub-view
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Default)]
-pub struct DependabotBoardState {
-    pub prs: PrListState,
-    pub selected_prs: HashSet<String>,
-    pub detail_visible: bool,
-}
-
-// ---------------------------------------------------------------------------
-// SecurityBoardState — security board data and loading state
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Default)]
-pub struct SecurityBoardState {
-    pub alerts: Vec<SecurityAlert>,
-    pub repos: Vec<String>,
-    pub loading: bool,
-    pub unconfigured: bool,
-    pub last_fetch: Option<Instant>,
-    pub last_error: Option<String>,
-    pub detail_visible: bool,
-    pub repo_filter: HashSet<String>,
-    pub repo_filter_mode: RepoFilterMode,
-    pub kind_filter: Option<AlertKind>,
-    pub review_flash: HashMap<PrRef, Instant>,
-    pub dependabot: DependabotBoardState,
-    pub fix_agents: HashMap<FixDispatchKey, FixAgentHandle>,
-    pub security_workflow_states: HashMap<
-        WorkflowKey,
-        (
-            crate::models::SecurityWorkflowState,
-            Option<crate::models::SecurityWorkflowSubState>,
-        ),
-    >,
-}
-
-impl SecurityBoardState {
-    /// Set alerts and rebuild the cached distinct repos list.
-    pub fn set_alerts(&mut self, alerts: Vec<SecurityAlert>) {
-        self.repos = {
-            let mut set = BTreeSet::new();
-            for a in &alerts {
-                set.insert(a.repo.clone());
-            }
-            set.into_iter().collect()
-        };
-        self.alerts = alerts;
-    }
-
-    /// Return alerts filtered by repo filter and kind filter.
-    pub fn filtered_alerts(&self) -> Vec<&SecurityAlert> {
-        self.alerts
-            .iter()
-            .filter(|a| self.repo_matches(&a.repo))
-            .filter(|a| self.kind_filter.is_none() || self.kind_filter == Some(a.kind))
-            .collect()
-    }
-
-    pub fn repo_matches(&self, repo: &str) -> bool {
-        repo_filter_matches(&self.repo_filter, self.repo_filter_mode, repo)
-    }
-
-    /// Whether alerts need a refresh given the interval.
-    pub fn needs_fetch(&self, interval: Duration) -> bool {
-        self.last_fetch
-            .map(|t| t.elapsed() > interval)
-            .unwrap_or(true)
-    }
-
-    /// Derive the workflow column for an alert based on its fix agent state.
-    pub fn workflow_column_for_alert(&self, alert: &SecurityAlert) -> SecurityWorkflowColumn {
-        let key = FixDispatchKey::new(alert.repo.clone(), alert.number, alert.kind);
-        match self.fix_agents.get(&key) {
-            None
-            | Some(FixAgentHandle {
-                status: ReviewAgentStatus::Idle,
-                ..
-            }) => SecurityWorkflowColumn::Backlog,
-            Some(FixAgentHandle {
-                status: ReviewAgentStatus::Reviewing,
-                ..
-            }) => SecurityWorkflowColumn::InProgress,
-            Some(FixAgentHandle {
-                status: ReviewAgentStatus::FindingsReady,
-                ..
-            }) => SecurityWorkflowColumn::Review,
-        }
-    }
-
-    /// Return filtered alerts for a specific workflow column, sorted by repo.
-    pub fn alerts_for_workflow_column(&self, col: SecurityWorkflowColumn) -> Vec<&SecurityAlert> {
-        let mut alerts: Vec<_> = self
-            .filtered_alerts()
-            .into_iter()
-            .filter(|a| self.workflow_column_for_alert(a) == col)
-            .collect();
-        alerts.sort_by(|a, b| a.repo.cmp(&b.repo));
-        alerts
-    }
-}
-
-// ---------------------------------------------------------------------------
 // ViewMode — board vs epic view with preserved selection state
 // ---------------------------------------------------------------------------
 
@@ -1510,17 +854,6 @@ pub enum ViewMode {
         /// For a root epic entered from the board, this is `ViewMode::Board(...)`.
         /// For a nested sub-epic, this is `ViewMode::Epic { ... }` of the parent.
         parent: Box<ViewMode>,
-    },
-    ReviewBoard {
-        mode: ReviewBoardMode,
-        selection: ReviewBoardSelection,
-        saved_board: BoardSelection,
-    },
-    SecurityBoard {
-        mode: SecurityBoardMode,
-        selection: SecurityBoardSelection,
-        dependabot_selection: ReviewBoardSelection,
-        saved_board: BoardSelection,
     },
 }
 
@@ -1674,114 +1007,6 @@ pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
-    use chrono::Utc;
-
-    fn make_pr(number: i64, repo: &str) -> ReviewPr {
-        ReviewPr {
-            number,
-            title: format!("PR {number}"),
-            author: "alice".to_string(),
-            repo: repo.to_string(),
-            url: format!("https://github.com/{repo}/pull/{number}"),
-            is_draft: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            additions: 10,
-            deletions: 5,
-            review_decision: ReviewDecision::ReviewRequired,
-            labels: vec![],
-            body: String::new(),
-            head_ref: String::new(),
-            ci_status: CiStatus::None,
-            reviewers: vec![],
-        }
-    }
-
-    // -- PrListState::set_prs --
-
-    #[test]
-    fn pr_list_state_set_prs_stores_prs_and_computes_repos() {
-        let mut state = PrListState::default();
-        state.set_prs(vec![make_pr(1, "org/beta"), make_pr(2, "org/alpha")]);
-        assert_eq!(state.prs.len(), 2);
-        // repos should be sorted and deduplicated
-        assert_eq!(state.repos, vec!["org/alpha", "org/beta"]);
-    }
-
-    // -- PrListState::filtered --
-
-    #[test]
-    fn pr_list_state_filtered_returns_all_when_no_filter() {
-        let mut state = PrListState::default();
-        state.set_prs(vec![make_pr(1, "org/a"), make_pr(2, "org/b")]);
-        assert_eq!(state.filtered().len(), 2);
-    }
-
-    #[test]
-    fn pr_list_state_filtered_include_mode() {
-        let mut state = PrListState::default();
-        state.set_prs(vec![make_pr(1, "org/a"), make_pr(2, "org/b")]);
-        state.repo_filter.insert("org/a".to_string());
-        state.repo_filter_mode = RepoFilterMode::Include;
-        let result = state.filtered();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].repo, "org/a");
-    }
-
-    #[test]
-    fn pr_list_state_filtered_exclude_mode() {
-        let mut state = PrListState::default();
-        state.set_prs(vec![make_pr(1, "org/a"), make_pr(2, "org/b")]);
-        state.repo_filter.insert("org/a".to_string());
-        state.repo_filter_mode = RepoFilterMode::Exclude;
-        let result = state.filtered();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].repo, "org/b");
-    }
-
-    // -- PrListState::repo_matches --
-
-    #[test]
-    fn pr_list_state_repo_matches_empty_filter_matches_all() {
-        let state = PrListState::default();
-        assert!(state.repo_matches("anything"));
-    }
-
-    #[test]
-    fn pr_list_state_repo_matches_include_mode() {
-        let mut state = PrListState::default();
-        state.repo_filter.insert("org/a".to_string());
-        state.repo_filter_mode = RepoFilterMode::Include;
-        assert!(state.repo_matches("org/a"));
-        assert!(!state.repo_matches("org/b"));
-    }
-
-    #[test]
-    fn pr_list_state_repo_matches_exclude_mode() {
-        let mut state = PrListState::default();
-        state.repo_filter.insert("org/a".to_string());
-        state.repo_filter_mode = RepoFilterMode::Exclude;
-        assert!(!state.repo_matches("org/a"));
-        assert!(state.repo_matches("org/b"));
-    }
-
-    // -- PrListState::needs_fetch --
-
-    #[test]
-    fn pr_list_state_needs_fetch_true_when_never_fetched() {
-        let state = PrListState::default();
-        assert!(state.needs_fetch(Duration::from_secs(60)));
-    }
-
-    #[test]
-    fn pr_list_state_needs_fetch_false_when_recently_fetched() {
-        let state = PrListState {
-            last_fetch: Some(Instant::now()),
-            ..Default::default()
-        };
-        assert!(!state.needs_fetch(Duration::from_secs(60)));
-    }
 
     // -- RepoFilterMode --
 
@@ -1810,101 +1035,6 @@ mod tests {
     #[test]
     fn repo_filter_mode_default_is_include() {
         assert_eq!(RepoFilterMode::default(), RepoFilterMode::Include);
-    }
-
-    // -- PrListKind --
-
-    #[test]
-    fn pr_list_kind_settings_key() {
-        assert_eq!(PrListKind::Review.settings_key(), "github_queries_review");
-        assert_eq!(PrListKind::Bot.settings_key(), "github_queries_bot");
-    }
-
-    #[test]
-    fn pr_list_kind_table_name() {
-        assert_eq!(PrListKind::Review.table_name(), "review_prs");
-        assert_eq!(PrListKind::Bot.table_name(), "bot_prs");
-    }
-
-    #[test]
-    fn pr_list_kind_label() {
-        assert_eq!(PrListKind::Review.label(), "review");
-        assert_eq!(PrListKind::Bot.label(), "bot");
-    }
-
-    // -- ReviewBoardState::list / list_mut --
-
-    #[test]
-    fn review_board_state_list_returns_correct_list() {
-        let mut state = ReviewBoardState::default();
-        state.review.set_prs(vec![make_pr(1, "org/a")]);
-        state
-            .bot
-            .set_prs(vec![make_pr(2, "org/b"), make_pr(3, "org/c")]);
-
-        assert_eq!(state.list(PrListKind::Review).unwrap().prs.len(), 1);
-        assert_eq!(state.list(PrListKind::Bot).unwrap().prs.len(), 2);
-    }
-
-    #[test]
-    fn review_board_state_list_mut_mutates_correct_list() {
-        let mut state = ReviewBoardState::default();
-        state.list_mut(PrListKind::Review).unwrap().loading = true;
-        assert!(state.review.loading);
-        assert!(!state.bot.loading);
-    }
-
-    // -- ReviewBoardState::find_and_set_pr_agent --
-
-    #[test]
-    fn find_and_set_pr_agent_sets_fields_in_review_list() {
-        let mut state = ReviewBoardState::default();
-        state.review.set_prs(vec![make_pr(42, "org/app")]);
-
-        let kind = state.find_and_set_pr_agent("org/app", 42, "win-42", "/tmp/wt");
-        assert_eq!(kind, Some(crate::db::PrKind::Review));
-        let key = PrRef::new("org/app".to_string(), 42);
-        let handle = state.review_agents.get(&key).unwrap();
-        assert_eq!(handle.tmux_window, "win-42");
-        assert_eq!(handle.worktree, "/tmp/wt");
-        assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
-    }
-
-    #[test]
-    fn find_and_set_pr_agent_sets_fields_in_bot_list() {
-        let mut state = ReviewBoardState::default();
-        state.bot.set_prs(vec![make_pr(99, "org/lib")]);
-
-        let kind = state.find_and_set_pr_agent("org/lib", 99, "win-99", "/tmp/wt2");
-        assert_eq!(kind, Some(crate::db::PrKind::Bot));
-        let key = PrRef::new("org/lib".to_string(), 99);
-        let handle = state.review_agents.get(&key).unwrap();
-        assert_eq!(handle.tmux_window, "win-99");
-    }
-
-    #[test]
-    fn find_and_set_pr_agent_returns_none_when_not_found() {
-        let mut state = ReviewBoardState::default();
-        let kind = state.find_and_set_pr_agent("org/unknown", 1, "win", "/wt");
-        assert_eq!(kind, None);
-    }
-
-    #[test]
-    fn review_board_list_bot_returns_some() {
-        let state = ReviewBoardState::default();
-        assert!(state.list(PrListKind::Bot).is_some());
-    }
-
-    #[test]
-    fn review_board_list_mut_bot_returns_some() {
-        let mut state = ReviewBoardState::default();
-        assert!(state.list_mut(PrListKind::Bot).is_some());
-    }
-
-    #[test]
-    fn review_board_list_review_returns_some() {
-        let state = ReviewBoardState::default();
-        assert!(state.list(PrListKind::Review).is_some());
     }
 
     // -- repo_filter_matches --

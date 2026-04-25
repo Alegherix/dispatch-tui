@@ -1,7 +1,7 @@
 use super::palette::{BORDER, FG, MUTED, MUTED_LIGHT, PURPLE};
 
 use crate::models::{Epic, Staleness};
-use crate::tui::{App, RepoFilterMode, ReviewBoardMode, ViewMode};
+use crate::tui::{App, RepoFilterMode, ViewMode};
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
@@ -83,25 +83,6 @@ fn tab_label(prefix: &str, name: &str, count: usize, filter: bool, loading: bool
     format!("{prefix}{name}{count_part}{filter_part}{loading_part} ")
 }
 
-fn review_tab_label(app: &App, prefix: &str, title: &str) -> String {
-    tab_label(
-        prefix,
-        title,
-        app.review_prs().len(),
-        false,
-        app.review_board_loading(),
-    )
-}
-
-fn bot_prs_tab_label(app: &App, prefix: &str, title: &str) -> String {
-    tab_label(
-        prefix,
-        title,
-        app.review_bot_prs().len(),
-        false,
-        app.review_bot_prs_loading(),
-    )
-}
 
 pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let active_style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
@@ -116,12 +97,6 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
 
     // Determine which feed epic index (if any) is active.
     let active_feed_idx: Option<usize> = match app.view_mode() {
-        ViewMode::ReviewBoard { .. } => feed_epics
-            .iter()
-            .position(|e| e.feed_command.as_deref() == Some("dispatch fetch-reviews")),
-        ViewMode::SecurityBoard { .. } => feed_epics
-            .iter()
-            .position(|e| e.feed_command.as_deref() == Some("dispatch fetch-security")),
         ViewMode::Epic { epic_id, .. } => feed_epics.iter().position(|e| e.id == *epic_id),
         ViewMode::Board(_) => None,
     };
@@ -156,15 +131,7 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
         spans.push(Span::styled(" \u{2502} ", Style::default().fg(BORDER)));
         let is_active = active_feed_idx == Some(idx);
         let label = if is_active {
-            match app.view_mode() {
-                ViewMode::ReviewBoard { mode, .. } => match mode {
-                    ReviewBoardMode::Reviewer => review_tab_label(app, " \u{25b8} ", &epic.title),
-                    ReviewBoardMode::Dependabot => {
-                        bot_prs_tab_label(app, " \u{25b8} ", "Dependabot")
-                    }
-                },
-                _ => tab_label(" \u{25b8} ", &epic.title, 0, false, false),
-            }
+            tab_label(" \u{25b8} ", &epic.title, 0, false, false)
         } else {
             tab_label(" ", &epic.title, 0, false, false)
         };
@@ -179,41 +146,16 @@ pub(in crate::tui::ui) fn render_tab_bar(frame: &mut Frame, app: &App, area: Rec
     let key_hint = Style::default()
         .fg(MUTED_LIGHT)
         .add_modifier(Modifier::BOLD);
-    match app.view_mode() {
-        ViewMode::ReviewBoard { .. } => {
-            let next_idx = active_feed_idx.map(|i| i + 1).unwrap_or(1);
-            let next_name = feed_epics
-                .get(next_idx)
-                .map(|e| e.title.as_str())
-                .unwrap_or("");
-            spans.push(Span::styled("  [Tab]", key_hint));
-            if !next_name.is_empty() {
-                spans.push(Span::styled(format!(" {next_name}  "), hint_style));
-            } else {
-                spans.push(Span::styled("  ", hint_style));
-            }
-            spans.push(Span::styled("[S-Tab]", key_hint));
-            spans.push(Span::styled(" toggle", hint_style));
-        }
-        ViewMode::SecurityBoard { .. } => {
-            spans.push(Span::styled("  [Tab]", key_hint));
-            spans.push(Span::styled(" tasks  ", hint_style));
-            spans.push(Span::styled("[Esc]", key_hint));
-            spans.push(Span::styled(" back", hint_style));
-        }
-        _ => {
-            let next_tab_name = match active_feed_idx {
-                None => feed_epics.first().map(|e| e.title.as_str()).unwrap_or(""),
-                Some(i) => feed_epics
-                    .get(i + 1)
-                    .map(|e| e.title.as_str())
-                    .unwrap_or("Tasks"),
-            };
-            spans.push(Span::styled("  [Tab]", key_hint));
-            if !next_tab_name.is_empty() {
-                spans.push(Span::styled(format!(" {next_tab_name}"), hint_style));
-            }
-        }
+    let next_tab_name = match active_feed_idx {
+        None => feed_epics.first().map(|e| e.title.as_str()).unwrap_or(""),
+        Some(i) => feed_epics
+            .get(i + 1)
+            .map(|e| e.title.as_str())
+            .unwrap_or("Tasks"),
+    };
+    spans.push(Span::styled("  [Tab]", key_hint));
+    if !next_tab_name.is_empty() {
+        spans.push(Span::styled(format!(" {next_tab_name}"), hint_style));
     }
 
     let line = Line::from(spans);

@@ -1892,16 +1892,9 @@ fn save_review_prs_preserves_agent_fields() {
     };
     db.save_prs(super::PrKind::Review, &[pr]).unwrap();
 
-    // Simulate agent dispatch by setting agent fields directly
-    {
-        let conn = db.conn().unwrap();
-        conn.execute(
-            "UPDATE review_prs SET tmux_window = 'dispatch:review-42', worktree = '/tmp/wt'
-             WHERE repo = 'acme/app' AND number = 42",
-            [],
-        )
+    // Simulate agent dispatch via the proper set_pr_agent method
+    db.set_pr_agent(super::PrKind::Review, "acme/app", 42, "dispatch:review-42", "/tmp/wt")
         .unwrap();
-    }
 
     // Now save a refreshed version of the same PR (as if GitHub API returned it)
     let refreshed_pr = ReviewPr {
@@ -1930,12 +1923,11 @@ fn save_review_prs_preserves_agent_fields() {
     assert_eq!(loaded[0].title, "Updated title");
     assert_eq!(loaded[0].review_decision, ReviewDecision::Approved);
 
-    // Agent state is now read via load_pr_agent_states, not from the PR struct
-    let agents = db.load_pr_agent_states().unwrap();
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    let handle = agents.get(&key).expect("agent handle should be preserved");
-    assert_eq!(handle.tmux_window, "dispatch:review-42");
-    assert_eq!(handle.worktree, "/tmp/wt");
+    // Agent status should still be present after refresh
+    let status = db
+        .pr_agent_status("review_prs", "acme/app", 42)
+        .unwrap();
+    assert!(status.is_some(), "agent status should be preserved");
 }
 
 #[test]
@@ -2839,16 +2831,9 @@ fn save_security_alerts_preserves_agent_fields() {
     };
     db.save_security_alerts(&[alert]).unwrap();
 
-    // Simulate agent dispatch
-    {
-        let conn = db.conn().unwrap();
-        conn.execute(
-            "UPDATE security_alerts SET tmux_window = 'dispatch:fix-1', worktree = '/tmp/wt'
-             WHERE repo = 'acme/app' AND number = 1 AND kind = 'dependabot'",
-            [],
-        )
+    // Simulate agent dispatch via the proper set_alert_agent method
+    db.set_alert_agent("acme/app", 1, AlertKind::Dependabot, "dispatch:fix-1", "/tmp/wt")
         .unwrap();
-    }
 
     // Refresh with updated alert data
     let refreshed = SecurityAlert {
@@ -2873,13 +2858,11 @@ fn save_security_alerts_preserves_agent_fields() {
     assert_eq!(loaded[0].title, "CVE-2024-1234 (updated)");
     assert_eq!(loaded[0].fixed_version.as_deref(), Some("4.17.22"));
 
-    // Agent state is now read via load_alert_agent_states, not from the alert struct
-    use crate::tui::types::FixDispatchKey;
-    let agents = db.load_alert_agent_states().unwrap();
-    let key = FixDispatchKey::new("acme/app".to_string(), 1, AlertKind::Dependabot);
-    let handle = agents.get(&key).expect("agent handle should be preserved");
-    assert_eq!(handle.tmux_window, "dispatch:fix-1");
-    assert_eq!(handle.worktree, "/tmp/wt");
+    // Agent status should still be present after refresh
+    let status = db
+        .alert_agent_status("acme/app", 1, AlertKind::Dependabot)
+        .unwrap();
+    assert!(status.is_some(), "agent status should be preserved");
 }
 
 #[test]
@@ -3503,13 +3486,14 @@ fn set_pr_agent_updates_fields() {
     )
     .unwrap();
 
-    // Agent state is now tracked in the agent map, not on the PR struct
-    let agents = db.load_pr_agent_states().unwrap();
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    let handle = agents.get(&key).expect("agent handle should be set");
-    assert_eq!(handle.tmux_window, "dispatch:review-42");
-    assert_eq!(handle.worktree, "/tmp/wt");
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
+    let status = db
+        .pr_agent_status("review_prs", "acme/app", 42)
+        .unwrap();
+    assert_eq!(
+        status,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        "agent should be marked as reviewing"
+    );
 }
 
 #[test]
@@ -3545,14 +3529,14 @@ fn set_alert_agent_updates_fields() {
     )
     .unwrap();
 
-    // Agent state is now tracked in the agent map, not on the alert struct
-    use crate::tui::types::FixDispatchKey;
-    let agents = db.load_alert_agent_states().unwrap();
-    let key = FixDispatchKey::new("acme/app".to_string(), 1, AlertKind::Dependabot);
-    let handle = agents.get(&key).expect("agent handle should be set");
-    assert_eq!(handle.tmux_window, "dispatch:fix-1");
-    assert_eq!(handle.worktree, "/tmp/wt");
-    assert_eq!(handle.status, crate::models::ReviewAgentStatus::Reviewing);
+    let status = db
+        .alert_agent_status("acme/app", 1, AlertKind::Dependabot)
+        .unwrap();
+    assert_eq!(
+        status,
+        Some(crate::models::ReviewAgentStatus::Reviewing),
+        "agent should be marked as reviewing"
+    );
 }
 
 #[test]
@@ -3594,11 +3578,8 @@ fn update_agent_status_finds_review_pr() {
         .unwrap();
     assert_eq!(table, "review_prs");
 
-    // Agent status is now read via load_pr_agent_states, not from the PR struct
-    let agents = db.load_pr_agent_states().unwrap();
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    let handle = agents.get(&key).expect("agent handle should be present");
-    assert_eq!(handle.status, ReviewAgentStatus::FindingsReady);
+    let status = db.pr_agent_status("review_prs", "acme/app", 42).unwrap();
+    assert_eq!(status, Some(ReviewAgentStatus::FindingsReady));
 }
 
 #[test]
@@ -3640,10 +3621,8 @@ fn update_agent_status_finds_bot_pr() {
         .unwrap();
     assert_eq!(table, "bot_prs");
 
-    let agents = db.load_pr_agent_states().unwrap();
-    let key = crate::models::PrRef::new("acme/app".to_string(), 10);
-    let handle = agents.get(&key).expect("agent handle should be present");
-    assert_eq!(handle.status, ReviewAgentStatus::Idle);
+    let status = db.pr_agent_status("bot_prs", "acme/app", 10).unwrap();
+    assert_eq!(status, Some(ReviewAgentStatus::Idle));
 }
 
 #[test]
@@ -3682,11 +3661,10 @@ fn update_agent_status_finds_security_alert() {
         .unwrap();
     assert_eq!(table, "security_alerts");
 
-    use crate::tui::types::FixDispatchKey;
-    let agents = db.load_alert_agent_states().unwrap();
-    let key = FixDispatchKey::new("acme/app".to_string(), 1, AlertKind::Dependabot);
-    let handle = agents.get(&key).expect("agent handle should be present");
-    assert_eq!(handle.status, ReviewAgentStatus::FindingsReady);
+    let status = db
+        .alert_agent_status("acme/app", 1, AlertKind::Dependabot)
+        .unwrap();
+    assert_eq!(status, Some(ReviewAgentStatus::FindingsReady));
 }
 
 #[test]
@@ -4783,133 +4761,6 @@ fn tips_state_overwrite() {
     let (seen_up_to, show_mode) = db.get_tips_state().unwrap();
     assert_eq!(seen_up_to, 5);
     assert_eq!(show_mode, crate::models::TipsShowMode::Never);
-}
-
-#[test]
-fn load_pr_agent_states_empty_when_no_agents() {
-    let db = in_memory_db();
-    let states = db.load_pr_agent_states().unwrap();
-    assert!(states.is_empty());
-}
-
-#[test]
-fn load_pr_agent_states_returns_active_agents() {
-    use crate::models::{CiStatus, ReviewAgentStatus, ReviewDecision, ReviewPr};
-
-    let db = in_memory_db();
-    let pr = ReviewPr {
-        number: 42,
-        title: "Fix bug".to_string(),
-        author: "alice".to_string(),
-        repo: "acme/app".to_string(),
-        url: "https://github.com/acme/app/pull/42".to_string(),
-        is_draft: false,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        additions: 10,
-        deletions: 5,
-        review_decision: ReviewDecision::ReviewRequired,
-        labels: vec![],
-        body: String::new(),
-        head_ref: String::new(),
-        ci_status: CiStatus::None,
-        reviewers: vec![],
-    };
-    db.save_prs(super::PrKind::Review, &[pr]).unwrap();
-    db.set_pr_agent(
-        super::PrKind::Review,
-        "acme/app",
-        42,
-        "dispatch:review-42",
-        "/tmp/wt-42",
-    )
-    .unwrap();
-
-    let states = db.load_pr_agent_states().unwrap();
-    assert_eq!(states.len(), 1);
-
-    let key = crate::models::PrRef::new("acme/app".to_string(), 42);
-    let handle = states.get(&key).expect("handle should be present");
-    assert_eq!(handle.tmux_window, "dispatch:review-42");
-    assert_eq!(handle.worktree, "/tmp/wt-42");
-    assert_eq!(handle.status, ReviewAgentStatus::Reviewing);
-}
-
-#[test]
-fn load_pr_agent_states_skips_rows_without_tmux_window() {
-    use crate::models::{CiStatus, ReviewDecision, ReviewPr};
-
-    let db = in_memory_db();
-    let pr = ReviewPr {
-        number: 1,
-        title: "No agent".to_string(),
-        author: "alice".to_string(),
-        repo: "acme/app".to_string(),
-        url: "https://github.com/acme/app/pull/1".to_string(),
-        is_draft: false,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        additions: 1,
-        deletions: 1,
-        review_decision: ReviewDecision::ReviewRequired,
-        labels: vec![],
-        body: String::new(),
-        head_ref: String::new(),
-        ci_status: CiStatus::None,
-        reviewers: vec![],
-    };
-    db.save_prs(super::PrKind::Review, &[pr]).unwrap();
-
-    let states = db.load_pr_agent_states().unwrap();
-    assert!(states.is_empty());
-}
-
-#[test]
-fn load_alert_agent_states_empty_when_no_agents() {
-    let db = in_memory_db();
-    let states = db.load_alert_agent_states().unwrap();
-    assert!(states.is_empty());
-}
-
-#[test]
-fn load_alert_agent_states_returns_active_agents() {
-    use crate::models::{AlertKind, AlertSeverity, ReviewAgentStatus, SecurityAlert};
-
-    let db = in_memory_db();
-    let alert = SecurityAlert {
-        number: 7,
-        repo: "acme/app".to_string(),
-        severity: AlertSeverity::High,
-        kind: AlertKind::Dependabot,
-        title: "CVE-2024-0001".to_string(),
-        package: None,
-        vulnerable_range: None,
-        fixed_version: None,
-        cvss_score: None,
-        url: "https://github.com/acme/app/security/dependabot/7".to_string(),
-        created_at: chrono::Utc::now(),
-        state: "open".to_string(),
-        description: String::new(),
-    };
-    db.save_security_alerts(&[alert]).unwrap();
-    db.set_alert_agent(
-        "acme/app",
-        7,
-        AlertKind::Dependabot,
-        "dispatch:fix-7",
-        "/tmp/wt-7",
-    )
-    .unwrap();
-
-    let states = db.load_alert_agent_states().unwrap();
-    assert_eq!(states.len(), 1);
-
-    use crate::tui::types::FixDispatchKey;
-    let key = FixDispatchKey::new("acme/app".to_string(), 7, AlertKind::Dependabot);
-    let handle = states.get(&key).expect("handle should be present");
-    assert_eq!(handle.tmux_window, "dispatch:fix-7");
-    assert_eq!(handle.worktree, "/tmp/wt-7");
-    assert_eq!(handle.status, ReviewAgentStatus::Reviewing);
 }
 
 #[test]

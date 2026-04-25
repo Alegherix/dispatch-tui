@@ -1116,7 +1116,7 @@ impl Task {
 // FeedItem — an item from a programmable epic feed
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FeedItem {
     pub external_id: String,
     pub title: String,

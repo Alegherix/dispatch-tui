@@ -4,6 +4,7 @@ pub const DEFAULT_PORT: u16 = 3142;
 pub mod db;
 pub mod dispatch;
 pub mod editor;
+pub mod feed;
 pub mod github;
 pub mod mcp;
 pub mod models;

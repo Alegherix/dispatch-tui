@@ -277,9 +277,7 @@ fn render_security_summary_row(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn sort_security_alerts(
-    alerts: &mut Vec<(&SecurityAlert, Option<SecurityWorkflowSubState>)>,
-) {
+fn sort_security_alerts(alerts: &mut Vec<(&SecurityAlert, Option<SecurityWorkflowSubState>)>) {
     alerts.sort_by(|(a, a_sub), (b, b_sub)| {
         security_sub_state_sort_key(*a_sub)
             .cmp(&security_sub_state_sort_key(*b_sub))

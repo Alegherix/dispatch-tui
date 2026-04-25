@@ -63,9 +63,11 @@ fn make_runtime(
     tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
 ) -> TuiRuntime {
+    let (feed_tx, _) = mpsc::unbounded_channel();
     TuiRuntime {
         task_svc: crate::service::TaskService::new(db.clone()),
         epic_svc: crate::service::EpicService::new(db.clone()),
+        feed_runner: crate::feed::FeedRunner::new(db.clone(), feed_tx),
         database: db,
         msg_tx: tx,
         runner,

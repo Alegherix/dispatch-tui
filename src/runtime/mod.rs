@@ -64,6 +64,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     let mcp_db = database.clone();
     let mcp_runner = runner.clone();
     let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
+    let feed_notify_tx = mcp_notify_tx.clone();
     tokio::spawn(async move {
         if let Err(e) = mcp::serve(mcp_db, port, mcp_notify_tx, mcp_runner).await {
             eprintln!("MCP server error: {e}");
@@ -179,9 +180,10 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
     // 7. Main loop
     tracing::info!(port, db = %db_path.display(), "TUI started, MCP server on port {port}");
 
-    let runtime = TuiRuntime {
+    let mut runtime = TuiRuntime {
         task_svc: crate::service::TaskService::new(database.clone()),
         epic_svc: crate::service::EpicService::new(database.clone()),
+        feed_runner: crate::feed::FeedRunner::new(database.clone(), feed_notify_tx),
         database,
         msg_tx,
         runner,
@@ -194,7 +196,7 @@ pub async fn run_tui(db_path: &Path, port: u16, inactivity_timeout: u64) -> Resu
         &mut msg_rx,
         &mut mcp_notify_rx,
         &mut tick_interval,
-        &runtime,
+        &mut runtime,
     )
     .await;
 
@@ -231,6 +233,7 @@ struct TuiRuntime {
     /// editor is currently open. We enforce "at most one editor at a time"
     /// by refusing to start a new one while this slot is populated.
     editor_session: Arc<std::sync::Mutex<Option<editor::EditorSession>>>,
+    feed_runner: crate::feed::FeedRunner,
 }
 
 mod agents;
@@ -375,7 +378,7 @@ async fn run_loop(
     msg_rx: &mut mpsc::UnboundedReceiver<Message>,
     mcp_notify_rx: &mut mpsc::UnboundedReceiver<mcp::McpEvent>,
     tick_interval: &mut tokio::time::Interval,
-    rt: &TuiRuntime,
+    rt: &mut TuiRuntime,
 ) -> Result<()> {
     loop {
         // Draw the current frame
@@ -415,8 +418,9 @@ async fn run_loop(
                 }
             }
 
-            // Periodic tick for tmux capture
+            // Periodic tick for tmux capture and feed polling
             _ = tick_interval.tick() => {
+                rt.feed_runner.tick().await;
                 app.update(Message::Tick)
             }
         };

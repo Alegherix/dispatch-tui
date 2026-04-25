@@ -5135,7 +5135,8 @@ fn migration_v38_feed_epic_columns() {
     Database::init_schema(&conn).unwrap();
 
     assert!(
-        conn.prepare("SELECT feed_command FROM epics LIMIT 1").is_ok(),
+        conn.prepare("SELECT feed_command FROM epics LIMIT 1")
+            .is_ok(),
         "feed_command column should exist on epics"
     );
     assert!(
@@ -5144,7 +5145,8 @@ fn migration_v38_feed_epic_columns() {
         "feed_interval_secs column should exist on epics"
     );
     assert!(
-        conn.prepare("SELECT external_id FROM tasks LIMIT 1").is_ok(),
+        conn.prepare("SELECT external_id FROM tasks LIMIT 1")
+            .is_ok(),
         "external_id column should exist on tasks"
     );
     let index_exists: bool = conn
@@ -5222,11 +5224,8 @@ fn upsert_feed_tasks_preserves_status() {
 
     // Simulate user moving task to Running
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
-    db.patch_task(
-        tasks[0].id,
-        &TaskPatch::new().status(TaskStatus::Running),
-    )
-    .unwrap();
+    db.patch_task(tasks[0].id, &TaskPatch::new().status(TaskStatus::Running))
+        .unwrap();
 
     // Re-run upsert with updated title and different status
     let updated = vec![crate::models::FeedItem {

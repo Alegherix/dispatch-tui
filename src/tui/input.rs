@@ -616,7 +616,11 @@ impl App {
         }
     }
 
-    fn handle_key_confirm_archive(&mut self, key: KeyEvent, task_id: Option<TaskId>) -> Vec<Command> {
+    fn handle_key_confirm_archive(
+        &mut self,
+        key: KeyEvent,
+        task_id: Option<TaskId>,
+    ) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             if s.has_selection() {
                 let mut cmds = Vec::new();

@@ -598,7 +598,7 @@ mod tests {
     // finalize-result dispatch. The watcher itself is covered by the pure
     // watch_editor tests above.
 
-    use crate::db::{Database, TaskCrud};
+    use crate::db::Database;
     use crate::models::TaskStatus;
     use crate::process::MockProcessRunner;
     use crate::tui::{App, EditKind};
@@ -607,9 +607,11 @@ mod tests {
     fn runtime_with_runner(runner: Arc<dyn ProcessRunner>) -> (TuiRuntime, App) {
         let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().unwrap());
         let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
         let rt = TuiRuntime {
             task_svc: crate::service::TaskService::new(db.clone()),
             epic_svc: crate::service::EpicService::new(db.clone()),
+            feed_runner: crate::feed::FeedRunner::new(db.clone(), feed_tx),
             database: db,
             msg_tx: tx,
             runner,
@@ -667,9 +669,11 @@ mod tests {
         let task = seed_task(&*db);
 
         let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
         let rt = TuiRuntime {
             task_svc: crate::service::TaskService::new(db.clone()),
             epic_svc: crate::service::EpicService::new(db.clone()),
+            feed_runner: crate::feed::FeedRunner::new(db.clone(), feed_tx),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -709,9 +713,11 @@ mod tests {
         let task = seed_task(&*db);
 
         let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
         let rt = TuiRuntime {
             task_svc: crate::service::TaskService::new(db.clone()),
             epic_svc: crate::service::EpicService::new(db.clone()),
+            feed_runner: crate::feed::FeedRunner::new(db.clone(), feed_tx),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -732,7 +738,6 @@ mod tests {
 
     #[test]
     fn finalize_security_queries_persists_setting() {
-        use crate::db::SettingsStore;
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (rt, mut app) = runtime_with_runner(runner);
 
@@ -753,7 +758,6 @@ mod tests {
 
     #[test]
     fn finalize_github_queries_review_persists_setting() {
-        use crate::db::SettingsStore;
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (rt, mut app) = runtime_with_runner(runner);
 
@@ -774,7 +778,6 @@ mod tests {
 
     #[test]
     fn finalize_cancelled_does_not_write_settings() {
-        use crate::db::SettingsStore;
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
         let (rt, mut app) = runtime_with_runner(runner);
 

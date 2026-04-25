@@ -1650,9 +1650,7 @@ fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
             .get::<_, Option<i64>>("parent_epic_id")
             .unwrap_or(None)
             .map(EpicId),
-        feed_command: row
-            .get::<_, Option<String>>("feed_command")
-            .unwrap_or(None),
+        feed_command: row.get::<_, Option<String>>("feed_command").unwrap_or(None),
         feed_interval_secs: row
             .get::<_, Option<i64>>("feed_interval_secs")
             .unwrap_or(None),

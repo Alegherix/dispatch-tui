@@ -11722,7 +11722,10 @@ fn security_alerts_for_column_cvss_breaks_severity_tie() {
         alerts[0].repo, "org/zebra",
         "Higher CVSS (9.8) should be first despite later repo name"
     );
-    assert_eq!(alerts[1].repo, "org/alpha", "Lower CVSS (4.3) should be second");
+    assert_eq!(
+        alerts[1].repo, "org/alpha",
+        "Lower CVSS (4.3) should be second"
+    );
 }
 
 #[test]

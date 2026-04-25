@@ -93,3 +93,49 @@ fn snapshot_help_overlay() {
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
+
+fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic {
+    let now = chrono::Utc::now();
+    crate::models::Epic {
+        id: crate::models::EpicId(id),
+        title: title.to_string(),
+        description: String::new(),
+        repo_path: "/repo".to_string(),
+        status: crate::models::TaskStatus::Backlog,
+        plan_path: None,
+        sort_order: Some(sort_order),
+        auto_dispatch: false,
+        parent_epic_id: None,
+        feed_command: Some(format!("feed-{title}")),
+        feed_interval_secs: Some(30),
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+#[test]
+fn snapshot_tab_bar_with_feed_epics_board_active() {
+    let mut app = App::new(vec![], super::TEST_TIMEOUT);
+    app.board.epics = vec![
+        make_feed_epic(1, "My Feed", -2),
+        make_feed_epic(2, "Another Feed", -1),
+    ];
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_tab_bar_with_feed_epics_feed_active() {
+    use super::super::types::Message;
+    use crate::models::EpicId;
+    let mut app = App::new(vec![], super::TEST_TIMEOUT);
+    app.board.epics = vec![
+        make_feed_epic(1, "My Feed", -2),
+        make_feed_epic(2, "Another Feed", -1),
+    ];
+    // Enter the first feed epic view to make its tab active
+    let feed_epic_id = app.epics().iter().find(|e| e.feed_command.is_some()).unwrap().id;
+    app.update(Message::EnterEpic(feed_epic_id));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}

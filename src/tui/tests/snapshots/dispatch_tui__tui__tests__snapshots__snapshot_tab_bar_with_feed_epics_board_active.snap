@@ -2,12 +2,12 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
- ▸ Tasks   [Tab]                                                                                                  🔕  [N]
-        ▸ backlog 0 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
-
-
-
-
+ ▸ Tasks  │  My Feed  │  Another Feed   [Tab] My Feed                                                             🔕  [N]
+        ▸ backlog 2 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
+  ▌ #1 My Feed
+    no subtasks
+  ▎ #2 Another Feed
+    no subtasks
 
 
 
@@ -41,4 +41,4 @@ expression: rendered
 
 
 
-[a] select all  [n]ew  [E]pic  [D] quick  [S]plit  [F]lat  [f]ilter  [H]istory  [?] help  [q]uit
+[d] plan  [g] board  [G] session  [Enter] detail  [e]dit  [W]rap up  [U] auto dispatch  [m] status →  [M] status ←  [x]

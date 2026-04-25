@@ -2,7 +2,7 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
- Tasks  │  ▸ Reviews (3)  │  Security   [Tab] security  [S-Tab] toggle                                            🔕  [N]
+ Tasks   [Tab]  [S-Tab] toggle                                                                                    🔕  [N]
 ▸ Backlog (3)                 ◦ Ongoing (0)                 ◦ Action Required (0)         ◦ Done (0)
 Updated 0s ago  [r] refresh
 ▌ #1 PR 1

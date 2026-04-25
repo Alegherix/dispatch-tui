@@ -2,7 +2,7 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
- Tasks  │  Reviews  │  ▸ Security (4)   [Tab] tasks  [Esc] back                                                   🔕  [N]
+ Tasks   [Tab] tasks  [Esc] back                                                                                  🔕  [N]
 ▸ Backlog (4)                 ◦ Ongoing (0)                 ◦ Action Required (0)         ◦ Done (0)
 Updated 0s ago  [r] refresh
 ▌ #4 Alert 4 [DEP]

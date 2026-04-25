@@ -3468,6 +3468,38 @@ fn make_epic_with_title(id: i64, title: &str) -> Epic {
     }
 }
 
+fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> Epic {
+    Epic {
+        title: title.to_string(),
+        sort_order: Some(sort_order),
+        feed_command: Some(format!("feed-{title}")),
+        feed_interval_secs: Some(30),
+        ..make_epic(id)
+    }
+}
+
+/// Create a feed epic using the canonical `feed_command` values seeded by setup,
+/// so that ReviewBoard / SecurityBoard active-tab highlighting works correctly.
+fn make_review_feed_epic(id: i64, sort_order: i64) -> Epic {
+    Epic {
+        title: "Reviews".to_string(),
+        sort_order: Some(sort_order),
+        feed_command: Some("dispatch fetch-reviews".to_string()),
+        feed_interval_secs: Some(30),
+        ..make_epic(id)
+    }
+}
+
+fn make_security_feed_epic(id: i64, sort_order: i64) -> Epic {
+    Epic {
+        title: "Security".to_string(),
+        sort_order: Some(sort_order),
+        feed_command: Some("dispatch fetch-security".to_string()),
+        feed_interval_secs: Some(30),
+        ..make_epic(id)
+    }
+}
+
 // --- tasks_for_current_view ---
 
 #[test]
@@ -7349,6 +7381,7 @@ fn review_board_renders_loading_state() {
 #[test]
 fn review_tab_shows_loading_indicator_during_refresh() {
     let mut app = make_app();
+    app.board.epics = vec![make_review_feed_epic(1, -2)];
     // Load some PRs first
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(
@@ -11116,6 +11149,7 @@ fn render_tab_bar_board_mode_shows_tasks_label() {
 #[test]
 fn render_tab_bar_review_board_shows_reviews_active() {
     let mut app = make_app();
+    app.board.epics = vec![make_review_feed_epic(1, -2)];
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     let buf = render_to_buffer(&mut app, 100, 30);
@@ -11128,6 +11162,7 @@ fn render_tab_bar_review_board_shows_reviews_active() {
 #[test]
 fn render_tab_bar_review_board_shows_pr_count() {
     let mut app = make_app();
+    app.board.epics = vec![make_review_feed_epic(1, -2)];
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(
         PrListKind::Review,
@@ -11146,6 +11181,7 @@ fn render_tab_bar_review_board_shows_pr_count() {
 #[test]
 fn render_tab_bar_review_board_dependabot_tab() {
     let mut app = make_app();
+    app.board.epics = vec![make_review_feed_epic(1, -2)];
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     app.update(Message::PrsLoaded(
@@ -11204,6 +11240,8 @@ fn tab_bar_board_mode_highlights_tab_key() {
 #[test]
 fn tab_bar_review_board_highlights_keys() {
     let mut app = make_app();
+    // Two feed epics so the second one's title appears as the [Tab] hint.
+    app.board.epics = vec![make_review_feed_epic(1, -2), make_security_feed_epic(2, -1)];
     app.update(Message::SwitchToReviewBoard);
     app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
     let buf = render_to_buffer(&mut app, 120, 30);
@@ -11216,8 +11254,8 @@ fn tab_bar_review_board_highlights_keys() {
     assert!(stab_style.add_modifier.contains(Modifier::BOLD));
     assert_eq!(stab_style.fg, Some(Color::Rgb(120, 124, 153)));
 
-    // Description text "security" should use MUTED (not highlighted)
-    let sec_style = find_style_of(&buf, "security").expect("'security' not found");
+    // Description text (second feed epic title) should use MUTED (not highlighted)
+    let sec_style = find_style_of(&buf, "Security").expect("'Security' not found");
     assert_eq!(
         sec_style.fg,
         Some(Color::Rgb(86, 95, 137)),

@@ -300,7 +300,7 @@ async fn main() -> Result<()> {
             println!("Created task #{}: \"{}\" [backlog]", id, title);
         }
         Commands::Setup { port, yes } => {
-            dispatch_tui::setup::run_setup(port, yes)?;
+            dispatch_tui::setup::run_setup(port, yes, &cli.db)?;
         }
         Commands::Uninstall { yes, purge } => {
             dispatch_tui::setup::run_uninstall(yes, purge)?;

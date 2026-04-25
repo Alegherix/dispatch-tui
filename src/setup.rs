@@ -5,8 +5,9 @@ use serde_json::{json, Map, Value};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use crate::db::{Database, EpicCrud, EpicPatch};
 use crate::process::RealProcessRunner;
 use crate::tmux;
 
@@ -329,10 +330,50 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
 }
 
 // ---------------------------------------------------------------------------
+// Feed epic seeding
+// ---------------------------------------------------------------------------
+
+pub fn seed_feed_epics(db: &Database) -> Result<()> {
+    let epics = db.list_epics()?;
+    let has_reviews = epics
+        .iter()
+        .any(|e| e.feed_command.as_deref() == Some("dispatch fetch-reviews"));
+    let has_security = epics
+        .iter()
+        .any(|e| e.feed_command.as_deref() == Some("dispatch fetch-security"));
+
+    if !has_reviews {
+        let epic = db.create_epic("Reviews", "", "", None)?;
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .feed_command(Some("dispatch fetch-reviews"))
+                .feed_interval_secs(Some(30))
+                .sort_order(Some(-2)),
+        )?;
+    }
+
+    if !has_security {
+        let epic = db.create_epic("Security", "", "", None)?;
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .feed_command(Some("dispatch fetch-security"))
+                .feed_interval_secs(Some(300))
+                .sort_order(Some(-1)),
+        )?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
 
-pub fn run_setup(port: u16, yes: bool) -> Result<()> {
+pub fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
+    let db = Database::open(db_path)?;
+    seed_feed_epics(&db)?;
     let claude_dir = claude_dir()?;
     fs::create_dir_all(&claude_dir)
         .with_context(|| format!("Failed to create {}", claude_dir.display()))?;
@@ -552,8 +593,54 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Database;
     use crate::DEFAULT_PORT;
     use serde_json::json;
+
+    // -- seed_feed_epics --
+
+    #[test]
+    fn seed_feed_epics_creates_both_epics_when_empty() {
+        let db = Database::open_in_memory().unwrap();
+        seed_feed_epics(&db).unwrap();
+        let epics = db.list_epics().unwrap();
+        assert_eq!(epics.len(), 2);
+        let commands: Vec<_> = epics
+            .iter()
+            .filter_map(|e| e.feed_command.as_deref())
+            .collect();
+        assert!(
+            commands.contains(&"dispatch fetch-reviews"),
+            "missing fetch-reviews"
+        );
+        assert!(
+            commands.contains(&"dispatch fetch-security"),
+            "missing fetch-security"
+        );
+
+        let reviews = epics
+            .iter()
+            .find(|e| e.feed_command.as_deref() == Some("dispatch fetch-reviews"))
+            .unwrap();
+        assert_eq!(reviews.feed_interval_secs, Some(30));
+        assert_eq!(reviews.sort_order, Some(-2));
+
+        let security = epics
+            .iter()
+            .find(|e| e.feed_command.as_deref() == Some("dispatch fetch-security"))
+            .unwrap();
+        assert_eq!(security.feed_interval_secs, Some(300));
+        assert_eq!(security.sort_order, Some(-1));
+    }
+
+    #[test]
+    fn seed_feed_epics_is_idempotent() {
+        let db = Database::open_in_memory().unwrap();
+        seed_feed_epics(&db).unwrap();
+        seed_feed_epics(&db).unwrap();
+        let epics = db.list_epics().unwrap();
+        assert_eq!(epics.len(), 2, "expected exactly 2 epics, got {}", epics.len());
+    }
 
     // -- MCP config merging --
 

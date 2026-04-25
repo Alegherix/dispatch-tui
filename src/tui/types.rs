@@ -1289,6 +1289,7 @@ impl Default for BoardSelection {
 pub struct ReviewBoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; crate::models::ReviewWorkflowState::COLUMN_COUNT],
+    #[allow(dead_code)] // removed in epic #29 package D
     pub(in crate::tui) list_states: [ListState; crate::models::ReviewWorkflowState::COLUMN_COUNT],
     pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
 }
@@ -1338,6 +1339,7 @@ impl Default for ReviewBoardSelection {
 pub struct SecurityBoardSelection {
     pub(in crate::tui) selected_column: usize,
     pub(in crate::tui) selected_row: [usize; SecurityWorkflowState::COLUMN_COUNT],
+    #[allow(dead_code)] // removed in epic #29 package D
     pub(in crate::tui) list_states: [ListState; SecurityWorkflowState::COLUMN_COUNT],
     pub(in crate::tui) anchor_pr: Option<crate::models::PrRef>,
 }

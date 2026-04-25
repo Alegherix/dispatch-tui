@@ -9,8 +9,7 @@ use crate::models::{
     TaskUsage,
 };
 use crate::tui::{
-    App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode, SecurityBoardMode,
-    ViewMode,
+    App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode, RepoFilterMode, ViewMode,
 };
 use chrono::{DateTime, Utc};
 use ratatui::{
@@ -124,26 +123,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         full_area
     };
-
-    if matches!(app.view_mode(), ViewMode::ReviewBoard { .. }) {
-        super::review::render_review_board(frame, app, area);
-        render_dispatch_repo_overlay(frame, app, area);
-        if matches!(app.mode(), InputMode::Help) {
-            render_help_overlay(frame, app, area);
-        }
-        render_error_popup(frame, app, area);
-        return;
-    }
-
-    if matches!(app.view_mode(), ViewMode::SecurityBoard { .. }) {
-        super::security::render_security_board(frame, app, area);
-        render_dispatch_repo_overlay(frame, app, area);
-        if matches!(app.mode(), InputMode::Help) {
-            render_help_overlay(frame, app, area);
-        }
-        render_error_popup(frame, app, area);
-        return;
-    }
 
     let panel_h = input_panel_height(app, area.height);
     let vertical = Layout::default()
@@ -1427,25 +1406,6 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     true
 }
 
-fn render_dispatch_repo_overlay(frame: &mut Frame, app: &App, area: Rect) {
-    if !matches!(app.input.mode, InputMode::InputDispatchRepoPath) {
-        return;
-    }
-    let popup_width = (area.width * 60 / 100).clamp(40, 70);
-    let line_count = if app.input.buffer.is_empty() {
-        app.board.repo_paths.len() as u16 + 6
-    } else {
-        6
-    };
-    let popup_height = line_count.clamp(6, area.height.saturating_sub(4));
-    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
-    let popup_area = Rect::new(x, y, popup_width, popup_height);
-
-    frame.render_widget(Clear, popup_area);
-    render_input_form(frame, app, popup_area);
-}
-
 fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
     let Some(error_msg) = &app.status.error_popup else {
         return;
@@ -1610,284 +1570,136 @@ fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let desc = Style::default().fg(Color::Gray);
     let note = Style::default().fg(Color::DarkGray);
 
-    let lines = if matches!(app.view_mode(), ViewMode::SecurityBoard { .. }) {
-        let mode = match app.view_mode() {
-            ViewMode::SecurityBoard { mode, .. } => *mode,
-            _ => SecurityBoardMode::Dependabot,
-        };
-        let mut lines = vec![
-            Line::from(""),
-            Line::from(Span::styled("  Security Board", header)),
-            Line::from(vec![
-                Span::styled("  [1]", key),
-                Span::styled(" Dependabot sub-view  ", desc),
-                Span::styled("[2]", key),
-                Span::styled(" Alerts sub-view", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [h/\u{2190}]", key),
-                Span::styled(" prev column     ", desc),
-                Span::styled("[l/\u{2192}]", key),
-                Span::styled(" next column", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [j/\u{2193}]", key),
-                Span::styled(" next item       ", desc),
-                Span::styled("[k/\u{2191}]", key),
-                Span::styled(" prev item", desc),
-            ]),
-        ];
-        if mode == SecurityBoardMode::Dependabot {
-            lines.extend(vec![
-                Line::from(""),
-                Line::from(Span::styled("  Dependabot Actions", header)),
-                Line::from(vec![
-                    Span::styled("  [Space]", key),
-                    Span::styled(" select PR    ", desc),
-                    Span::styled("[a]", key),
-                    Span::styled(" approve selected", desc),
-                ]),
-                Line::from(vec![
-                    Span::styled("  [m]", key),
-                    Span::styled(" merge selected  ", desc),
-                    Span::styled("[d]", key),
-                    Span::styled(" dispatch review agent", desc),
-                ]),
-                Line::from(vec![
-                    Span::styled("  [p]", key),
-                    Span::styled(" open in browser  ", desc),
-                    Span::styled("[r]", key),
-                    Span::styled(" refresh", desc),
-                ]),
-            ]);
-        } else {
-            lines.extend(vec![
-                Line::from(""),
-                Line::from(Span::styled("  Alert Actions", header)),
-                Line::from(vec![
-                    Span::styled("  [d]", key),
-                    Span::styled(" dispatch fix agent  ", desc),
-                    Span::styled("[p]", key),
-                    Span::styled(" open in browser", desc),
-                ]),
-                Line::from(vec![
-                    Span::styled("  [f]", key),
-                    Span::styled(" filter repos  ", desc),
-                    Span::styled("[t]", key),
-                    Span::styled(" toggle kind filter", desc),
-                ]),
-            ]);
-        }
-        lines.extend(vec![
-            Line::from(""),
-            Line::from(Span::styled("  General", header)),
-            Line::from(vec![
-                Span::styled("  [Tab/Esc]", key),
-                Span::styled(" back to Task Board  ", desc),
-                Span::styled("[q]", key),
-                Span::styled(" quit", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [?]", key),
-                Span::styled(" close this help", desc),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("  [?] or [Esc] to close", note)),
-        ]);
-        lines
-    } else if matches!(app.view_mode(), ViewMode::ReviewBoard { .. }) {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled("  Review Board", header)),
-            Line::from(vec![
-                Span::styled("  [h/\u{2190}]", key),
-                Span::styled(" prev column     ", desc),
-                Span::styled("[l/\u{2192}]", key),
-                Span::styled(" next column", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [j/\u{2193}]", key),
-                Span::styled(" next PR         ", desc),
-                Span::styled("[k/\u{2191}]", key),
-                Span::styled(" prev PR", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [Enter]", key),
-                Span::styled(" detail panel  ", desc),
-                Span::styled("[p]", key),
-                Span::styled(" open PR in browser", desc),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("  Actions", header)),
-            Line::from(vec![
-                Span::styled("  [d]", key),
-                Span::styled(" dispatch / resume agent  ", desc),
-                Span::styled("[T]", key),
-                Span::styled(" detach agent", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [a]", key),
-                Span::styled(" approve PR (reviewer mode)  ", desc),
-                Span::styled("[m]", key),
-                Span::styled(" merge PR (when approved)", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [f]", key),
-                Span::styled(" filter repos          ", desc),
-                Span::styled("[e]", key),
-                Span::styled(" edit search queries", desc),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("  General", header)),
-            Line::from(vec![
-                Span::styled("  [S-Tab]", key),
-                Span::styled(" toggle Reviews / My PRs", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [Tab/Esc]", key),
-                Span::styled(" back to Task Board  ", desc),
-                Span::styled("[q]", key),
-                Span::styled(" quit", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [?]", key),
-                Span::styled(" close this help", desc),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("  [?] or [Esc] to close", note)),
-        ]
-    } else {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled("  Navigation", header)),
-            Line::from(vec![
-                Span::styled("  [h/\u{2190}]", key),
-                Span::styled(" prev column     ", desc),
-                Span::styled("[j/\u{2193}]", key),
-                Span::styled(" next task", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [l/\u{2192}]", key),
-                Span::styled(" next column     ", desc),
-                Span::styled("[k/\u{2191}]", key),
-                Span::styled(" prev task", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [Enter]", key),
-                Span::styled(" detail panel     ", desc),
-                Span::styled("[e]", key),
-                Span::styled(" edit / enter epic", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [q]", key),
-                Span::styled(" exit epic (in epic)   ", desc),
-                Span::styled("[Esc]", key),
-                Span::styled(" clear selection", desc),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("  Actions", header)),
-            Line::from(vec![
-                Span::styled("  [n]", key),
-                Span::styled(" new task   ", desc),
-                Span::styled("[E]", key),
-                Span::styled(" new epic   ", desc),
-                Span::styled("[N]", key),
-                Span::styled(" notifications", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [d]", key),
-                Span::styled(" dispatch*  ", desc),
-                Span::styled("[m]", key),
-                Span::styled(" move fwd   ", desc),
-                Span::styled("[M]", key),
-                Span::styled(" move back", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [x]", key),
-                Span::styled(" archive    ", desc),
-                Span::styled("[D]", key),
-                Span::styled(" quick dsp  ", desc),
-                Span::styled("[g]", key),
-                Span::styled(" session/board", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [G]", key),
-                Span::styled(" session    ", desc),
-                Span::styled("(epic: jump to subtask tmux)", note),
-            ]),
-            Line::from(vec![
-                Span::styled("  [H]", key),
-                Span::styled(" history    ", desc),
-                Span::styled("[V]", key),
-                Span::styled(" epic done  ", desc),
-                Span::styled("[a]", key),
-                Span::styled(" select all", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [Space]", key),
-                Span::styled(" select  ", desc),
-                Span::styled("[f]", key),
-                Span::styled(" filter repos  ", desc),
-                Span::styled("[W]", key),
-                Span::styled(" wrap up  ", desc),
-                Span::styled("(task/epic)", note),
-            ]),
-            Line::from(vec![
-                Span::styled("  [T]", key),
-                Span::styled(" detach tmux panel  ", desc),
-                Span::styled("(Review tasks, supports batch)", note),
-            ]),
-            Line::from(vec![
-                Span::styled("  [S]", key),
-                Span::styled(" toggle split mode  ", desc),
-                Span::styled("(side-by-side with agent)", note),
-            ]),
-            Line::from(vec![
-                Span::styled("  [P]", key),
-                Span::styled(" merge PR  ", desc),
-                Span::styled("[p]", key),
-                Span::styled(" open PR in browser", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [J/K]", key),
-                Span::styled(" reorder item up/down in column", desc),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("  * [d] is context-dependent:", note)),
-            Line::from(Span::styled(
-                "    Backlog (no plan) \u{2192} brainstorm",
-                note,
-            )),
-            Line::from(Span::styled(
-                "    Backlog (has plan) \u{2192} dispatch",
-                note,
-            )),
-            Line::from(Span::styled(
-                "    Running \u{2192} resume (if window gone)",
-                note,
-            )),
-            Line::from(Span::styled(
-                "    Epic \u{2192} dispatch next backlog subtask",
-                note,
-            )),
-            Line::from(""),
-            Line::from(Span::styled("  General", header)),
-            Line::from(vec![
-                Span::styled("  [?]", key),
-                Span::styled(" this help  ", desc),
-                Span::styled("[N]", key),
-                Span::styled(" notify on/off  ", desc),
-                Span::styled("[q]", key),
-                Span::styled(" quit (or exit epic)", desc),
-            ]),
-            Line::from(vec![
-                Span::styled("  [Tab]", key),
-                Span::styled(" switch to Review Board", desc),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("  [?] or [Esc] to close", note)),
-        ]
-    };
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled("  Navigation", header)),
+        Line::from(vec![
+            Span::styled("  [h/\u{2190}]", key),
+            Span::styled(" prev column     ", desc),
+            Span::styled("[j/\u{2193}]", key),
+            Span::styled(" next task", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [l/\u{2192}]", key),
+            Span::styled(" next column     ", desc),
+            Span::styled("[k/\u{2191}]", key),
+            Span::styled(" prev task", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [Enter]", key),
+            Span::styled(" detail panel     ", desc),
+            Span::styled("[e]", key),
+            Span::styled(" edit / enter epic", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [q]", key),
+            Span::styled(" exit epic (in epic)   ", desc),
+            Span::styled("[Esc]", key),
+            Span::styled(" clear selection", desc),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  Actions", header)),
+        Line::from(vec![
+            Span::styled("  [n]", key),
+            Span::styled(" new task   ", desc),
+            Span::styled("[E]", key),
+            Span::styled(" new epic   ", desc),
+            Span::styled("[N]", key),
+            Span::styled(" notifications", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [d]", key),
+            Span::styled(" dispatch*  ", desc),
+            Span::styled("[m]", key),
+            Span::styled(" move fwd   ", desc),
+            Span::styled("[M]", key),
+            Span::styled(" move back", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [x]", key),
+            Span::styled(" archive    ", desc),
+            Span::styled("[D]", key),
+            Span::styled(" quick dsp  ", desc),
+            Span::styled("[g]", key),
+            Span::styled(" session/board", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [G]", key),
+            Span::styled(" session    ", desc),
+            Span::styled("(epic: jump to subtask tmux)", note),
+        ]),
+        Line::from(vec![
+            Span::styled("  [H]", key),
+            Span::styled(" history    ", desc),
+            Span::styled("[V]", key),
+            Span::styled(" epic done  ", desc),
+            Span::styled("[a]", key),
+            Span::styled(" select all", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [Space]", key),
+            Span::styled(" select  ", desc),
+            Span::styled("[f]", key),
+            Span::styled(" filter repos  ", desc),
+            Span::styled("[W]", key),
+            Span::styled(" wrap up  ", desc),
+            Span::styled("(task/epic)", note),
+        ]),
+        Line::from(vec![
+            Span::styled("  [T]", key),
+            Span::styled(" detach tmux panel  ", desc),
+            Span::styled("(Review tasks, supports batch)", note),
+        ]),
+        Line::from(vec![
+            Span::styled("  [S]", key),
+            Span::styled(" toggle split mode  ", desc),
+            Span::styled("(side-by-side with agent)", note),
+        ]),
+        Line::from(vec![
+            Span::styled("  [P]", key),
+            Span::styled(" merge PR  ", desc),
+            Span::styled("[p]", key),
+            Span::styled(" open PR in browser", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [J/K]", key),
+            Span::styled(" reorder item up/down in column", desc),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  * [d] is context-dependent:", note)),
+        Line::from(Span::styled(
+            "    Backlog (no plan) \u{2192} brainstorm",
+            note,
+        )),
+        Line::from(Span::styled(
+            "    Backlog (has plan) \u{2192} dispatch",
+            note,
+        )),
+        Line::from(Span::styled(
+            "    Running \u{2192} resume (if window gone)",
+            note,
+        )),
+        Line::from(Span::styled(
+            "    Epic \u{2192} dispatch next backlog subtask",
+            note,
+        )),
+        Line::from(""),
+        Line::from(Span::styled("  General", header)),
+        Line::from(vec![
+            Span::styled("  [?]", key),
+            Span::styled(" this help  ", desc),
+            Span::styled("[N]", key),
+            Span::styled(" notify on/off  ", desc),
+            Span::styled("[q]", key),
+            Span::styled(" quit (or exit epic)", desc),
+        ]),
+        Line::from(vec![
+            Span::styled("  [Tab]", key),
+            Span::styled(" switch to Review Board", desc),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  [?] or [Esc] to close", note)),
+    ];
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup_area);
@@ -2542,8 +2354,6 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
 
 #[cfg(test)]
 mod tests {
-    use super::super::review::build_review_pr_item;
-    use super::super::security::build_security_alert_item;
     use super::*;
     use crate::models::TaskTag;
     use crate::tui::types::TaskDraft;
@@ -2667,56 +2477,6 @@ mod tests {
             .collect()
     }
 
-    fn make_test_pr(
-        number: i64,
-        author: &str,
-        ci: crate::models::CiStatus,
-        additions: i64,
-        deletions: i64,
-    ) -> crate::models::ReviewPr {
-        crate::models::ReviewPr {
-            number,
-            title: format!("PR {number}"),
-            author: author.to_string(),
-            repo: "acme/app".to_string(),
-            url: format!("https://github.com/acme/app/pull/{number}"),
-            is_draft: false,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            additions,
-            deletions,
-            review_decision: crate::models::ReviewDecision::ReviewRequired,
-            labels: vec![],
-            body: String::new(),
-            head_ref: String::new(),
-            ci_status: ci,
-            reviewers: vec![],
-        }
-    }
-
-    fn make_test_alert(
-        number: i64,
-        kind: crate::models::AlertKind,
-        package: Option<&str>,
-        cvss: Option<f32>,
-    ) -> crate::models::SecurityAlert {
-        crate::models::SecurityAlert {
-            number,
-            repo: "acme/app".to_string(),
-            severity: crate::models::AlertSeverity::High,
-            kind,
-            title: format!("Alert {number}"),
-            package: package.map(str::to_string),
-            vulnerable_range: None,
-            fixed_version: None,
-            cvss_score: cvss.map(|v| v as f64),
-            url: format!("https://github.com/acme/app/security/alerts/{number}"),
-            created_at: chrono::Utc::now(),
-            state: "open".to_string(),
-            description: String::new(),
-        }
-    }
-
     // ---------------------------------------------------------------------------
     // render_substatus_header
     // ---------------------------------------------------------------------------
@@ -2765,180 +2525,6 @@ mod tests {
             "header text should be BOLD"
         );
         assert_eq!(style.fg, Some(FG), "header text should use FG color");
-    }
-
-    // ---------------------------------------------------------------------------
-    // build_review_pr_item
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn review_pr_card_line2_contains_author() {
-        use crate::models::ReviewWorkflowState;
-        let pr = make_test_pr(7, "alice", crate::models::CiStatus::Success, 8, 2);
-        let item = build_review_pr_item(
-            &pr,
-            ReviewWorkflowState::Backlog,
-            None,
-            false,
-            None,
-            false,
-            80,
-        );
-        let buf = render_list_item_to_buf(item, 80, 2);
-        let row1 = buf_row(&buf, 1);
-        assert!(
-            row1.contains("@alice"),
-            "review PR line 2 should show @author, got: {row1:?}"
-        );
-    }
-
-    #[test]
-    fn review_pr_card_line1_has_colored_ci_dot_for_failure() {
-        use crate::models::ReviewWorkflowState;
-        let pr = make_test_pr(7, "alice", crate::models::CiStatus::Failure, 8, 2);
-        let item = build_review_pr_item(
-            &pr,
-            ReviewWorkflowState::Backlog,
-            None,
-            false,
-            None,
-            false,
-            80,
-        );
-        let buf = render_list_item_to_buf(item, 80, 2);
-        let area = buf.area();
-        // CI dot is on line 1 (row 0)
-        let has_red =
-            (area.left()..area.right()).any(|x| buf[(x, 0)].style().fg == Some(Color::Red));
-        assert!(
-            has_red,
-            "review PR line 1 should have red CI dot for failing CI, got no red cell"
-        );
-    }
-
-    #[test]
-    fn review_pr_card_line1_has_colored_ci_dot_for_success() {
-        use crate::models::ReviewWorkflowState;
-        let pr = make_test_pr(7, "alice", crate::models::CiStatus::Success, 8, 2);
-        let item = build_review_pr_item(
-            &pr,
-            ReviewWorkflowState::Backlog,
-            None,
-            false,
-            None,
-            false,
-            80,
-        );
-        let buf = render_list_item_to_buf(item, 80, 2);
-        let area = buf.area();
-        // CI dot is on line 1 (row 0) with green color
-        let has_green =
-            (area.left()..area.right()).any(|x| buf[(x, 0)].style().fg == Some(Color::Green));
-        assert!(
-            has_green,
-            "review PR line 1 should have green CI dot for passing CI"
-        );
-    }
-
-    // ---------------------------------------------------------------------------
-    // build_security_alert_item
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn security_alert_card_line1_has_kind_badge() {
-        let alert = make_test_alert(
-            3,
-            crate::models::AlertKind::CodeScanning,
-            Some("lodash"),
-            None,
-        );
-        let item = build_security_alert_item(
-            &alert,
-            crate::models::SecurityWorkflowState::Backlog,
-            None,
-            false,
-            false,
-            80,
-        );
-        let buf = render_list_item_to_buf(item, 80, 2);
-        let row0 = buf_row(&buf, 0);
-        assert!(
-            row0.contains("[SCAN]"),
-            "line 1 should contain [SCAN] kind badge for CodeScanning, got: {row0:?}"
-        );
-    }
-
-    #[test]
-    fn security_alert_card_line1_kind_badge_colored() {
-        let alert = make_test_alert(
-            3,
-            crate::models::AlertKind::CodeScanning,
-            Some("lodash"),
-            None,
-        );
-        let item = build_security_alert_item(
-            &alert,
-            crate::models::SecurityWorkflowState::Backlog,
-            None,
-            false,
-            false,
-            80,
-        );
-        let buf = render_list_item_to_buf(item, 80, 2);
-        let area = buf.area();
-        let has_cyan = (area.left()..area.right()).any(|x| buf[(x, 0)].style().fg == Some(CYAN));
-        assert!(
-            has_cyan,
-            "CodeScanning kind badge should render with CYAN on line 1"
-        );
-    }
-
-    #[test]
-    fn security_alert_card_line2_package_present() {
-        let alert = make_test_alert(
-            3,
-            crate::models::AlertKind::Dependabot,
-            Some("lodash"),
-            None,
-        );
-        let item = build_security_alert_item(
-            &alert,
-            crate::models::SecurityWorkflowState::Backlog,
-            None,
-            false,
-            false,
-            80,
-        );
-        let buf = render_list_item_to_buf(item, 80, 2);
-        let row1 = buf_row(&buf, 1);
-        assert!(
-            row1.contains("lodash"),
-            "line 2 should contain package name, got: {row1:?}"
-        );
-    }
-
-    #[test]
-    fn security_alert_card_line2_cvss_present_when_set() {
-        let alert = make_test_alert(
-            3,
-            crate::models::AlertKind::Dependabot,
-            Some("lodash"),
-            Some(8.1),
-        );
-        let item = build_security_alert_item(
-            &alert,
-            crate::models::SecurityWorkflowState::Backlog,
-            None,
-            false,
-            false,
-            80,
-        );
-        let buf = render_list_item_to_buf(item, 80, 2);
-        let row1 = buf_row(&buf, 1);
-        assert!(
-            row1.contains("CVSS"),
-            "line 2 should contain CVSS when score is set, got: {row1:?}"
-        );
     }
 
     #[test]

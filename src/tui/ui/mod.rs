@@ -1,7 +1,5 @@
 mod kanban;
 mod palette;
-mod review;
-mod security;
 mod shared;
 
 pub use kanban::render;
@@ -9,9 +7,3 @@ pub use shared::{refresh_status, truncate};
 
 #[cfg(test)]
 pub(in crate::tui) use kanban::{action_hints, column_color, epic_action_hints, task_detail_lines};
-#[cfg(test)]
-pub(in crate::tui) use review::{
-    review_action_hints, review_column_bg_color, review_column_color, review_cursor_bg_color,
-};
-#[cfg(test)]
-pub(in crate::tui) use security::{build_security_alert_item_for_test, security_action_hints};

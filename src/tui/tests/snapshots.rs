@@ -1,10 +1,7 @@
 use ratatui::buffer::Buffer;
 
 use super::super::App;
-use super::{
-    make_app, make_key, make_review_board_app, make_security_board_app, render_to_buffer,
-    TEST_TIMEOUT,
-};
+use super::{make_app, make_key, render_to_buffer, TEST_TIMEOUT};
 use crossterm::event::KeyCode;
 
 fn buffer_to_string(buf: &Buffer) -> String {
@@ -35,53 +32,6 @@ fn snapshot_empty_kanban_board() {
 #[test]
 fn snapshot_kanban_with_tasks() {
     let mut app = make_app();
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_review_board_reviewer_mode() {
-    let mut app = make_review_board_app();
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_review_board_with_running_agent() {
-    let mut app = make_review_board_app();
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-1".to_string(),
-            worktree: "/repo/.worktrees/review-1".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_security_board() {
-    let mut app = make_security_board_app();
-    let rendered = render_to_string(&mut app, 120, 40);
-    insta::assert_snapshot!(rendered);
-}
-
-#[test]
-fn snapshot_security_board_severity_order() {
-    use super::super::types::Message;
-    use crate::tui::types::SecurityBoardMode;
-    let mut app = make_app();
-    app.update(Message::SwitchToSecurityBoard);
-    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
-    // Loaded in reverse severity order — Critical should render at the top.
-    app.update(Message::SecurityAlertsLoaded(vec![
-        super::make_security_alert(1, "org/alpha", crate::models::AlertSeverity::Low),
-        super::make_security_alert(2, "org/beta", crate::models::AlertSeverity::Medium),
-        super::make_security_alert(3, "org/gamma", crate::models::AlertSeverity::High),
-        super::make_security_alert(4, "org/delta", crate::models::AlertSeverity::Critical),
-    ]));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

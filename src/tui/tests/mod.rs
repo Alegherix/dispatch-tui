@@ -1834,32 +1834,6 @@ fn epic_action_hints_shows_filter_help() {
     assert!(keys.contains(&"[?]"), "epic should show help hint");
 }
 
-// --- review_action_hints: missing hints ---
-
-#[test]
-fn review_hints_shows_mode_keys_and_filter() {
-    let hints = ui::review_action_hints(true, None, false);
-    let keys = hint_keys(&hints);
-    assert!(keys.contains(&"[1/2]"), "review should show 1/2 mode hint");
-    assert!(keys.contains(&"[f]"), "review should show filter hint");
-}
-
-// --- security_action_hints: missing hints ---
-
-#[test]
-fn security_hints_shows_quit() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.board.view_mode = ViewMode::SecurityBoard {
-        mode: SecurityBoardMode::default(),
-        selection: crate::tui::types::SecurityBoardSelection::new(),
-        dependabot_selection: ReviewBoardSelection::new(),
-        saved_board: crate::tui::types::BoardSelection::default(),
-    };
-    let hints = ui::security_action_hints(&app, false, None);
-    let keys = hint_keys(&hints);
-    assert!(keys.contains(&"[q]"), "security should show quit hint");
-}
-
 // --- Edit key ---
 
 #[test]
@@ -3234,79 +3208,6 @@ fn render_help_overlay_shows_keybindings_help() {
     assert!(
         buffer_contains(&buf, "Actions"),
         "help overlay should show Actions section"
-    );
-}
-
-#[test]
-fn render_help_overlay_in_review_board_shows_review_shortcuts() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::ToggleHelp);
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Review Board"),
-        "review help should have Review Board section"
-    );
-    assert!(
-        buffer_contains(&buf, "open PR"),
-        "review help should mention open PR"
-    );
-    assert!(
-        buffer_contains(&buf, "dispatch / resume agent"),
-        "review help should mention dispatch/resume agent"
-    );
-    assert!(
-        !buffer_contains(&buf, "new task"),
-        "review help should not show task board new task key"
-    );
-}
-
-#[test]
-fn review_board_status_bar_shows_forward_and_filter_hints() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let mut pr = make_review_pr(1, "alice", ReviewDecision::ReviewRequired);
-    pr.ci_status = crate::models::CiStatus::None;
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    app.update(Message::SwitchToReviewBoard);
-    let buf = render_to_buffer(&mut app, 200, 30);
-    // forward/back hints shown when a PR is selected
-    assert!(
-        buffer_contains(&buf, "[m]"),
-        "status bar should show [m] forward hint when PR selected"
-    );
-    assert!(
-        buffer_contains(&buf, "[f]"),
-        "status bar should show [f]ilter hint"
-    );
-}
-
-#[test]
-fn review_board_status_bar_shows_dispatch_hint_without_agent() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    let pr = make_review_pr(1, "alice", ReviewDecision::Approved);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![pr]));
-    app.update(Message::SwitchToReviewBoard);
-    let buf = render_to_buffer(&mut app, 200, 30);
-    // dispatch hint appears when PR is selected and no agent
-    assert!(
-        buffer_contains(&buf, "[d]"),
-        "status bar should show [d]ispatch hint when no agent running"
-    );
-}
-
-#[test]
-fn review_help_overlay_shows_approve_and_merge_shortcuts() {
-    let mut app = App::new(vec![], TEST_TIMEOUT);
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::ToggleHelp);
-    let buf = render_to_buffer(&mut app, 120, 40);
-    assert!(
-        buffer_contains(&buf, "approve"),
-        "review help overlay should mention approve"
-    );
-    assert!(
-        buffer_contains(&buf, "merge"),
-        "review help overlay should mention merge"
     );
 }
 
@@ -7269,40 +7170,6 @@ fn esc_in_review_board_switches_back() {
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 #[test]
-fn review_board_renders_pr_titles() {
-    let mut app = make_app();
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![
-            make_review_pr(42, "alice", ReviewDecision::ReviewRequired),
-            make_review_pr(50, "bob", ReviewDecision::Approved),
-        ],
-    ));
-    app.update(Message::SwitchToReviewBoard);
-
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Backlog"),
-        "Should show column header"
-    );
-    assert!(buffer_contains(&buf, "PR 42"), "Should show PR title");
-}
-
-#[test]
-fn review_board_renders_loading_state() {
-    let mut app = make_app();
-    // SwitchToReviewBoard triggers a fetch, so review_board_loading becomes true
-    app.update(Message::SwitchToReviewBoard);
-    assert!(app.review_board_loading());
-
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Refreshing..."),
-        "Refresh status row should show Refreshing... while fetching"
-    );
-}
-
-#[test]
 fn review_tab_shows_loading_indicator_during_refresh() {
     let mut app = make_app();
     app.board.epics = vec![make_review_feed_epic(1, -2)];
@@ -7339,41 +7206,6 @@ fn review_tab_hides_loading_indicator_after_fetch() {
     assert!(
         !buffer_contains(&buf, "\u{21bb}"),
         "Tab bar should not show loading indicator after fetch completes"
-    );
-}
-
-#[test]
-fn review_board_renders_empty_state_after_fetch() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    assert!(!app.review_board_loading());
-
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "No PRs found"),
-        "Should show empty state after fetch with no results"
-    );
-    assert!(
-        !buffer_contains(&buf, "Refreshing..."),
-        "Should not show Refreshing after fetch completes"
-    );
-}
-
-#[test]
-fn review_board_renders_persistent_error() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsFetchFailed(
-        PrListKind::Review,
-        "not authenticated".to_string(),
-    ));
-    assert_eq!(app.last_review_error(), Some("not authenticated"));
-
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "not authenticated"),
-        "Should show persistent error text in review board"
     );
 }
 
@@ -10779,38 +10611,6 @@ fn render_repo_filter_confirm_delete_preset() {
 // Review repo filter overlay tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn render_review_repo_filter_overlay_shows_title() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
-    ));
-    app.input.mode = InputMode::ReviewRepoFilter;
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Review Repo Filter"),
-        "review repo filter overlay should show 'Review Repo Filter' title"
-    );
-}
-
-#[test]
-fn render_review_repo_filter_overlay_shows_repos() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(
-        PrListKind::Review,
-        vec![make_review_pr(1, "alice", ReviewDecision::ReviewRequired)],
-    ));
-    app.input.mode = InputMode::ReviewRepoFilter;
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "acme/app"),
-        "review repo filter overlay should show 'acme/app' repo from loaded PRs"
-    );
-}
-
 // ---------------------------------------------------------------------------
 // Tab bar mode tests
 // ---------------------------------------------------------------------------
@@ -10998,67 +10798,6 @@ fn tab_bar_security_board_highlights_keys() {
         back_style.fg,
         Some(Color::Rgb(86, 95, 137)),
         "description text should use MUTED color"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Review board Dependabot mode rendering tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn render_review_board_dependabot_shows_bot_pr_titles() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![make_review_pr(
-            42,
-            "dependabot",
-            ReviewDecision::ReviewRequired,
-        )],
-    ));
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "PR 42"),
-        "dependabot mode should show 'PR 42' for the loaded bot PR"
-    );
-}
-
-#[test]
-fn render_review_board_dependabot_shows_column_headers() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(
-        PrListKind::Bot,
-        vec![make_review_pr(
-            42,
-            "dependabot",
-            ReviewDecision::ReviewRequired,
-        )],
-    ));
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    let buf = render_to_buffer(&mut app, 120, 30);
-    // In v2 layout the column headers are Backlog/Ongoing/Action Required/Done
-    assert!(
-        buffer_contains(&buf, "Backlog"),
-        "dependabot mode should show 'Backlog' column header"
-    );
-}
-
-#[test]
-fn render_review_board_dependabot_empty_shows_no_prs() {
-    let mut app = make_app();
-    app.update(Message::SwitchToReviewBoard);
-    app.update(Message::PrsLoaded(PrListKind::Review, vec![]));
-    app.update(Message::PrsLoaded(PrListKind::Bot, vec![]));
-    app.update(Message::SwitchReviewBoardMode(ReviewBoardMode::Dependabot));
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "No PRs found"),
-        "dependabot mode with no bot PRs should show 'No PRs found'"
     );
 }
 
@@ -14044,43 +13783,6 @@ fn focused_backlog_header_renders_in_blue() {
     );
 }
 
-#[test]
-fn review_workflow_column_colors_are_distinct() {
-    use crate::models::ReviewWorkflowState;
-    let backlog = ui::review_column_color(ReviewWorkflowState::Backlog);
-    let ongoing = ui::review_column_color(ReviewWorkflowState::Ongoing);
-    let action = ui::review_column_color(ReviewWorkflowState::ActionRequired);
-    let done = ui::review_column_color(ReviewWorkflowState::Done);
-    // All four columns should have distinct colors
-    assert_ne!(backlog, ongoing);
-    assert_ne!(ongoing, action);
-    assert_ne!(action, done);
-}
-
-#[test]
-fn review_workflow_cursor_bg_colors_are_distinct() {
-    use crate::models::ReviewWorkflowState;
-    let backlog = ui::review_cursor_bg_color(ReviewWorkflowState::Backlog);
-    let ongoing = ui::review_cursor_bg_color(ReviewWorkflowState::Ongoing);
-    let action = ui::review_cursor_bg_color(ReviewWorkflowState::ActionRequired);
-    let done = ui::review_cursor_bg_color(ReviewWorkflowState::Done);
-    assert_ne!(backlog, ongoing);
-    assert_ne!(ongoing, action);
-    assert_ne!(action, done);
-}
-
-#[test]
-fn review_workflow_column_bg_colors_are_distinct() {
-    use crate::models::ReviewWorkflowState;
-    let backlog = ui::review_column_bg_color(ReviewWorkflowState::Backlog);
-    let ongoing = ui::review_column_bg_color(ReviewWorkflowState::Ongoing);
-    let action = ui::review_column_bg_color(ReviewWorkflowState::ActionRequired);
-    let done = ui::review_column_bg_color(ReviewWorkflowState::Done);
-    assert_ne!(backlog, ongoing);
-    assert_ne!(ongoing, action);
-    assert_ne!(action, done);
-}
-
 // ---------------------------------------------------------------------------
 // Input routing tests — verify handle_key() dispatches to correct handler
 // ---------------------------------------------------------------------------
@@ -16194,138 +15896,23 @@ fn fix_agents_map_survives_alert_refresh() {
     assert_eq!(app.security.fix_agents[&key].tmux_window, "fix-win-5");
 }
 #[test]
-fn review_board_reviewing_agent_shows_circle_badge() {
-    use super::types::WorkflowKey;
-    use crate::models::ReviewWorkflowState;
-    let mut app = make_review_board_app();
-    // Put PR 1 in Ongoing column so circle is shown
-    let key = WorkflowKey::new(
-        "acme/app".to_string(),
-        1,
-        crate::models::WorkflowItemKind::ReviewerPr,
-    );
-    app.review
-        .review_workflow_states
-        .insert(key, (ReviewWorkflowState::Ongoing, None));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-1".to_string(),
-            worktree: "/repo/.worktrees/review-1".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    let buf = render_to_buffer(&mut app, 120, 40);
+fn security_board_r_refreshes_security_alerts_in_alerts_mode() {
+    let mut app = App::new(vec![], TEST_TIMEOUT);
+    app.update(Message::SwitchToSecurityBoard);
+    app.update(Message::SwitchSecurityBoardMode(SecurityBoardMode::Alerts));
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('r')));
     assert!(
-        buffer_contains(&buf, "\u{25c9}"),
-        "expected ◉ (U+25C9) in review board when agent is Reviewing"
+        cmds.iter()
+            .any(|c| matches!(c, Command::FetchSecurityAlerts)),
+        "r in Alerts mode should emit FetchSecurityAlerts"
     );
     assert!(
-        !buffer_contains(&buf, "\u{25c6}"),
-        "expected ◆ (U+25C6) to be absent from review board when agent is Reviewing"
+        !cmds.iter().any(|c| matches!(c, Command::ReReview { .. })),
+        "r in Alerts mode must not emit ReReview"
     );
 }
 
-#[test]
-fn review_board_reviewing_agent_badge_is_cyan() {
-    use super::types::WorkflowKey;
-    use crate::models::ReviewWorkflowState;
-    let mut app = make_review_board_app();
-    // Put PR 1 in Ongoing column so circle is shown
-    let key = WorkflowKey::new(
-        "acme/app".to_string(),
-        1,
-        crate::models::WorkflowItemKind::ReviewerPr,
-    );
-    app.review
-        .review_workflow_states
-        .insert(key, (ReviewWorkflowState::Ongoing, None));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::types::ReviewAgentHandle {
-            tmux_window: "review:pr-1".to_string(),
-            worktree: "/repo/.worktrees/review-1".to_string(),
-            status: crate::models::ReviewAgentStatus::Reviewing,
-        },
-    );
-    let buf = render_to_buffer(&mut app, 120, 40);
-    let area = buf.area();
-    let mut found_cyan_circle = false;
-    'outer: for y in 0..area.height {
-        for x in 0..area.width {
-            let cell = &buf[(x, y)];
-            if cell.symbol() == "\u{25c9}"
-                && cell.style().fg == Some(ratatui::style::Color::Rgb(86, 182, 194))
-            {
-                found_cyan_circle = true;
-                break 'outer;
-            }
-        }
-    }
-    assert!(
-        found_cyan_circle,
-        "expected ◉ to be styled in CYAN (86, 182, 194) on the review board when agent is Reviewing"
-    );
-}
-
-#[test]
-fn review_board_findings_ready_agent_shows_open_circle_badge() {
-    use super::types::WorkflowKey;
-    use crate::models::ReviewWorkflowState;
-    // FindingsReady means the agent finished — shows ○ (tmux not alive)
-    let mut app = make_review_board_app();
-    let key = WorkflowKey::new(
-        "acme/app".to_string(),
-        1,
-        crate::models::WorkflowItemKind::ReviewerPr,
-    );
-    app.review
-        .review_workflow_states
-        .insert(key, (ReviewWorkflowState::ActionRequired, None));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::types::ReviewAgentHandle {
-            tmux_window: "".to_string(), // tmux window cleared when session ends
-            worktree: "/repo/.worktrees/review-1".to_string(),
-            status: crate::models::ReviewAgentStatus::FindingsReady,
-        },
-    );
-    let buf = render_to_buffer(&mut app, 120, 40);
-    // FindingsReady agent shows ○ (session no longer running)
-    assert!(
-        buffer_contains(&buf, "\u{25cb}"),
-        "expected ○ (U+25CB) for FindingsReady agent (session ended)"
-    );
-}
-
-#[test]
-fn review_board_idle_agent_shows_open_circle_badge() {
-    use super::types::WorkflowKey;
-    use crate::models::ReviewWorkflowState;
-    let mut app = make_review_board_app();
-    // Put PR 1 in Ongoing column so circle is shown
-    let key = WorkflowKey::new(
-        "acme/app".to_string(),
-        1,
-        crate::models::WorkflowItemKind::ReviewerPr,
-    );
-    app.review
-        .review_workflow_states
-        .insert(key, (ReviewWorkflowState::Ongoing, None));
-    app.review.review_agents.insert(
-        crate::models::PrRef::new("acme/app".to_string(), 1),
-        super::types::ReviewAgentHandle {
-            tmux_window: "".to_string(), // tmux window cleared when idle (not actively running)
-            worktree: "/repo/.worktrees/review-1".to_string(),
-            status: crate::models::ReviewAgentStatus::Idle,
-        },
-    );
-    let buf = render_to_buffer(&mut app, 120, 40);
-    assert!(
-        buffer_contains(&buf, "\u{25cb}"),
-        "expected ○ (U+25CB) for Idle agent"
-    );
-}
 // == refresh_status: text and color helper ==
 
 #[test]
@@ -16521,33 +16108,6 @@ fn bot_pr_filter_overlay_hidden_when_not_in_filter_mode() {
     assert!(
         !buffer_contains(&buf, "Filter Repos"),
         "overlay must not appear when BotPrRepoFilter is not active"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Bug fix: security alerts repo filter overlay title shows include/exclude mode
-// ---------------------------------------------------------------------------
-
-#[test]
-fn security_repo_filter_overlay_title_shows_include_mode() {
-    let mut app = make_security_board_app(); // already in Alerts mode with repos loaded
-    app.update(Message::StartSecurityRepoFilter);
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Filter Repos (include)"),
-        "security repo filter overlay title must contain 'Filter Repos (include)'"
-    );
-}
-
-#[test]
-fn security_repo_filter_overlay_title_shows_exclude_mode() {
-    let mut app = make_security_board_app();
-    app.update(Message::StartSecurityRepoFilter);
-    app.update(Message::ToggleSecurityRepoFilterMode);
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Filter Repos (exclude)"),
-        "security repo filter overlay title must contain 'Filter Repos (exclude)' after mode toggle"
     );
 }
 
@@ -17160,79 +16720,6 @@ fn alerts_for_workflow_column_partitions_correctly() {
     assert_eq!(review[0].number, 3);
 }
 
-// -- Card rendering --
-
-#[test]
-fn card_shows_running_badge_when_in_progress() {
-    use crate::tui::ui::build_security_alert_item_for_test;
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
-    let item = build_security_alert_item_for_test(&alert, false, 80, true);
-    let text = item;
-    assert!(
-        text.contains('◉'),
-        "running badge ◉ should appear when is_running=true"
-    );
-}
-
-#[test]
-fn card_no_running_badge_when_backlog() {
-    use crate::tui::ui::build_security_alert_item_for_test;
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
-    let item = build_security_alert_item_for_test(&alert, false, 80, false);
-    let text = item;
-    assert!(
-        !text.contains('◉'),
-        "running badge ◉ should not appear when is_running=false"
-    );
-}
-
-#[test]
-fn card_severity_badge_critical() {
-    use crate::tui::ui::build_security_alert_item_for_test;
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Critical);
-    let item = build_security_alert_item_for_test(&alert, false, 80, false);
-    let text = item;
-    assert!(
-        text.contains("[CRIT]"),
-        "critical severity badge should appear on card"
-    );
-}
-
-#[test]
-fn card_severity_badge_high() {
-    use crate::tui::ui::build_security_alert_item_for_test;
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::High);
-    let item = build_security_alert_item_for_test(&alert, false, 80, false);
-    let text = item;
-    assert!(
-        text.contains("[HIGH]"),
-        "high severity badge should appear on card"
-    );
-}
-
-#[test]
-fn card_severity_badge_medium() {
-    use crate::tui::ui::build_security_alert_item_for_test;
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Medium);
-    let item = build_security_alert_item_for_test(&alert, false, 80, false);
-    let text = item;
-    assert!(
-        text.contains("[MED]"),
-        "medium severity badge should appear on card"
-    );
-}
-
-#[test]
-fn card_severity_badge_low() {
-    use crate::tui::ui::build_security_alert_item_for_test;
-    let alert = make_security_alert(1, "org/repo", crate::models::AlertSeverity::Low);
-    let item = build_security_alert_item_for_test(&alert, false, 80, false);
-    let text = item;
-    assert!(
-        text.contains("[LOW]"),
-        "low severity badge should appear on card"
-    );
-}
 #[test]
 fn review_board_mode_column_labels_v2() {
     use crate::models::ReviewWorkflowState::*;

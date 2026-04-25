@@ -440,3 +440,39 @@ fn update_unknown_status_fails() {
         .unwrap();
     assert!(!out.status.success(), "Expected failure for unknown status");
 }
+
+// ---------------------------------------------------------------------------
+// fetch-reviews
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fetch_reviews_no_settings_prints_empty_array() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "fetch-reviews"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let items: Vec<serde_json::Value> = serde_json::from_str(stdout.trim())
+        .expect("output must be valid JSON array");
+    assert!(items.is_empty(), "expected empty array, got: {stdout}");
+}
+
+// ---------------------------------------------------------------------------
+// fetch-security
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fetch_security_no_settings_prints_empty_array() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "fetch-security"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let items: Vec<serde_json::Value> = serde_json::from_str(stdout.trim())
+        .expect("output must be valid JSON array");
+    assert!(items.is_empty(), "expected empty array, got: {stdout}");
+}

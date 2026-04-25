@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ pub fn expand_tilde(path: &str) -> String {
 // TaskStatus
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
     #[serde(alias = "ready")]
@@ -1116,11 +1116,13 @@ impl Task {
 // FeedItem — an item from a programmable epic feed
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedItem {
     pub external_id: String,
     pub title: String,
     pub description: String,
+    #[serde(default)]
+    pub url: String,
     pub status: TaskStatus,
 }
 

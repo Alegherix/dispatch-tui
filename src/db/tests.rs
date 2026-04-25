@@ -5173,6 +5173,7 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
         external_id: external_id.to_string(),
         title: title.to_string(),
         description: "desc".to_string(),
+        url: String::new(),
         status: TaskStatus::Backlog,
     }
 }
@@ -5232,6 +5233,7 @@ fn upsert_feed_tasks_preserves_status() {
         external_id: "ext-1".to_string(),
         title: "Updated Title".to_string(),
         description: "new desc".to_string(),
+        url: String::new(),
         status: TaskStatus::Done, // feed says done; user status should be preserved
     }];
     db.upsert_feed_tasks(epic.id, &updated).unwrap();

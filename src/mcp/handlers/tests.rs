@@ -6416,8 +6416,14 @@ async fn list_projects_returns_all_projects() {
 
     let text = extract_response_text(&resp);
     assert!(text.contains("Default"), "expected Default project in list");
-    assert!(text.contains("Dispatch"), "expected Dispatch project in list");
-    assert!(text.contains("wizard_game"), "expected wizard_game project in list");
+    assert!(
+        text.contains("Dispatch"),
+        "expected Dispatch project in list"
+    );
+    assert!(
+        text.contains("wizard_game"),
+        "expected wizard_game project in list"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -6489,7 +6495,13 @@ async fn update_epic_project_id_moves_epic() {
     });
 
     let epic = db
-        .create_epic("Test Epic", "", "/repo", None, db.get_default_project().unwrap().id)
+        .create_epic(
+            "Test Epic",
+            "",
+            "/repo",
+            None,
+            db.get_default_project().unwrap().id,
+        )
         .unwrap();
     let default_id = db.get_default_project().unwrap().id;
     assert_eq!(epic.project_id, default_id);

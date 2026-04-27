@@ -22,8 +22,8 @@ pub struct EpicEditorFields {
     pub title: String,
     pub description: String,
     pub repo_path: String,
-    pub feed_command: String,        // "" → Clear, non-empty → Set
-    pub feed_interval_secs: String,  // "" or non-integer → None (don't touch)
+    pub feed_command: String,       // "" → Clear, non-empty → Set
+    pub feed_interval_secs: String, // "" or non-integer → None (don't touch)
 }
 
 /// Parse `--- SECTION ---` delimited text into a map of section name → content.
@@ -671,7 +671,10 @@ mod tests {
             feed_interval_secs: "".into(),
         };
         let applied = apply_epic_editor_fields(&epic, fields);
-        assert_eq!(applied.feed_command, crate::service::FieldUpdate::Set("my-script.sh".into()));
+        assert_eq!(
+            applied.feed_command,
+            crate::service::FieldUpdate::Set("my-script.sh".into())
+        );
         assert_eq!(applied.feed_interval_secs, None);
     }
 
@@ -727,7 +730,10 @@ mod tests {
         let fields = parse_epic_editor_output(&content);
         let applied = apply_epic_editor_fields(&epic, fields);
         assert_eq!(applied.title, "E title");
-        assert_eq!(applied.feed_command, crate::service::FieldUpdate::Set("scripts/fetch-dependabot.sh".into()));
+        assert_eq!(
+            applied.feed_command,
+            crate::service::FieldUpdate::Set("scripts/fetch-dependabot.sh".into())
+        );
         assert_eq!(applied.feed_interval_secs, Some(60));
     }
 }

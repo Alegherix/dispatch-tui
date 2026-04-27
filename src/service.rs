@@ -2853,7 +2853,6 @@ mod tests {
         assert_eq!(task.project_id, other.id);
     }
 
-
     // -- project_id in update_epic --------------------------------------------
 
     #[test]
@@ -2896,5 +2895,4 @@ mod tests {
         let updated = epics.iter().find(|e| e.id == epic.id).unwrap();
         assert_eq!(updated.project_id, other.id);
     }
-
 }

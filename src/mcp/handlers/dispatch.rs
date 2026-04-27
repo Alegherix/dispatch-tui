@@ -520,10 +520,7 @@ fn handle_list_projects(state: &McpState, id: Option<Value>, _args: Value) -> Js
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": text}]}),
-            )
+            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
         }
         Err(e) => JsonRpcResponse::err(id, -32603, format!("Failed to list projects: {e}")),
     }

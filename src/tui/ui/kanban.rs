@@ -937,14 +937,14 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
     let bg_block = Block::default().style(Style::default().bg(PROJECTS_COL_BG));
     frame.render_widget(bg_block, area);
 
-    let task_counts: std::collections::HashMap<i64, usize> =
-        app.tasks()
-            .iter()
-            .filter(|t| t.status != TaskStatus::Archived)
-            .fold(std::collections::HashMap::new(), |mut acc, t| {
-                *acc.entry(t.project_id).or_insert(0) += 1;
-                acc
-            });
+    let task_counts: std::collections::HashMap<i64, usize> = app
+        .tasks()
+        .iter()
+        .filter(|t| t.status != TaskStatus::Archived)
+        .fold(std::collections::HashMap::new(), |mut acc, t| {
+            *acc.entry(t.project_id).or_insert(0) += 1;
+            acc
+        });
 
     let mut items: Vec<ListItem> = app
         .projects()

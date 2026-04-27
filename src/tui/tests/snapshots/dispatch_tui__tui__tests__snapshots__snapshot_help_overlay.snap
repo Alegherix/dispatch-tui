@@ -8,10 +8,10 @@ expression: rendered
 ──────────────────────────────│  ── active                │                              │──────────────────────────────
   ▌ #1 Task 1           ╔ Help ════════════════════════════════════════════════════════════════╗ Task 4
    ◦ <1h                ║                                                                      ║1h
-────────────────────────║  Navigation                                                          ║
+────────────────────────║  Navigation                                                          ║────────────────────────
   ▎ #2 Task 2           ║  [h/←] prev column     [j/↓] next task                               ║
    ◦ <1h                ║  [l/→] next column     [k/↑] prev task                               ║
-                        ║  [Enter] detail panel     [e] edit / enter epic                      ║
+────────────────────────║  [Enter] detail panel     [e] edit / enter epic                      ║
                         ║  [q] exit epic (in epic)   [Esc] clear selection                     ║
                         ║                                                                      ║
                         ║  Actions                                                             ║

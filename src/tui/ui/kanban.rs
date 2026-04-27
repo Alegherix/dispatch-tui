@@ -731,6 +731,10 @@ fn render_task_column(
         });
     }
 
+    if !column_items.is_empty() {
+        list_items.push(ListItem::new(card_rule_line(MUTED, col_area.width)));
+    }
+
     let on_select_all = app.on_select_all();
     let sel = app.selection_mut();
     if is_focused {
@@ -765,7 +769,7 @@ fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: Date
     let bg_block = Block::default().style(Style::default().bg(ARCHIVE_COL_BG));
     frame.render_widget(bg_block, area);
 
-    let items: Vec<ListItem> = archived
+    let mut items: Vec<ListItem> = archived
         .iter()
         .enumerate()
         .map(|(idx, task)| {
@@ -781,6 +785,9 @@ fn render_archive_column(frame: &mut Frame, app: &mut App, area: Rect, now: Date
             )
         })
         .collect();
+    if !items.is_empty() {
+        items.push(ListItem::new(card_rule_line(MUTED, area.width)));
+    }
 
     let title = format!(" Archive ({}) ", archived.len());
     let block = Block::default()
@@ -939,7 +946,7 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
                 acc
             });
 
-    let items: Vec<ListItem> = app
+    let mut items: Vec<ListItem> = app
         .projects()
         .iter()
         .enumerate()
@@ -954,6 +961,9 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect) {
             )
         })
         .collect();
+    if !items.is_empty() {
+        items.push(ListItem::new(card_rule_line(MUTED, area.width)));
+    }
 
     let title = format!(" Projects ({}) ", app.projects().len());
     let block = Block::default()

@@ -4,13 +4,13 @@ expression: rendered
 ---
 [Default]   ▸ Tasks   [Tab]                                                                                       🔕  [N]
         ▸ backlog 2 [ ]                 ◦ running 1                   ◦ review 0                     ◦ done 1
-  ▌ #1 Task 1                   ── active                                                   ▎ #4 Task 4
-   ◦ <1h                        ▎ #3 Task 3                                                  ✓ <1h
-  ▎ #2 Task 2           ╔ Help ════════════════════════════════════════════════════════════════╗
-   ◦ <1h                ║                                                                      ║
-                        ║  Navigation                                                          ║
-                        ║  [h/←] prev column     [j/↓] next task                               ║
-                        ║  [l/→] next column     [k/↑] prev task                               ║
+──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
+──────────────────────────────│  ── active                │                              │──────────────────────────────
+  ▌ #1 Task 1           ╔ Help ════════════════════════════════════════════════════════════════╗ Task 4
+   ◦ <1h                ║                                                                      ║1h
+────────────────────────║  Navigation                                                          ║
+  ▎ #2 Task 2           ║  [h/←] prev column     [j/↓] next task                               ║
+   ◦ <1h                ║  [l/→] next column     [k/↑] prev task                               ║
                         ║  [Enter] detail panel     [e] edit / enter epic                      ║
                         ║  [q] exit epic (in epic)   [Esc] clear selection                     ║
                         ║                                                                      ║

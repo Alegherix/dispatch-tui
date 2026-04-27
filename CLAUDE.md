@@ -64,6 +64,31 @@ rm src/tui/tests/snapshots/*.snap.new  # clean up leftover .snap.new files
 
 Keep snapshots at 120×40 so failure diffs remain readable.
 
+> **Do not change the `TestBackend` size from 120×40.** Resizing breaks all existing snapshot diffs and makes failures unreadable.
+
+### Where New Tests Go
+
+| What you're testing | Where to put the test |
+|---------------------|----------------------|
+| TUI key handling / message flow | `src/tui/tests/` |
+| DB schema, CRUD, migrations | `src/db/tests.rs` |
+| Business rules in the service layer | inline in `src/service.rs` |
+| MCP JSON-RPC handler behaviour | `src/mcp/handlers/tests.rs` |
+| Full task/epic lifecycle (end-to-end) | `tests/` (integration tests) |
+| Domain-type invariants and roundtrips | inline in the owning module (`src/models.rs`, `src/db/mod.rs`) |
+
+Property tests live alongside unit tests in the same module, in a nested `mod property_tests` block.
+
+### Coverage
+
+`cargo-tarpaulin` is configured in CI (`.github/workflows/ci.yml`). Run locally with:
+
+```bash
+cargo tarpaulin --out Html
+```
+
+Coverage is not added to the pre-push hook — the run is slow. Check the trend manually or review the CI artifact.
+
 ## Test-Driven Development
 
 Always use TDD when working in this repo. Start by expressing the intended behaviour as tests — capture what the code should do before writing the code that does it. Then implement the minimum code to make the tests pass. This applies to all changes — new features, bug fixes, and refactors.
@@ -92,6 +117,7 @@ Key patterns that aren't obvious from reading the code:
 - **MCP server**: Runs on port 3142 (configurable via `DISPATCH_PORT`). Agents call JSON-RPC methods in `src/mcp/handlers/` to update task status.
 - **Integration tests**: Use `Database::open_in_memory()` with a real SQLite instance — no mocking the database layer.
 - **Command queue draining**: `execute_commands` (`src/runtime.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Any handler that produces additional commands (e.g. error-path `app.update()` calls that return extra commands) extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls.
+- **Editor session invariant**: `TuiRuntime` holds an `editor_session: Arc<Mutex<Option<EditorSession>>>` (`src/runtime/mod.rs`). At most one pop-out editor can be open at a time — the runtime refuses to start a new one while the slot is occupied. The slot is `None` when idle.
 
 ### Error Handling
 
@@ -180,6 +206,23 @@ Key types in the chain:
 
 The `MessageSent` variant additionally triggers `Message::MessageReceived(task_id)`, which flashes the target task's card in the TUI.
 
+### MCP Error Codes
+
+MCP handlers in `src/mcp/handlers/` return JSON-RPC error objects using two codes:
+
+| Code | Meaning | When to use |
+|------|---------|-------------|
+| `-32602` | Invalid params | Validation failure, missing required field, unknown tool name — maps to `ServiceError::Validation` |
+| `-32603` | Internal error | Unexpected DB error, I/O failure — maps to `ServiceError::Internal` or `anyhow` errors |
+
+Use `JsonRpcResponse::err(id, -32602, msg)` for anything the caller can fix; use `-32603` for anything they can't.
+
+## Feed Epics
+
+Feed epics are epics whose tasks are populated externally by a shell command rather than by a human. When an epic has a `feed_command` set, the runtime runs it periodically (`feed_interval_secs`) and calls `upsert_feed_tasks()` to sync the results. Each feed task has an `external_id` that is used as the upsert key — tasks are created on first appearance and updated (but not deleted) on subsequent runs.
+
+Feed tasks appear in their own column on the kanban board (`SubStatus::Feed`). The schema is backed by migration v38. See `docs/specs/feeds.allium` for the full specification.
+
 ## Visibility Convention
 
 `App` fields use `pub(in crate::tui)` to restrict mutation to the TUI module. External code (runtime, MCP handlers) can only change `App` state by sending a `Message` through `app.update()`, which returns `Command`s. This keeps state transitions auditable in one place and prevents scattered mutation from outside the TUI boundary.
@@ -262,6 +305,14 @@ If you see `let _ =` and are unsure whether it's intentional, check the surround
 
 Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If a type or function is unused today but is part of an in-progress feature, document it with a comment pointing at the relevant issue/task rather than silencing the warning.
 
+### Sub-status validation TOCTOU
+
+`TaskService::update_task()` (`src/service.rs`) reads the existing task to validate the requested sub-status before applying the patch. This is a TOCTOU window: a concurrent MCP call could change the task status between the read and the write. This is intentional and accepted — simultaneous status changes from two agents on the same task are considered a user error, and the window is too small to be worth a transaction-level fix.
+
+### Immutable `parent_epic_id`
+
+`EpicPatch` intentionally omits `parent_epic_id`. Reparenting an epic is not supported: the parent is set at creation time and never changed. This keeps the parent chain immutable and prevents accidental cycle introduction. The database enforces `CHECK (parent_epic_id != id)` (migration v35) as a final guard. See the doc comment at `src/db/mod.rs` (`EpicPatch` definition) for the full rationale.
+
 ## How-To Guides
 
 ### Adding a New MCP Tool
@@ -283,7 +334,7 @@ Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If 
 
 ### Adding a Database Migration
 
-Migrations live in `src/db/migrations.rs` as standalone functions:
+Migrations live in `src/db/migrations.rs` as standalone functions. We do **not** squash migrations — see the module-level doc comment in `src/db/migrations.rs` for the policy.
 
 1. **Write the migration function**: `fn migrate_vN_description(conn: &Connection) -> Result<()>` in `src/db/migrations.rs`. Use `ALTER TABLE` for additive changes; for destructive changes (column removal, constraint changes), create a new table, copy data, drop old, rename.
 2. **Register it** in the `MIGRATIONS` array in `src/db/migrations.rs`: add `(N, migrate_vN_description)`. The loop in `Database::init_schema()` applies any migration where `current_version < N` and bumps `PRAGMA user_version` after each.

@@ -5131,3 +5131,106 @@ fn upsert_feed_tasks_adds_new_items() {
     let tasks = db.list_tasks_for_epic(epic.id).unwrap();
     assert_eq!(tasks.len(), 2, "new item should be created on second call");
 }
+
+// ---------------------------------------------------------------------------
+// Property tests
+// ---------------------------------------------------------------------------
+
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Build a `TaskPatch` with the subset of fields indicated by `bits`.
+    /// Each bit (0-12) maps to one field in `has_changes()` order.
+    fn taskpatch_from_bits(bits: u16) -> TaskPatch<'static> {
+        let mut p = TaskPatch::new();
+        if bits & (1 << 0) != 0 {
+            p = p.status(crate::models::TaskStatus::Backlog);
+        }
+        if bits & (1 << 1) != 0 {
+            p = p.plan_path(Some("plan.md"));
+        }
+        if bits & (1 << 2) != 0 {
+            p = p.title("t");
+        }
+        if bits & (1 << 3) != 0 {
+            p = p.description("d");
+        }
+        if bits & (1 << 4) != 0 {
+            p = p.repo_path("/repo");
+        }
+        if bits & (1 << 5) != 0 {
+            p = p.worktree(Some(".wt"));
+        }
+        if bits & (1 << 6) != 0 {
+            p = p.tmux_window(Some("w"));
+        }
+        if bits & (1 << 7) != 0 {
+            p = p.sub_status(crate::models::SubStatus::Active);
+        }
+        if bits & (1 << 8) != 0 {
+            p = p.pr_url(Some("https://github.com/pr/1"));
+        }
+        if bits & (1 << 9) != 0 {
+            p = p.tag(Some(crate::models::TaskTag::Bug));
+        }
+        if bits & (1 << 10) != 0 {
+            p = p.sort_order(Some(1));
+        }
+        if bits & (1 << 11) != 0 {
+            p = p.base_branch("main");
+        }
+        if bits & (1 << 12) != 0 {
+            p = p.external_id(Some("ext-1"));
+        }
+        p
+    }
+
+    /// Build an `EpicPatch` with the subset of fields indicated by `bits`.
+    /// Each bit (0-8) maps to one field in `has_changes()` order.
+    fn epicpatch_from_bits(bits: u16) -> EpicPatch<'static> {
+        let mut p = EpicPatch::new();
+        if bits & (1 << 0) != 0 {
+            p = p.title("epic title");
+        }
+        if bits & (1 << 1) != 0 {
+            p = p.description("desc");
+        }
+        if bits & (1 << 2) != 0 {
+            p = p.status(crate::models::TaskStatus::Running);
+        }
+        if bits & (1 << 3) != 0 {
+            p = p.plan_path(Some("plan.md"));
+        }
+        if bits & (1 << 4) != 0 {
+            p = p.sort_order(Some(1));
+        }
+        if bits & (1 << 5) != 0 {
+            p = p.repo_path("/repo");
+        }
+        if bits & (1 << 6) != 0 {
+            p = p.auto_dispatch(true);
+        }
+        if bits & (1 << 7) != 0 {
+            p = p.feed_command(Some("cmd"));
+        }
+        if bits & (1 << 8) != 0 {
+            p = p.feed_interval_secs(Some(60));
+        }
+        p
+    }
+
+    proptest! {
+        #[test]
+        fn taskpatch_has_changes_iff_any_field_set(bits in 0u16..8192) {
+            let patch = taskpatch_from_bits(bits);
+            prop_assert_eq!(patch.has_changes(), bits != 0);
+        }
+
+        #[test]
+        fn epicpatch_has_changes_iff_any_field_set(bits in 0u16..512) {
+            let patch = epicpatch_from_bits(bits);
+            prop_assert_eq!(patch.has_changes(), bits != 0);
+        }
+    }
+}

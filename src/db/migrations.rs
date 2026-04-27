@@ -1,3 +1,12 @@
+//! Database migrations.
+//!
+//! ## Squashing policy
+//!
+//! We do **not** squash migrations. Every entry in `MIGRATIONS` has run in
+//! production at some point; squashing would diverge the schema history from
+//! the audit trail. Running all N migrations on a fresh install is negligible
+//! (sub-millisecond for SQLite). If the number grows beyond ~100, revisit.
+
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 

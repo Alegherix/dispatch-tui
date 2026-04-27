@@ -2819,6 +2819,81 @@ mod tests {
             DispatchMode::Dispatch
         );
     }
+
+    mod property_tests {
+        use super::*;
+
+        const TASK_STATUSES: &[TaskStatus] = &[
+            TaskStatus::Backlog,
+            TaskStatus::Running,
+            TaskStatus::Review,
+            TaskStatus::Done,
+            TaskStatus::Archived,
+        ];
+
+        const TASK_TAGS: &[TaskTag] = &[
+            TaskTag::Bug,
+            TaskTag::Feature,
+            TaskTag::Chore,
+            TaskTag::Epic,
+        ];
+
+        fn task_status_strategy() -> impl Strategy<Value = TaskStatus> {
+            (0..TASK_STATUSES.len()).prop_map(|i| TASK_STATUSES[i])
+        }
+
+        fn task_tag_strategy() -> impl Strategy<Value = TaskTag> {
+            (0..TASK_TAGS.len()).prop_map(|i| TASK_TAGS[i])
+        }
+
+        fn sub_status_strategy() -> impl Strategy<Value = SubStatus> {
+            (0..SubStatus::ALL.len()).prop_map(|i| SubStatus::ALL[i])
+        }
+
+        proptest! {
+            #[test]
+            fn taskstatus_parse_roundtrip(idx in 0..TaskStatus::ALL.len()) {
+                let status = TaskStatus::ALL[idx];
+                let parsed = TaskStatus::parse(status.as_str());
+                prop_assert_eq!(parsed, Some(status));
+            }
+
+            #[test]
+            fn tasktag_parse_roundtrip(tag in task_tag_strategy()) {
+                let parsed = TaskTag::parse(tag.as_str());
+                prop_assert_eq!(parsed, Some(tag));
+            }
+
+            #[test]
+            fn substatus_default_is_valid_for_status(status in task_status_strategy()) {
+                let default_ss = SubStatus::default_for(status);
+                prop_assert!(
+                    default_ss.is_valid_for(status),
+                    "default_for({:?}) = {:?} is not valid for that status",
+                    status,
+                    default_ss
+                );
+            }
+
+            #[test]
+            fn substatus_none_is_only_valid_for_terminal_statuses(ss in sub_status_strategy()) {
+                // For Backlog, Done, and Archived only SubStatus::None is valid.
+                // Running and Review require a specific active sub-status.
+                for &terminal in &[TaskStatus::Backlog, TaskStatus::Done, TaskStatus::Archived] {
+                    let valid = ss.is_valid_for(terminal);
+                    let expected = matches!(ss, SubStatus::None);
+                    prop_assert_eq!(valid, expected);
+                }
+            }
+
+            #[test]
+            fn substatus_column_priority_never_panics(ss in sub_status_strategy()) {
+                // column_priority() is a pure exhaustive match — just confirm it always
+                // returns a value for every variant.
+                let _ = ss.column_priority();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

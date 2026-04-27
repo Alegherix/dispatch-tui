@@ -342,7 +342,7 @@ impl App {
         }
     }
 
-    /// Handle keys when the archive overlay is visible.
+    /// Handle keys when the Archive column is focused.
     fn handle_key_archive(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {

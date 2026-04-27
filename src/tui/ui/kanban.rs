@@ -233,7 +233,6 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         });
     }
 
-    // Edge column: Archive (only shown when col 5 is focused)
     if sel == TaskStatus::COLUMN_COUNT + 1 {
         let count = app.archived_tasks().len();
         segments.push(Segment {
@@ -587,13 +586,11 @@ fn render_columns(
 
     let mut area_idx = 0usize;
 
-    // Projects column (only when col 0 focused)
     if sel == 0 {
         render_projects_column(frame, app, column_areas[area_idx], now);
         area_idx += 1;
     }
 
-    // Task columns 1–4
     for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let nav_col = task_col_idx + 1;
         render_task_column(
@@ -608,7 +605,6 @@ fn render_columns(
         area_idx += 1;
     }
 
-    // Archive column (col 5, only when focused)
     if sel == TaskStatus::COLUMN_COUNT + 1 {
         render_archive_column(frame, app, column_areas[area_idx], now);
     }
@@ -872,16 +868,21 @@ fn render_projects_column(frame: &mut Frame, app: &mut App, area: Rect, _now: Da
     let bg_block = Block::default().style(Style::default().bg(PROJECTS_COL_BG));
     frame.render_widget(bg_block, area);
 
+    let task_counts: std::collections::HashMap<i64, usize> =
+        app.tasks()
+            .iter()
+            .filter(|t| t.status != TaskStatus::Archived)
+            .fold(std::collections::HashMap::new(), |mut acc, t| {
+                *acc.entry(t.project_id).or_insert(0) += 1;
+                acc
+            });
+
     let items: Vec<ListItem> = app
         .projects()
         .iter()
         .enumerate()
         .map(|(idx, project)| {
-            let task_count = app
-                .tasks()
-                .iter()
-                .filter(|t| t.project_id == project.id && t.status != TaskStatus::Archived)
-                .count();
+            let task_count = task_counts.get(&project.id).copied().unwrap_or(0);
             build_project_list_item(
                 project,
                 task_count,

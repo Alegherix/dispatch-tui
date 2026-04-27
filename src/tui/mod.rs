@@ -594,6 +594,10 @@ impl App {
             return;
         }
         let col = self.selection().column();
+        // Archive column (col == COLUMN_COUNT) has no row array slot; nothing to anchor.
+        if col >= TaskStatus::COLUMN_COUNT {
+            return;
+        }
         let row = self.selection().row(col);
         let status = match TaskStatus::from_column_index(col) {
             Some(s) => s,
@@ -981,9 +985,20 @@ impl App {
     }
 
     fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
+        // COLUMN_COUNT (4) is the virtual archive column; normal columns are 0..COLUMN_COUNT-1.
         let new_col = (self.selection().column() as isize + delta)
-            .clamp(0, (TaskStatus::COLUMN_COUNT - 1) as isize) as usize;
+            .clamp(0, TaskStatus::COLUMN_COUNT as isize) as usize;
         self.selection_mut().set_column(new_col);
+
+        let at_archive = new_col == TaskStatus::COLUMN_COUNT;
+        if at_archive && !self.archive.visible {
+            self.archive.visible = true;
+            self.archive.selected_row = 0;
+            *self.archive.list_state.selected_mut() = Some(0);
+        } else if !at_archive && self.archive.visible {
+            self.archive.visible = false;
+        }
+
         self.clamp_selection();
         self.update_anchor_from_current();
         vec![]

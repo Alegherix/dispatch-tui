@@ -898,8 +898,8 @@ fn card_shows_merged_pr_badge() {
     let mut task = make_task(1, TaskStatus::Done);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
     let mut app = App::new(vec![task], TEST_TIMEOUT);
-    // Navigate to Done column (visual index 7)
-    for _ in 0..7 {
+    // Navigate to Done column (index 3)
+    for _ in 0..3 {
         app.update(Message::NavigateColumn(1));
     }
 

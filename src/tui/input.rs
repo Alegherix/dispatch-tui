@@ -344,7 +344,9 @@ impl App {
                 *self.archive.list_state.selected_mut() = Some(self.archive.selected_row);
                 vec![]
             }
-            KeyCode::Esc => vec![], // temporary — replaced in Task 3
+            KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
+                self.update(Message::NavigateColumn(-1))
+            }
             KeyCode::Char('x') => {
                 let archived = self.archived_tasks();
                 if let Some(task) = archived.get(self.archive.selected_row) {

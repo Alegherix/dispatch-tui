@@ -86,9 +86,11 @@ fn navigate_column_clamps() {
     app.update(Message::NavigateColumn(-1));
     assert_eq!(app.selection().column(), 0); // can't go below 0
 
-    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT - 1);
+    // From archive column (COLUMN_COUNT), pressing right stays clamped
+    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);
+    app.archive.visible = true; // keep state consistent
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT - 1); // can't go above max
+    assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT); // can't go above max
 }
 
 #[test]
@@ -106,9 +108,13 @@ fn navigate_column_moves_through_visual_columns() {
 #[test]
 fn navigate_column_clamps_at_visual_column_max() {
     let mut app = make_app();
-    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT - 1); // Done column (3)
+    // From Done (col 3) pressing right enters archive (col 4), not a clamp
+    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT - 1);
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT - 1); // stays at 3
+    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT); // archive column
+    // From archive (col 4), pressing right is clamped
+    app.update(Message::NavigateColumn(1));
+    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT); // stays at archive
 }
 
 #[test]
@@ -1931,4 +1937,125 @@ fn test_selection_falls_back_when_column_empties() {
     // Cursor must be in a valid state: row 0 in the empty Running column
     assert_eq!(app.selection().column(), 1);
     assert_eq!(app.selection().row(1), 0);
+}
+
+// --- Archive column navigation ---
+
+#[test]
+fn navigate_right_from_done_shows_archive() {
+    let mut app = make_app();
+    // Navigate to Done column (col 3)
+    for _ in 0..3 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert_eq!(app.selected_column(), 3);
+    assert!(!app.show_archived());
+
+    // Navigate right from Done → archive column
+    app.update(Message::NavigateColumn(1));
+    assert_eq!(app.selected_column(), 4);
+    assert!(app.show_archived());
+}
+
+#[test]
+fn navigate_right_from_done_resets_archive_selection() {
+    let mut app = App::new(
+        vec![
+            make_task(1, TaskStatus::Archived),
+            make_task(2, TaskStatus::Archived),
+        ],
+        TEST_TIMEOUT,
+    );
+    // Pre-position archive selection at row 1
+    app.archive.selected_row = 1;
+    *app.archive.list_state.selected_mut() = Some(1);
+
+    // Navigate to Done then into archive
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    // Selection should reset to 0
+    assert_eq!(app.archive.selected_row, 0);
+}
+
+#[test]
+fn navigate_left_from_archive_hides_it_and_goes_to_done() {
+    let mut app = make_app();
+    // Enter archive column
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert!(app.show_archived());
+
+    // Navigate left
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 3);
+    assert!(!app.show_archived());
+}
+
+#[test]
+fn pressing_right_at_archive_column_stays_clamped() {
+    let mut app = make_app();
+    for _ in 0..5 {
+        app.update(Message::NavigateColumn(1));
+    }
+    // Should clamp at 4
+    assert_eq!(app.selected_column(), 4);
+    assert!(app.show_archived());
+}
+
+#[test]
+fn h_key_in_archive_returns_to_done() {
+    let mut app = make_app();
+    // Enter archive column
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert!(app.show_archived());
+
+    // Press h
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert_eq!(app.selected_column(), 3);
+    assert!(!app.show_archived());
+}
+
+#[test]
+fn left_arrow_in_archive_returns_to_done() {
+    let mut app = make_app();
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert!(app.show_archived());
+
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.selected_column(), 3);
+    assert!(!app.show_archived());
+}
+
+#[test]
+fn esc_key_in_archive_returns_to_done() {
+    let mut app = make_app();
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert!(app.show_archived());
+
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.selected_column(), 3);
+    assert!(!app.show_archived());
+}
+
+#[test]
+fn navigate_left_from_done_does_not_show_archive() {
+    let mut app = make_app();
+    // Navigate to Done column (col 3)
+    for _ in 0..3 {
+        app.update(Message::NavigateColumn(1));
+    }
+    assert_eq!(app.selected_column(), 3);
+
+    // Navigate left (back to Review) — archive must NOT appear
+    app.update(Message::NavigateColumn(-1));
+    assert_eq!(app.selected_column(), 2);
+    assert!(!app.show_archived());
 }

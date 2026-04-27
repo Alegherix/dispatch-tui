@@ -255,8 +255,10 @@ fn full_archive_flow() {
     assert!(task.worktree.is_none());
     assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 
-    // Toggle archive panel
-    app.update(Message::ToggleArchive);
+    // Navigate to archive column
+    for _ in 0..4 {
+        app.update(Message::NavigateColumn(1));
+    }
     assert!(app.archive.visible);
 
     // Should see 1 archived task
@@ -344,7 +346,7 @@ fn render_archive_overlay_shows_archived_tasks() {
     task.status = TaskStatus::Archived;
     task.title = "Archived Item".to_string();
     let mut app = App::new(vec![task], TEST_TIMEOUT);
-    app.update(Message::ToggleArchive);
+    app.archive.visible = true;
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Archived Item"),

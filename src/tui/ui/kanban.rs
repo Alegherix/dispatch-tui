@@ -435,6 +435,11 @@ fn render_card_indicator(indicator: CardIndicator) -> Line<'static> {
     ])
 }
 
+fn card_rule_line(color: Color, width: u16) -> Line<'static> {
+    let rule = "\u{2500}".repeat(width as usize); // ─
+    Line::from(Span::styled(rule, Style::default().fg(color)))
+}
+
 /// Build a styled two-line ListItem for a task card in a kanban column.
 /// Line 1: stripe + title
 /// Line 2: status icon + age/activity metadata
@@ -502,7 +507,13 @@ fn build_task_list_item<'a>(
         }
     }
 
-    let mut item = ListItem::new(vec![line1, line2]);
+    let rule_color = if is_cursor || has_message_flash {
+        col_color
+    } else {
+        MUTED
+    };
+    let rule_line = card_rule_line(rule_color, col_width);
+    let mut item = ListItem::new(vec![rule_line, line1, line2]);
 
     // Flash bg takes priority over cursor — it's transient (3s) and meant to grab attention
     if has_message_flash {
@@ -2320,5 +2331,19 @@ mod tests {
             2,
             "subsequent header should have 2 lines (blank + label)"
         );
+    }
+
+    #[test]
+    fn card_rule_line_fills_width_with_dashes() {
+        let line = card_rule_line(BLUE, 10);
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "──────────");
+        assert_eq!(line.spans[0].style.fg, Some(BLUE));
+    }
+
+    #[test]
+    fn card_rule_line_zero_width_returns_empty() {
+        let line = card_rule_line(MUTED, 0);
+        assert_eq!(line.spans[0].content, "");
     }
 }

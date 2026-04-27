@@ -232,6 +232,7 @@ struct TuiRuntime {
 }
 
 mod agents;
+mod commands;
 mod editor;
 mod epics;
 mod pr;
@@ -353,139 +354,16 @@ async fn run_loop(
 
 async fn execute_commands(
     app: &mut App,
-    commands: Vec<Command>,
+    cmds: Vec<Command>,
     rt: &TuiRuntime,
     _terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     _key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
 ) -> Result<()> {
-    let mut queue = std::collections::VecDeque::from(commands);
+    let mut queue = std::collections::VecDeque::from(cmds);
     while let Some(command) = queue.pop_front() {
-        match command {
-            Command::PersistTask(task) => rt.exec_persist_task(app, task),
-            Command::InsertTask { draft, epic_id } => rt.exec_insert_task(app, draft, epic_id),
-            Command::DeleteTask(id) => rt.exec_delete_task(app, id),
-            Command::DispatchAgent { task, mode } => rt.exec_dispatch_agent(task, mode),
-            Command::CaptureTmux { id, window } => rt.exec_capture_tmux(id, window),
-            Command::PopOutEditor(kind) => rt.exec_pop_out_editor(app, kind),
-            Command::FinalizeEditorResult { kind, outcome } => {
-                let extra = rt.exec_finalize_editor_result(app, kind, outcome);
-                queue.extend(extra);
-            }
-            Command::SaveRepoPath(path) => rt.exec_save_repo_path(app, path),
-            Command::RefreshFromDb => {
-                let extra = rt.exec_refresh_from_db(app);
-                queue.extend(extra);
-            }
-            Command::Cleanup {
-                id,
-                repo_path,
-                worktree,
-                tmux_window,
-            } => rt.exec_cleanup(id, repo_path, worktree, tmux_window),
-            Command::Resume { task } => rt.exec_resume(task),
-            Command::JumpToTmux { window } => rt.exec_jump_to_tmux(app, window),
-            Command::QuickDispatch { draft, epic_id } => {
-                rt.exec_quick_dispatch(app, draft, epic_id)
-            }
-            Command::KillTmuxWindow { window } => rt.exec_kill_tmux_window(window),
-            Command::Finish {
-                id,
-                repo_path,
-                branch,
-                base_branch,
-                worktree,
-                tmux_window,
-            } => rt.exec_finish(id, repo_path, branch, base_branch, worktree, tmux_window),
-            // Epic commands
-            Command::InsertEpic(draft) => rt.exec_insert_epic(
-                app,
-                draft.title,
-                draft.description,
-                draft.repo_path,
-                draft.parent_epic_id,
-            ),
-            Command::DeleteEpic(id) => rt.exec_delete_epic(app, id),
-            Command::PersistEpic {
-                id,
-                status,
-                sort_order,
-            } => rt.exec_persist_epic(app, id, status, sort_order),
-            Command::RefreshEpicsFromDb => rt.exec_refresh_epics_from_db(app),
-            Command::DispatchEpic { epic } => rt.exec_dispatch_epic(app, epic),
-            Command::ToggleEpicAutoDispatch { id, auto_dispatch } => {
-                rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch)
-            }
-            Command::SendNotification {
-                title,
-                body,
-                urgent,
-            } => rt.exec_send_notification(&title, &body, urgent),
-            Command::PersistSetting { key, value } => rt.exec_persist_setting(app, &key, value),
-            Command::CreatePr {
-                id,
-                repo_path,
-                branch,
-                base_branch,
-                title,
-                description,
-            } => rt.exec_create_pr(id, repo_path, branch, base_branch, title, description),
-            Command::CheckPrStatus { id, pr_url } => rt.exec_check_pr_status(id, pr_url),
-            Command::MergePr { id, pr_url } => rt.exec_merge_pr(id, pr_url),
-            Command::PersistStringSetting { key, value } => {
-                rt.exec_persist_string_setting(app, &key, &value)
-            }
-            Command::OpenInBrowser { url } => rt.exec_open_in_browser(url),
-            Command::PersistFilterPreset {
-                name,
-                repo_paths,
-                mode,
-            } => {
-                rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str());
-            }
-            Command::DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name),
-            Command::DeleteRepoPath(path) => rt.exec_delete_repo_path(app, &path),
-            Command::PatchSubStatus { id, sub_status } => {
-                rt.exec_patch_sub_status(app, id, sub_status)
-            }
-            // Split mode
-            Command::EnterSplitMode => rt.exec_enter_split_mode(app),
-            Command::EnterSplitModeWithTask { task_id, window } => {
-                rt.exec_enter_split_mode_with_task(app, task_id, &window)
-            }
-            Command::ExitSplitMode {
-                pane_id,
-                restore_window,
-            } => rt.exec_exit_split_mode(app, &pane_id, restore_window.as_deref()),
-            Command::SwapSplitPane {
-                task_id,
-                new_window,
-                old_pane_id,
-                old_window,
-            } => rt.exec_swap_split_pane(
-                app,
-                task_id,
-                &new_window,
-                old_pane_id.as_deref(),
-                old_window.as_deref(),
-            ),
-            Command::FocusSplitPane { pane_id } => {
-                if let Err(e) = tmux::select_pane(&pane_id, &*rt.runner) {
-                    tracing::warn!("select-pane failed: {e:#}");
-                }
-            }
-            Command::CheckSplitPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
-            Command::RespawnSplitPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
-            Command::SaveTipsState {
-                seen_up_to,
-                show_mode,
-            } => {
-                if let Err(e) = rt.database.save_tips_state(seen_up_to, show_mode) {
-                    tracing::warn!("Failed to save tips state: {e:#}");
-                }
-            }
-        }
+        let extra = commands::dispatch(command, app, rt);
+        queue.extend(extra);
     }
-
     Ok(())
 }
 

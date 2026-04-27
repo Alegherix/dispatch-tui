@@ -1,0 +1,219 @@
+use anyhow::{Context, Result};
+
+use crate::models::{expand_tilde, ReviewDecision};
+use crate::process::ProcessRunner;
+
+mod agents;
+mod finish;
+mod prompts;
+mod worktree;
+
+pub use agents::{
+    brainstorm_agent, build_fix_prompt, dispatch_agent, dispatch_fix_agent, dispatch_review_agent,
+    epic_planning_agent, is_wrappable, plan_agent, quick_dispatch_agent, resume_agent,
+};
+pub use finish::{finish_task, FinishError};
+pub use prompts::EpicContext;
+pub use worktree::{branch_from_worktree, cleanup_task, validate_repo_path};
+
+/// Extract stderr from a process `Output` as a trimmed `String`.
+pub(super) fn stderr_str(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
+}
+
+/// Extract stdout from a process `Output` as a trimmed `String`.
+pub(super) fn stdout_str(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+// ---------------------------------------------------------------------------
+// PR types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct PrResult {
+    pub pr_url: String,
+}
+
+#[derive(Debug)]
+pub enum PrError {
+    PushFailed(String),
+    CreateFailed(String),
+    Other(String),
+}
+
+impl std::fmt::Display for PrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PrError::PushFailed(msg) => write!(f, "Push failed: {msg}"),
+            PrError::CreateFailed(msg) => write!(f, "PR creation failed: {msg}"),
+            PrError::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrState {
+    Open,
+    Merged,
+    Closed,
+}
+
+#[derive(Debug)]
+pub struct PrStatus {
+    pub state: PrState,
+    pub review_decision: Option<ReviewDecision>,
+}
+
+// ---------------------------------------------------------------------------
+// PR functions
+// ---------------------------------------------------------------------------
+
+/// Extract "owner/repo" from a git remote URL.
+/// Handles both SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git).
+fn parse_repo_slug(remote_url: &str) -> Option<String> {
+    let url = remote_url.trim().trim_end_matches(".git");
+    // SSH: git@github.com:owner/repo
+    if let Some(path) = url.strip_prefix("git@github.com:") {
+        return Some(path.to_string());
+    }
+    // HTTPS: https://github.com/owner/repo
+    if let Some(rest) = url.strip_prefix("https://github.com/") {
+        return Some(rest.to_string());
+    }
+    None
+}
+
+/// Push the branch to origin and create a GitHub PR using `gh`.
+pub fn create_pr(
+    repo_path: &str,
+    branch: &str,
+    title: &str,
+    description: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+) -> std::result::Result<PrResult, PrError> {
+    let repo_path = &expand_tilde(repo_path);
+
+    // 1. Push the branch
+    let output = runner
+        .run("git", &["-C", repo_path, "push", "-u", "origin", branch])
+        .map_err(|e| PrError::PushFailed(format!("Failed to run git push: {e}")))?;
+    if !output.status.success() {
+        return Err(PrError::PushFailed(stderr_str(&output)));
+    }
+
+    // 2. Get the repo slug from git remote
+    let remote_output = runner
+        .run("git", &["-C", repo_path, "remote", "get-url", "origin"])
+        .map_err(|e| PrError::Other(format!("Failed to get remote URL: {e}")))?;
+    let remote_url = stdout_str(&remote_output);
+    let repo_slug = parse_repo_slug(&remote_url)
+        .ok_or_else(|| PrError::Other(format!("Could not parse repo slug from: {remote_url}")))?;
+
+    // 3. Create the PR.
+    // Use owner:branch format for --head so gh resolves the branch in the same repo as --repo.
+    // Without the owner prefix, gh defaults to the authenticated user's namespace, causing
+    // "Head sha can't be blank" errors when the user isn't the repo owner.
+    let owner = repo_slug
+        .split('/')
+        .next()
+        .ok_or_else(|| PrError::Other(format!("Invalid repo slug: {repo_slug}")))?;
+    let head_ref = format!("{owner}:{branch}");
+    let output = runner
+        .run(
+            "gh",
+            &[
+                "pr",
+                "create",
+                "--draft",
+                "--title",
+                title,
+                "--body",
+                description,
+                "--head",
+                &head_ref,
+                "--base",
+                base_branch,
+                "--repo",
+                &repo_slug,
+            ],
+        )
+        .map_err(|e| PrError::Other(format!("Failed to run gh: {e}")))?;
+    if !output.status.success() {
+        return Err(PrError::CreateFailed(stderr_str(&output)));
+    }
+
+    // 4. Parse the PR URL from stdout
+    let pr_url = stdout_str(&output);
+    Ok(PrResult { pr_url })
+}
+
+/// Check the current status of a PR using `gh pr view`.
+pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrStatus> {
+    let output = runner
+        .run(
+            "gh",
+            &[
+                "pr",
+                "view",
+                pr_url,
+                "--json",
+                "state,reviewDecision",
+                "-q",
+                r#"[.state, .reviewDecision] | join("\n")"#,
+            ],
+        )
+        .context("Failed to run gh pr view")?;
+    if !output.status.success() {
+        anyhow::bail!("gh pr view failed: {}", stderr_str(&output));
+    }
+
+    let stdout = stdout_str(&output);
+    let mut lines = stdout.lines();
+    let state_str = lines.next().unwrap_or("").to_uppercase();
+    let review_str = lines.next().unwrap_or("").to_uppercase();
+
+    let state = match state_str.as_str() {
+        "MERGED" => PrState::Merged,
+        "CLOSED" => PrState::Closed,
+        _ => PrState::Open,
+    };
+
+    let review_decision = ReviewDecision::parse(&review_str);
+
+    Ok(PrStatus {
+        state,
+        review_decision,
+    })
+}
+
+/// Merge a GitHub PR using `gh pr merge --squash`.
+pub fn merge_pr(pr_url: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    let output = runner
+        .run("gh", &["pr", "merge", "--squash", pr_url])
+        .context("Failed to run gh pr merge")?;
+    if !output.status.success() {
+        anyhow::bail!("{}", stderr_str(&output));
+    }
+    Ok(())
+}
+
+/// Resolve a GitHub repo name (e.g. `"org/repo"`) to a local filesystem path
+/// by matching against known repo paths.  Returns the first path whose
+/// directory name equals the short repo name.
+pub fn resolve_repo_path(github_repo: &str, known_paths: &[String]) -> Option<String> {
+    let repo_short = github_repo.split('/').next_back().unwrap_or(github_repo);
+    known_paths
+        .iter()
+        .find(|p| {
+            std::path::Path::new(p)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|dir| dir == repo_short)
+        })
+        .cloned()
+}
+
+#[cfg(test)]
+mod tests;

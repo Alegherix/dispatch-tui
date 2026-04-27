@@ -149,4 +149,10 @@ impl TuiRuntime {
             }
         });
     }
+
+    pub(super) fn exec_focus_split_pane(&self, pane_id: String) {
+        if let Err(e) = tmux::select_pane(&pane_id, &*self.runner) {
+            tracing::warn!("select-pane failed: {e:#}");
+        }
+    }
 }

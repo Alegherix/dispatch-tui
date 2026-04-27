@@ -162,6 +162,8 @@ fn column_layout_constraints(selected_col: usize) -> Vec<Constraint> {
 
 /// Layout constraints for the kanban board: content columns interleaved with
 /// 1-char separator columns. Separators are at odd indices, content at even.
+/// Returns 7 constraints for 4 task columns (normal) or 9 for 5 (edge column visible).
+/// Epic view is handled by the caller — it constrains `selected_col` to 1–4.
 fn board_column_constraints(selected_col: usize) -> Vec<Constraint> {
     let n = if is_edge_column(selected_col) {
         5u32
@@ -179,6 +181,9 @@ fn board_column_constraints(selected_col: usize) -> Vec<Constraint> {
 }
 
 fn render_column_separator(frame: &mut Frame, area: Rect) {
+    if area.width == 0 {
+        return;
+    }
     let buf = frame.buffer_mut();
     for y in area.top()..area.bottom() {
         buf[(area.x, y)]

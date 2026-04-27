@@ -22,13 +22,12 @@
 | `e` | Edit task in editor (opens in a separate tmux window) |
 | `d` | Dispatch agent — behavior depends on tag (see README) / resume (Running task whose window is gone) |
 | `D` | Quick dispatch — pick repo and dispatch immediately |
-| `m` / `M` | Move task forward / backward |
+| `Shift+L` / `Shift+H` | Move task forward / backward |
 | `W` | Wrap up — commit, rebase, open PR |
 | `g` | Jump to the agent's tmux window (swap pane in split view) |
 | `G` | Jump to the agent's tmux window (always, ignoring split view) |
 | `S` | Toggle split view — side-by-side TUI + agent pane |
 | `x` | Archive task (with confirmation) |
-| `H` | Toggle archive panel |
 | `Space` | Toggle select |
 | `a` | Select all in column |
 | `J` / `K` | Reorder task up / down |
@@ -43,7 +42,7 @@
 | `g` | Enter epic view (see subtasks) |
 | `d` | Dispatch next backlog subtask |
 | `D` | Quick dispatch subtask for this epic |
-| `m` | Mark epic done (when all subtasks are done) |
+| `Shift+L` / `Shift+H` | Move epic status forward / backward |
 | `J` / `K` | Reorder subtasks (determines dispatch order) |
 | `q` | Exit epic view |
 

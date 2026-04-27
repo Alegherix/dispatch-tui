@@ -982,18 +982,6 @@ fn x_key_on_empty_column_is_noop() {
     assert_eq!(app.input.mode, InputMode::Normal); // did NOT enter ConfirmArchive
 }
 
-// --- H key toggles archive panel ---
-
-#[test]
-fn shift_h_toggles_archive() {
-    let mut app = make_app();
-    assert!(!app.archive.visible);
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
-    assert!(app.archive.visible);
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
-    assert!(!app.archive.visible);
-}
-
 // --- Error popup dismissal ---
 
 #[test]
@@ -1536,18 +1524,18 @@ fn g_key_on_empty_column_is_noop() {
 }
 
 #[test]
-fn m_key_on_empty_column_is_noop() {
+fn shift_l_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
 }
 
 #[test]
-fn shift_m_key_on_empty_column_is_noop() {
+fn shift_h_key_on_empty_column_is_noop() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.selection_mut().set_column(0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert!(cmds.is_empty());
 }
 
@@ -1575,8 +1563,8 @@ fn action_hints_backlog_task() {
         "should have dispatch/brainstorm hint"
     );
     assert!(keys.contains(&"[e]"), "should have edit hint");
-    assert!(keys.contains(&"[m]"), "should have move hint");
-    assert!(!keys.contains(&"[M]"), "backlog has no back movement");
+    assert!(keys.contains(&"[L]"), "should have move hint");
+    assert!(!keys.contains(&"[H]"), "backlog has no back movement");
     assert!(keys.contains(&"[x]"), "should have archive hint");
     assert!(keys.contains(&"[n]"), "should have new hint");
     assert!(keys.contains(&"[q]"), "should have quit hint");
@@ -1681,9 +1669,9 @@ fn action_hints_done_task() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(keys.contains(&"[e]"), "done has edit");
-    assert!(keys.contains(&"[M]"), "done has back");
+    assert!(keys.contains(&"[H]"), "done has back");
     assert!(keys.contains(&"[x]"), "done has archive");
-    assert!(!keys.contains(&"[m]"), "done has no forward move");
+    assert!(!keys.contains(&"[L]"), "done has no forward move");
     assert!(!keys.contains(&"[d]"), "done has no dispatch");
 }
 
@@ -1713,8 +1701,8 @@ fn epic_action_hints_not_done() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(keys.contains(&"[Enter]"), "epic shows detail");
-    assert!(keys.contains(&"[m]"), "epic shows status forward");
-    assert!(keys.contains(&"[M]"), "epic shows status backward");
+    assert!(keys.contains(&"[L]"), "epic shows status forward");
+    assert!(keys.contains(&"[H]"), "epic shows status backward");
     assert!(keys.contains(&"[x]"), "epic shows archive");
     assert!(keys.contains(&"[q]"), "epic shows quit");
 }
@@ -1729,8 +1717,8 @@ fn epic_action_hints_done() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"[m]"), "done epic shows status forward");
-    assert!(keys.contains(&"[M]"), "done epic shows status backward");
+    assert!(keys.contains(&"[L]"), "done epic shows status forward");
+    assert!(keys.contains(&"[H]"), "done epic shows status backward");
 }
 
 // --- action_hints: missing hints ---
@@ -2453,15 +2441,6 @@ fn archive_panel_j_k_navigation() {
 }
 
 #[test]
-fn archive_panel_h_closes() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], TEST_TIMEOUT);
-    app.archive.visible = true;
-
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
-    assert!(!app.archive.visible);
-}
-
-#[test]
 fn archive_panel_x_enters_confirm_delete() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)], TEST_TIMEOUT);
     app.archive.visible = true;
@@ -2542,7 +2521,7 @@ fn full_archive_flow() {
     assert!(cmds.iter().any(|c| matches!(c, Command::Cleanup { .. })));
 
     // Toggle archive panel
-    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+    app.update(Message::ToggleArchive);
     assert!(app.archive.visible);
 
     // Should see 1 archived task
@@ -2611,7 +2590,7 @@ fn batch_move_forward_moves_all_selected() {
     app.update(Message::ToggleSelect(TaskId(2)));
 
     // Press m to batch move forward
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
 
     // Both should now be Running
     assert_eq!(
@@ -2636,7 +2615,7 @@ fn batch_move_clears_selection() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
 
     assert!(app.select.tasks.is_empty());
 }
@@ -2648,12 +2627,12 @@ fn batch_move_multiple_steps() {
     app.update(Message::ToggleSelect(TaskId(2)));
 
     // Move Backlog -> Running (clears selection)
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
 
     // Re-select and move Running -> Review
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Review);
     assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Review);
@@ -2673,7 +2652,7 @@ fn batch_move_backward() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
-    app.handle_key(make_key(KeyCode::Char('M')));
+    app.handle_key(make_key(KeyCode::Char('H')));
 
     assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Review);
     assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Review);
@@ -2766,7 +2745,7 @@ fn single_task_operations_work_without_selection() {
     assert!(app.select.tasks.is_empty());
 
     // Single move should still work
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(
         app.find_task(TaskId(1)).unwrap().status,
         TaskStatus::Running
@@ -3786,9 +3765,9 @@ fn make_app_with_epic_selected() -> App {
 }
 
 #[test]
-fn m_key_on_epic_moves_status_forward() {
+fn shift_l_key_on_epic_moves_status_forward() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
     assert!(cmds
         .iter()
@@ -3796,16 +3775,16 @@ fn m_key_on_epic_moves_status_forward() {
 }
 
 #[test]
-fn shift_m_key_on_backlog_epic_stays_backlog() {
+fn shift_h_key_on_backlog_epic_stays_backlog() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     // Already at Backlog, can't go backward
     assert_eq!(app.board.epics[0].status, TaskStatus::Backlog);
     assert!(cmds.is_empty());
 }
 
 #[test]
-fn shift_m_on_done_epic_moves_to_review() {
+fn shift_h_on_done_epic_moves_to_review() {
     let mut app = App::new(
         vec![{
             let mut t = make_task(1, TaskStatus::Done);
@@ -3820,7 +3799,7 @@ fn shift_m_on_done_epic_moves_to_review() {
     // Done epic → column 3
     app.selection_mut().set_column(3);
     app.selection_mut().set_row(3, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Review);
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -5264,7 +5243,7 @@ fn move_review_to_done_enters_confirm_mode() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Review)], TEST_TIMEOUT);
     app.selection_mut().set_column(2); // Review column
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
     assert!(matches!(app.input.mode, InputMode::ConfirmDone(TaskId(1))));
     assert!(app.status.message.as_deref().unwrap().contains("Done"));
@@ -5301,7 +5280,7 @@ fn move_backlog_to_running_no_confirmation() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.selection_mut().set_column(0); // Backlog column
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.input.mode, InputMode::Normal);
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Running);
@@ -5355,7 +5334,7 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
     app.update(Message::ToggleSelect(TaskId(1)));
     app.update(Message::ToggleSelect(TaskId(2)));
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds.is_empty());
     assert!(app.status.message.as_deref().unwrap().contains("2 tasks"));
     assert!(app.status.message.as_deref().unwrap().contains("Done"));
@@ -8176,14 +8155,6 @@ fn handle_key_normal_dispatch_running_task_with_window_shows_info() {
 }
 
 #[test]
-fn handle_key_normal_toggle_archive() {
-    let mut app = make_app();
-    assert!(!app.archive.visible);
-    app.handle_key(make_key(KeyCode::Char('H')));
-    assert!(app.archive.visible);
-}
-
-#[test]
 fn handle_key_normal_enter_toggles_detail() {
     let mut app = make_app();
     app.selection_mut().set_column(0);
@@ -8504,14 +8475,14 @@ fn confirm_archive_y_archives_selected_epics() {
 }
 
 #[test]
-fn m_on_epic_moves_status_forward() {
+fn shift_l_on_epic_moves_status_forward() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     // Cursor on Backlog column, row 0 (the epic)
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert_eq!(app.board.epics[0].status, TaskStatus::Running);
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -8524,7 +8495,7 @@ fn m_on_epic_moves_status_forward() {
 }
 
 #[test]
-fn m_with_mixed_selection_moves_tasks_only() {
+fn shift_l_with_mixed_selection_moves_tasks_only() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::ToggleSelect(TaskId(1)));
@@ -8533,7 +8504,7 @@ fn m_with_mixed_selection_moves_tasks_only() {
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
 
-    app.handle_key(make_key(KeyCode::Char('m')));
+    app.handle_key(make_key(KeyCode::Char('L')));
     // Task should move forward
     assert_eq!(
         app.find_task(TaskId(1)).unwrap().status,
@@ -10962,7 +10933,7 @@ fn handle_key_normal_move_forward_via_handle_key() {
     let mut app = make_app();
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     // Task 1 should move from Backlog to Running
     assert!(cmds
         .iter()
@@ -10975,7 +10946,7 @@ fn handle_key_normal_move_backward_via_handle_key() {
     // Select running task (column 1)
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     // Task 3 should move from Running to Backlog
     assert!(cmds
         .iter()
@@ -11170,14 +11141,6 @@ fn handle_key_archive_e_enters_confirm_edit() {
         *app.mode(),
         InputMode::ConfirmEditTask(TaskId(100))
     ));
-}
-
-#[test]
-fn handle_key_archive_h_closes() {
-    let mut app = make_app();
-    app.archive.visible = true;
-    app.handle_key(make_key(KeyCode::Char('H')));
-    assert!(!app.archive.visible);
 }
 
 #[test]
@@ -11726,26 +11689,26 @@ fn handle_key_normal_dispatch_in_epic_view_with_no_items() {
 }
 
 #[test]
-fn handle_key_normal_m_on_epic_moves_status() {
+fn handle_key_normal_shift_l_on_epic_moves_status() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(0);
     app.selection_mut().set_row(0, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('m')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('L')));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::PersistEpic { .. })));
 }
 
 #[test]
-fn handle_key_normal_uppercase_m_on_epic_moves_backward() {
+fn handle_key_normal_shift_h_on_epic_moves_backward() {
     let mut app = App::new(vec![], TEST_TIMEOUT);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('M')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::PersistEpic { .. })));

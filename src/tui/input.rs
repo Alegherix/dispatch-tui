@@ -113,13 +113,13 @@ impl App {
                 |s, id| s.update(Message::StartWrapUp(id)),
                 |s, id| s.update(Message::StartEpicWrapUp(id)),
             ),
-            KeyCode::Char('m') => {
+            KeyCode::Char('L') => {
                 if let Some(id) = self.selected_epic_id() {
                     return self.update(Message::MoveEpicStatus(id, MoveDirection::Forward));
                 }
                 self.handle_key_move(MoveDirection::Forward)
             }
-            KeyCode::Char('M') => {
+            KeyCode::Char('H') => {
                 if let Some(id) = self.selected_epic_id() {
                     return self.update(Message::MoveEpicStatus(id, MoveDirection::Backward));
                 }
@@ -292,8 +292,6 @@ impl App {
                 }
             }
 
-            KeyCode::Char('H') => self.update(Message::ToggleArchive),
-
             KeyCode::Char('F') => self.update(Message::ToggleFlattened),
 
             KeyCode::Char('?') => self.update(Message::ToggleHelp),
@@ -346,7 +344,7 @@ impl App {
                 *self.archive.list_state.selected_mut() = Some(self.archive.selected_row);
                 vec![]
             }
-            KeyCode::Char('H') | KeyCode::Esc => self.update(Message::ToggleArchive),
+            KeyCode::Esc => self.update(Message::ToggleArchive),
             KeyCode::Char('x') => {
                 let archived = self.archived_tasks();
                 if let Some(task) = archived.get(self.archive.selected_row) {

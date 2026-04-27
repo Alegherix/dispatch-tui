@@ -2134,7 +2134,7 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
                 };
                 push_hint("d", d_label);
                 push_hint("e", "edit");
-                push_hint("m", "move");
+                push_hint("L", "move");
                 push_hint("x", "archive");
             }
             TaskStatus::Running => {
@@ -2144,8 +2144,8 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
                     push_hint("d", "resume");
                 }
                 push_hint("e", "edit");
-                push_hint("m", "move");
-                push_hint("M", "back");
+                push_hint("L", "move");
+                push_hint("H", "back");
                 push_hint("x", "archive");
             }
             TaskStatus::Review => {
@@ -2159,13 +2159,13 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
                     push_hint("d", "resume");
                 }
                 push_hint("e", "edit");
-                push_hint("m", "move");
-                push_hint("M", "back");
+                push_hint("L", "move");
+                push_hint("H", "back");
                 push_hint("x", "archive");
             }
             TaskStatus::Done => {
                 push_hint("e", "edit");
-                push_hint("M", "back");
+                push_hint("H", "back");
                 push_hint("x", "archive");
             }
             TaskStatus::Archived => {}
@@ -2189,7 +2189,6 @@ pub(in crate::tui) fn action_hints(task: Option<&Task>, key_color: Color) -> Vec
     push_hint("S", "split");
     push_hint("F", "flat");
     push_hint("f", "filter");
-    push_hint("H", "history");
     push_hint("?", "help");
     push_hint("q", "quit");
 
@@ -2217,8 +2216,8 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("e", "edit");
     push_hint("W", "wrap up");
     push_hint("U", "auto dispatch");
-    push_hint("m", "status \u{2192}");
-    push_hint("M", "status \u{2190}");
+    push_hint("L", "status \u{2192}");
+    push_hint("H", "status \u{2190}");
     push_hint("x", "archive");
 
     push_hint("a", "select all");
@@ -2227,7 +2226,6 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("D", "quick");
     push_hint("F", "flat");
     push_hint("f", "filter");
-    push_hint("H", "history");
     push_hint("?", "help");
     push_hint("q", "quit");
 
@@ -2247,8 +2245,8 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
     };
 
     if has_tasks {
-        push_hint("m", "move");
-        push_hint("M", "back");
+        push_hint("L", "move");
+        push_hint("H", "back");
     }
     push_hint("x", "archive");
     push_hint("a", "select all");

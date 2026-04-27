@@ -163,7 +163,32 @@ fn scenario_help_overlay_toggles_closed_on_second_question_mark() {
 
 #[test]
 fn scenario_move_key_advances_selected_task_to_next_column() {
-    // Backlog column is selected by default; 'm' moves task 1 forward (Backlog → Running).
+    // Backlog column is selected by default; Shift+L moves task 1 forward (Backlog → Running).
+    let mut s = Scenario::new();
+    s.key(KeyCode::Char('L'));
+
+    let task1 = s
+        .app
+        .board
+        .tasks
+        .iter()
+        .find(|t| t.id == TaskId(1))
+        .expect("task 1 should exist");
+    assert_eq!(
+        task1.status,
+        TaskStatus::Running,
+        "task 1 should be moved to Running after Shift+L"
+    );
+    assert!(
+        s.commands
+            .iter()
+            .any(|c| matches!(c, Command::PersistTask(_))),
+        "move should emit PersistTask command"
+    );
+}
+
+#[test]
+fn scenario_lowercase_m_is_no_longer_bound_to_move() {
     let mut s = Scenario::new();
     s.key(KeyCode::Char('m'));
 
@@ -176,14 +201,14 @@ fn scenario_move_key_advances_selected_task_to_next_column() {
         .expect("task 1 should exist");
     assert_eq!(
         task1.status,
-        TaskStatus::Running,
-        "task 1 should be moved to Running after 'm'"
+        TaskStatus::Backlog,
+        "lowercase 'm' must not move tasks; it is unbound"
     );
     assert!(
-        s.commands
+        !s.commands
             .iter()
             .any(|c| matches!(c, Command::PersistTask(_))),
-        "move should emit PersistTask command"
+        "lowercase 'm' must not emit PersistTask"
     );
 }
 

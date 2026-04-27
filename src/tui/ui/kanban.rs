@@ -821,7 +821,9 @@ fn render_epic_item(
         ])
     };
 
-    let mut item = ListItem::new(vec![line1, line2]);
+    let rule_color = if is_cursor { PURPLE } else { MUTED };
+    let rule_line = card_rule_line(rule_color, col_width);
+    let mut item = ListItem::new(vec![rule_line, line1, line2]);
 
     if is_cursor {
         item = item.style(

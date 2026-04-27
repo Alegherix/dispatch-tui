@@ -298,8 +298,8 @@ impl TuiRuntime {
             sort_order: None,
             repo_path: Some(applied.repo_path.clone()),
             auto_dispatch: None,
-            feed_command: None,
-            feed_interval_secs: None,
+            feed_command: Some(applied.feed_command.clone()),
+            feed_interval_secs: applied.feed_interval_secs,
             project_id: None,
         }) {
             app.update(Message::Error(Self::db_error("updating epic", e)));
@@ -308,6 +308,12 @@ impl TuiRuntime {
         updated.title = applied.title;
         updated.description = applied.description;
         updated.repo_path = applied.repo_path;
+        if let crate::service::FieldUpdate::Set(ref cmd) = applied.feed_command {
+            updated.feed_command = Some(cmd.clone());
+        } else {
+            updated.feed_command = None;
+        }
+        updated.feed_interval_secs = applied.feed_interval_secs;
         app.update(Message::EpicEdited(updated))
     }
 }
